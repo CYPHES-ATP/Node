@@ -34,6 +34,11 @@ interface GitHubRepository {
   message?: string;
 }
 
+interface GitHubCommit {
+  sha: string;
+  message?: string;
+}
+
 function repositoryApiUrl(value: string) {
   const normalized = value.trim().replace(/\.git$/, "").replace(/\/+$/, "");
   const match = normalized.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/i);
@@ -41,7 +46,10 @@ function repositoryApiUrl(value: string) {
   return `https://api.github.com/repos/${encodeURIComponent(match[1])}/${encodeURIComponent(match[2])}`;
 }
 
-function toRepositorySummary(repository: GitHubRepository): RepositorySummary {
+function toRepositorySummary(
+  repository: GitHubRepository,
+  commitSha: string,
+): RepositorySummary {
   return {
     fullName: repository.full_name,
     url: repository.html_url,
@@ -50,6 +58,7 @@ function toRepositorySummary(repository: GitHubRepository): RepositorySummary {
     defaultBranch: repository.default_branch,
     stars: repository.stargazers_count,
     isPrivate: repository.private,
+    commitSha,
   };
 }
 
@@ -108,7 +117,20 @@ function AppContent() {
       throw new Error("Private repositories are not supported in this build.");
     }
 
-    return toRepositorySummary(repository);
+    const commitResponse = await fetch(
+      `${apiUrl}/commits/${encodeURIComponent(repository.default_branch)}`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+        },
+      },
+    );
+    const commit = (await commitResponse.json()) as GitHubCommit;
+    if (!commitResponse.ok || !/^[0-9a-f]{40,64}$/i.test(commit.sha || "")) {
+      throw new Error(commit.message || "GitHub could not resolve the default branch to a commit.");
+    }
+
+    return toRepositorySummary(repository, commit.sha);
   }
 
   async function createAudit(event: FormEvent) {
@@ -176,6 +198,9 @@ function AppContent() {
   }
 
   function jobAction(job: AuditJob, isMine: boolean) {
+    if (!job.repository.commitSha) {
+      return <div className="job-outcome">Legacy unpinned request; repost required</div>;
+    }
     if (job.status === "discovered" && !isMine) {
       return (
         <button
@@ -340,7 +365,12 @@ function AppContent() {
                       {job.repository.description ? <p>{job.repository.description}</p> : null}
                       <div className="repo-meta">
                         <span>{job.repository.language || "Language unknown"}</span>
-                        <span>{job.repository.defaultBranch}</span>
+                        <span>
+                          {job.repository.defaultBranch}
+                          {job.repository.commitSha
+                            ? `@${job.repository.commitSha.slice(0, 7)}`
+                            : ""}
+                        </span>
                         <span>{job.repository.stars.toLocaleString()} stars</span>
                       </div>
                       <div className="job-footer">

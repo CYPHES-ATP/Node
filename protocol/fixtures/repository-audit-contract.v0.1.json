@@ -1,0 +1,78 @@
+{
+  "profile": "cyphes.repository-security-audit/0.1",
+  "profileVersion": "0.1",
+  "transactionId": "atp_audit_fixture_001",
+  "requesterAgentId": "urn:libp2p:12D3KooWRequesterFixture",
+  "workerAgentId": "urn:libp2p:12D3KooWWorkerFixture",
+  "repository": {
+    "fullName": "CYPHES-ATP/Node",
+    "url": "https://github.com/CYPHES-ATP/Node",
+    "commitSha": "1d523ceb684227961c3254b5e6a1536946c56dc1"
+  },
+  "scope": [
+    "Dependency and supply-chain risk",
+    "Secrets, permissions, and exposed configuration",
+    "CI workflow and repository security posture",
+    "Prioritized findings with reproducible evidence"
+  ],
+  "exclusions": [
+    "No write access to the repository",
+    "No access outside the pinned repository checkout",
+    "No credential discovery or secret use",
+    "No external state changes"
+  ],
+  "deliverables": [
+    {
+      "path": "artifacts/audit-report.md",
+      "mediaType": "text/markdown",
+      "required": true
+    },
+    {
+      "path": "artifacts/findings.json",
+      "mediaType": "application/json",
+      "required": true
+    },
+    {
+      "path": "artifacts/results.sarif",
+      "mediaType": "application/sarif+json",
+      "required": true
+    },
+    {
+      "path": "artifacts/checks.json",
+      "mediaType": "application/json",
+      "required": true
+    },
+    {
+      "path": "artifacts/manifest.json",
+      "mediaType": "application/json",
+      "required": true
+    }
+  ],
+  "execution": {
+    "repositoryAccess": "read-only-pinned-commit",
+    "networkAccess": "deny-unless-contract-extension",
+    "maxDurationSeconds": 3600,
+    "deleteCheckoutAfterReceipt": true
+  },
+  "proposedCompensation": {
+    "amount": "100",
+    "asset": "USDC",
+    "status": "non-payable-term"
+  },
+  "settlement": {
+    "rail": "zero-value",
+    "amount": "0",
+    "asset": "none",
+    "condition": "verified-receipt-and-requester-approval",
+    "proofOfPayment": "waived",
+    "refundPolicy": "not-applicable",
+    "disputePolicy": "manual"
+  },
+  "proofPolicy": {
+    "workerSignature": true,
+    "requesterApproval": true,
+    "artifactHashes": true,
+    "eventChain": true
+  },
+  "expiresAt": "2099-01-01T00:30:00.000Z"
+}

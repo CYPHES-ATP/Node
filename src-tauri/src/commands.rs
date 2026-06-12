@@ -3,7 +3,8 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 
 use crate::{
-    atp::{agent_id, create_signed_envelope, AtpVerb},
+    atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
+    audit_profile::{is_git_commit_sha, AuditContract, RepositoryTarget},
     p2p::{load_or_create_identity, spawn_swarm, SwarmCommand, ATP_PROTOCOL},
     state::{P2pState, PeerInfo},
     store::{
@@ -91,6 +92,9 @@ pub async fn create_audit(
     if repository.is_private {
         return Err("Private repositories are not supported".to_string());
     }
+    if !is_git_commit_sha(&repository.commit_sha) {
+        return Err("Audit requests must pin an exact Git commit SHA".to_string());
+    }
     if compensation
         .parse::<f64>()
         .map_or(true, |amount| amount <= 0.0)
@@ -160,7 +164,22 @@ pub async fn offer_audit(
         return Err("This audit is not open for a new worker offer".to_string());
     }
 
-    let envelope = create_signed_envelope(
+    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(30))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let contract = AuditContract::repository_audit(
+        job.transaction_id.clone(),
+        job.requester_agent_id.clone(),
+        worker_agent_id.clone(),
+        RepositoryTarget {
+            full_name: job.repository.full_name.clone(),
+            url: job.repository.url.clone(),
+            commit_sha: job.repository.commit_sha.clone(),
+        },
+        job.scope.clone(),
+        job.compensation.clone(),
+        expires_at.clone(),
+    );
+    let envelope = create_signed_envelope_with_expiry(
         &keypair,
         AtpVerb::Negotiate,
         job.transaction_id.clone(),
@@ -169,8 +188,10 @@ pub async fn offer_audit(
         serde_json::to_value(AuditEventBody::WorkerOffer {
             job_id: job.id.clone(),
             worker_agent_id,
+            contract,
         })
         .map_err(|error| error.to_string())?,
+        Some(expires_at),
     )?;
 
     store.commit_envelope(&envelope, &agent_id(&keypair.public()), None)?;
@@ -201,6 +222,10 @@ pub async fn accept_offer(
         .worker_agent_id
         .clone()
         .ok_or_else(|| "The pending offer has no worker identity".to_string())?;
+    let contract_hash = job
+        .contract_hash
+        .clone()
+        .ok_or_else(|| "The pending offer has no canonical contract hash".to_string())?;
 
     let envelope = create_signed_envelope(
         &keypair,
@@ -211,6 +236,7 @@ pub async fn accept_offer(
         serde_json::to_value(AuditEventBody::WorkerSelected {
             job_id: job.id.clone(),
             worker_agent_id,
+            contract_hash,
         })
         .map_err(|error| error.to_string())?,
     )?;
@@ -241,7 +267,10 @@ pub async fn migrate_legacy_jobs(
             migrated += 1;
             continue;
         }
-        if legacy.requester_peer_id != peer_id || legacy.currency != "USDC" {
+        if legacy.requester_peer_id != peer_id
+            || legacy.currency != "USDC"
+            || !is_git_commit_sha(&legacy.repository.commit_sha)
+        {
             skipped += 1;
             continue;
         }
