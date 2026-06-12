@@ -33,7 +33,6 @@ export function TitleBar() {
       <div className="brand" data-tauri-drag-region>
         <img alt="" src="/cyphes-mark.svg" />
         <span>CYPHES</span>
-        <span className="brand-product">Audit Node</span>
       </div>
 
       <div className="titlebar-status" data-tauri-drag-region>

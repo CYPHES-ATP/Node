@@ -10,7 +10,7 @@ The current workload is a public GitHub repository security audit.
 > Developer preview: build from source. Nodes currently discover each other
 > only on the same LAN. Compensation is a signed term, not escrowed money.
 
-![CYPHES Audit Node showing a locally committed request](docs/screenshots/audit-node-main.png)
+![CYPHES showing a locally committed request](docs/screenshots/audit-node-main.png)
 
 The screenshot is real application state. The request is signed and stored by
 the local node, but no other node has acknowledged it.
@@ -68,7 +68,7 @@ simulated responses.
 ## Join The Network
 
 Today, "join the network" means running a node from source on the same LAN as
-another CYPHES Audit Node.
+another CYPHES node.
 
 Prerequisites:
 
@@ -107,7 +107,7 @@ CYPHES_DATA_DIR=/tmp/cyphes-peer-2 target/debug/cyphes-desktop
 When the second node discovers and commits the request, the requester changes
 from `SIGNED LOCALLY, NO PEER RECEIPT` to a real peer receipt:
 
-![CYPHES Audit Node showing a committed peer acknowledgement](docs/screenshots/audit-node-peer-ack.png)
+![CYPHES showing a committed peer acknowledgement](docs/screenshots/audit-node-peer-ack.png)
 
 For the full two-node workflow, expected states, and troubleshooting, read
 [Join the CYPHES Network](docs/JOIN_NETWORK.md).
