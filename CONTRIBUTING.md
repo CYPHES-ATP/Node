@@ -1,6 +1,6 @@
-# Contributing to CYPHES Audit Node
+# Contributing to CYPHES
 
-CYPHES Audit Node is an early protocol implementation, not a finished
+CYPHES is an early protocol implementation, not a finished
 marketplace. Contributions should strengthen one real ATP work order before
 expanding the product surface.
 

@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-This document maps the current CYPHES Audit Node implementation to the ATP
+This document maps the current CYPHES implementation to the ATP
 work-order lifecycle.
 
 Last reviewed: June 12, 2026

@@ -109,13 +109,6 @@ button:disabled {
   height: 22px;
 }
 
-.brand-product {
-  padding-left: 10px;
-  border-left: 1px solid var(--line);
-  color: var(--muted);
-  font-weight: 480;
-}
-
 .titlebar-status {
   display: flex;
   align-items: center;

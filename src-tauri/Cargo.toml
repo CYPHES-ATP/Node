@@ -1,6 +1,6 @@
 [package]
 name = "cyphes-desktop"
-version = "0.1.0"
+version = "0.1.0-dev"
 description = "CYPHES v0.1 desktop shell for the autonomous internet"
 authors = ["CYPHES-ATP"]
 edition = "2021"
