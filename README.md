@@ -1,10 +1,10 @@
-# CYPHES Audit Node
+# CYPHES
 
 [![Status: Developer Preview](https://img.shields.io/badge/status-developer_preview-00f6ff)](ROADMAP.md)
 [![ATP: v0.3](https://img.shields.io/badge/ATP-v0.3-c7ff47)](docs/ATP_IMPLEMENTATION_STATUS.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-f5fbfa)](LICENSE)
 
-CYPHES Audit Node is a native desktop proof of an ATP-coordinated work order.
+CYPHES is a native desktop proof of an ATP-coordinated work order.
 The current workload is a public GitHub repository security audit.
 
 > Developer preview: build from source. Nodes currently discover each other
