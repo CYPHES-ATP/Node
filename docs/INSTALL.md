@@ -10,7 +10,7 @@ npm install
 npm run tauri dev
 ```
 
-The native app starts the libp2p node and discovers other CYPHES Audit Nodes on
+The native app starts the libp2p node and discovers other CYPHES nodes on
 the same LAN.
 
 ## Browser Preview

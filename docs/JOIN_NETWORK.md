@@ -2,7 +2,7 @@
 
 ## What Joining Means Today
 
-CYPHES Audit Node is currently a LAN-only developer network. There is no public
+CYPHES is currently a LAN-only developer network. There is no public
 bootstrap server, relay, hosted marketplace, account system, or downloadable
 signed release.
 

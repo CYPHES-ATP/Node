@@ -1,4 +1,4 @@
-# CYPHES Audit Node Roadmap
+# CYPHES Roadmap
 
 The roadmap is organized around one end-to-end ATP work order: a requester
 contracts an independent worker to audit a public GitHub repository and

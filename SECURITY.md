@@ -1,6 +1,6 @@
 # Security Policy
 
-CYPHES Audit Node is a developer preview. It has not received an independent
+CYPHES is a developer preview. It has not received an independent
 security audit and must not be used to hold or release real funds.
 
 ## Reporting
