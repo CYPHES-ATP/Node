@@ -1,164 +1,116 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
-import type { AgentMessage, BackendPeerInfo } from "@/types";
+import type {
+  AuditJob,
+  BackendPeerInfo,
+  LegacyAuditJob,
+  RepositorySummary,
+} from "@/types";
 
 interface StartNodeResponse {
   peer_id: string;
-  topic: string;
+  agent_id: string;
+  protocol: string;
   listen_addrs: string[];
 }
 
-export interface BackendAgentMessage {
-  msg_type: AgentMessage["msgType"];
-  agent_id: string;
-  name: string;
-  capabilities: string[];
-  endpoint?: string;
-  timestamp: number;
-  signature?: string;
-  payload?: string;
-  target_peer_id?: string;
-  location?: string;
-  source?: AgentMessage["source"];
-}
-
-export function fromBackendMessage(message: BackendAgentMessage): AgentMessage {
-  return {
-    id: `${message.agent_id}-${message.msg_type}-${message.timestamp}`,
-    msgType: message.msg_type,
-    agentId: message.agent_id,
-    peerId: message.agent_id,
-    name: message.name,
-    capabilities: message.capabilities,
-    endpoint: message.endpoint,
-    timestamp: message.timestamp,
-    signature: message.signature,
-    payload: message.payload,
-    targetPeerId: message.target_peer_id,
-    location: message.location,
-    source: message.source ?? "global",
-  };
+interface MigrationResult {
+  migrated: number;
+  skipped: number;
 }
 
 export function useP2P() {
-  const myAgent = useCyphesStore((state) => state.myAgent);
-  const setMyAgent = useCyphesStore((state) => state.setMyAgent);
-  const addWireItem = useCyphesStore((state) => state.addWireItem);
-  const updatePeer = useCyphesStore((state) => state.updatePeer);
-  const setToast = useCyphesStore((state) => state.setToast);
-  const pulseSync = useCyphesStore((state) => state.pulseSync);
+  const setNodeOnline = useCyphesStore((state) => state.setNodeOnline);
+  const setPeerCount = useCyphesStore((state) => state.setPeerCount);
+  const replaceJobs = useCyphesStore((state) => state.replaceJobs);
 
   async function startNode() {
     if (!isTauriRuntime()) {
-      const peerId = `12D3KooWLocal${Math.floor(Date.now() / 1000)}`;
-      setMyAgent({ peerId, isOnline: true });
-      return { peer_id: peerId, topic: "cyphes-v0.1-wire", listen_addrs: [] };
+      setNodeOnline("browser-preview", "browser-preview");
+      return {
+        peer_id: "browser-preview",
+        agent_id: "browser-preview",
+        protocol: "preview",
+        listen_addrs: [],
+      };
     }
 
     const response = await invoke<StartNodeResponse>("start_node");
-    setMyAgent({ peerId: response.peer_id, isOnline: true });
+    setNodeOnline(response.peer_id, response.agent_id);
     return response;
   }
 
   async function refreshPeers() {
-    if (!isTauriRuntime()) return;
+    if (!isTauriRuntime()) {
+      setPeerCount(0);
+      return [];
+    }
 
     const peers = await invoke<BackendPeerInfo[]>("get_peers");
-    peers.forEach((peer) => {
-      updatePeer(peer.peer_id, {
-        peerId: peer.peer_id,
-        name: peer.name ?? "DISCOVERED_PEER",
-        capabilities: peer.capabilities,
-        endpoint: peer.endpoint,
-        lastSeen: peer.last_seen,
-        status: "online",
-        attestations: 0,
-        tasksCompleted: 0,
-        source: peer.source ?? "global",
-      });
-    });
+    setPeerCount(peers.length);
+    return peers;
   }
 
-  async function broadcastAdvertise() {
-    const timestamp = Date.now();
-    const message: AgentMessage = {
-      id: `${myAgent.peerId}-advertise-${timestamp}`,
-      msgType: "advertise",
-      agentId: myAgent.peerId,
-      peerId: myAgent.peerId,
-      name: myAgent.name,
-      capabilities: myAgent.capabilities,
-      endpoint: myAgent.openClawConnected ? "http://localhost:8080" : undefined,
-      timestamp,
-      payload: myAgent.openClawConnected
-        ? "OpenClaw station is broadcasting live capability state."
-        : "Manual station broadcast from CYPHES.",
-      source: "local",
-    };
-
-    addWireItem(message);
-    pulseSync();
-
-    if (isTauriRuntime()) {
-      await invoke("broadcast_advertise", {
-        name: myAgent.name,
-        capabilities: myAgent.capabilities,
-        endpoint: message.endpoint,
-        payload: message.payload,
-      });
+  async function loadAudits() {
+    if (!isTauriRuntime()) {
+      replaceJobs([]);
+      return [];
     }
-
-    setToast(`Beacon sent with ${myAgent.capabilities.length} capabilities.`);
+    const jobs = await invoke<AuditJob[]>("list_audits");
+    replaceJobs(jobs);
+    return jobs;
   }
 
-  async function sendPing(targetPeerId: string, targetName: string) {
-    const timestamp = Date.now();
-
-    if (isTauriRuntime()) {
-      await invoke("send_ping", {
-        targetPeerId,
-        message: `Greeting ${targetName} from ${myAgent.name}.`,
-      });
+  async function migrateLegacyJobs(jobs: LegacyAuditJob[]) {
+    if (!isTauriRuntime() || jobs.length === 0) {
+      return { migrated: 0, skipped: 0 };
     }
+    return invoke<MigrationResult>("migrate_legacy_jobs", { jobs });
+  }
 
-    addWireItem({
-      id: `${myAgent.peerId}-ping-${timestamp}`,
-      msgType: "ping",
-      agentId: myAgent.peerId,
-      peerId: myAgent.peerId,
-      name: myAgent.name,
-      capabilities: myAgent.capabilities,
-      timestamp,
-      payload: `Greeting ${targetName}.`,
-      targetPeerId,
-      source: "local",
+  async function createAudit(
+    repository: RepositorySummary,
+    compensation: string,
+    scope: string[],
+  ) {
+    if (!isTauriRuntime()) {
+      throw new Error("Audit requests can only be created in the native CYPHES app.");
+    }
+    const job = await invoke<AuditJob>("create_audit", {
+      repository,
+      compensation,
+      scope,
     });
-    pulseSync();
+    await loadAudits();
+    return job;
+  }
 
-    window.setTimeout(() => {
-      addWireItem({
-        id: `${targetPeerId}-pong-${timestamp + 1200}`,
-        msgType: "pong",
-        agentId: targetPeerId,
-        peerId: targetPeerId,
-        name: targetName,
-        capabilities: [],
-        timestamp: timestamp + 1200,
-        payload: "Pong received. Capability card acknowledged.",
-        targetPeerId: myAgent.peerId,
-        source: "global",
-      });
-      pulseSync();
-    }, 1200);
+  async function offerAudit(jobId: string) {
+    if (!isTauriRuntime()) {
+      throw new Error("Worker offers require the native CYPHES app.");
+    }
+    const job = await invoke<AuditJob>("offer_audit", { jobId });
+    await loadAudits();
+    return job;
+  }
 
-    setToast(`Ping sent to ${targetName}.`);
+  async function acceptOffer(jobId: string) {
+    if (!isTauriRuntime()) {
+      throw new Error("Worker selection requires the native CYPHES app.");
+    }
+    const job = await invoke<AuditJob>("accept_offer", { jobId });
+    await loadAudits();
+    return job;
   }
 
   return {
     startNode,
     refreshPeers,
-    broadcastAdvertise,
-    sendPing,
+    loadAudits,
+    migrateLegacyJobs,
+    createAudit,
+    offerAudit,
+    acceptOffer,
   };
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CYPHES",
+  "productName": "CYPHES Audit Node",
   "version": "0.1.0",
   "identifier": "com.cyphes-atp.client",
   "build": {
@@ -12,12 +12,19 @@
   "app": {
     "windows": [
       {
-        "title": "CYPHES v0.1",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 960,
-        "minHeight": 640,
-        "decorations": false,
+        "title": "CYPHES Audit Node",
+        "width": 1240,
+        "height": 860,
+        "minWidth": 860,
+        "minHeight": 680,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 18
+        },
+        "shadow": true,
         "transparent": false,
         "resizable": true
       }
