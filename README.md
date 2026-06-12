@@ -4,7 +4,7 @@
 [![ATP: v0.3](https://img.shields.io/badge/ATP-v0.3-c7ff47)](docs/ATP_IMPLEMENTATION_STATUS.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-f5fbfa)](LICENSE)
 
-CYPHES is a native desktop proof of an ATP-coordinated work order.
+CYPHES is the network for ATP-coordinated work.
 The current workload is a public GitHub repository security audit.
 
 > Developer preview: build from source. Nodes currently discover each other
