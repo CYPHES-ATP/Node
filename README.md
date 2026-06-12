@@ -28,6 +28,10 @@ the local node, but no other node has acknowledged it.
 - Direct libp2p request/response delivery.
 - Commit-before-ACK semantics on the receiving node.
 - Signed audit discovery and bilateral worker negotiation.
+- GitHub requests pinned to an exact commit SHA.
+- Typed repository-audit contracts with canonical contract hashes.
+- Requester acceptance bound to the exact offered contract.
+- Versioned JSON Schemas and canonical contract/receipt fixtures.
 - Live validation of public GitHub repository URLs.
 - A native Tauri client that renders backend-confirmed state only.
 
@@ -118,6 +122,7 @@ For the full two-node workflow, expected states, and troubleshooting, read
 | `src/components/providers/P2PProvider.tsx` | Native event subscriptions and refresh |
 | `src/styles/globals.css` | CYPHES AMOLED desktop design system |
 | `src-tauri/src/atp.rs` | ATP envelopes, canonical signing, verification, hashes, transitions |
+| `src-tauri/src/audit_profile.rs` | Typed repository-audit contract and receipt profile |
 | `src-tauri/src/store.rs` | SQLite schema, replay checks, event commits, jobs, delivery receipts |
 | `src-tauri/src/p2p.rs` | libp2p swarm, mDNS, request/response, ACK delivery |
 | `src-tauri/src/commands.rs` | Native commands for node startup and audit negotiation |
@@ -151,6 +156,7 @@ An inbound envelope is acknowledged only after the receiver:
 - [Install and two-node test](docs/INSTALL.md)
 - [Developer guide and code ownership](docs/DEVELOPER_GUIDE.md)
 - [ATP implementation status](docs/ATP_IMPLEMENTATION_STATUS.md)
+- [Repository audit contract and receipt profile](docs/REPOSITORY_AUDIT_PROFILE.md)
 - [ATP network architecture and roadmap](docs/ATP_NETWORK_ARCHITECTURE.md)
 - [Project roadmap](ROADMAP.md)
 - [Contributing](CONTRIBUTING.md)

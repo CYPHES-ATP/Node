@@ -882,10 +882,11 @@ ATP.
 The SQLite migration, signed envelope kernel, event chain, replay checks, and
 commit-before-ACK LAN exchange are now implemented for the audit workflow.
 
-The next implementation slice is:
+The versioned audit contract and receipt profile are now implemented. The next
+implementation slice is:
 
-1. define the concrete audit contract and receipt-bundle profile,
-2. emit `ROUTE`, `EXECUTE`, `SETTLE`, and `ATTEST` bodies for that profile,
+1. emit `ROUTE` with the accepted contract hash and a read-only repository lease,
+2. emit `EXECUTE`, `SETTLE`, and `ATTEST` bodies for that profile,
 3. integrate Artifact Two verification against one real repository audit,
 4. add an isolated worker runtime and bounded GitHub capability,
 5. add public relay, rendezvous, Identify, Ping, AutoNAT, and direct upgrade,

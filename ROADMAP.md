@@ -39,11 +39,15 @@ Implemented:
 - `DISCOVER`;
 - worker `NEGOTIATE` offer;
 - requester `NEGOTIATE` selection;
+- repository requests pinned to an exact commit SHA;
+- typed zero-value repository-audit contract;
+- canonical contract hash persisted and accepted by the requester;
+- JSON Schemas and canonical contract/receipt fixtures;
 - commit-before-ACK LAN delivery.
 
 Remaining:
 
-- complete contract schema;
+- counters and rejection paths;
 - expiry and clock-skew policy;
 - deterministic reason-code registry;
 - cross-implementation fixtures;
