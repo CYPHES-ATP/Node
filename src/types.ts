@@ -1,61 +1,67 @@
-export type AgentStatus = "online" | "offline" | "unknown";
-export type WireSource = "local" | "global" | "seed";
-export type WireType = "advertise" | "heartbeat" | "ping" | "pong";
+export type NodeStatus = "starting" | "online" | "error";
+export type AuditStatus =
+  | "discovered"
+  | "negotiating"
+  | "negotiated"
+  | "routed"
+  | "executing"
+  | "settled"
+  | "attested"
+  | "rejected"
+  | "revoked";
+export type DeliveryState = "queued" | "acknowledged" | "received";
 
-export interface Agent {
-  peerId: string;
-  name: string;
-  capabilities: string[];
-  endpoint?: string;
-  location?: string;
-  lastSeen: number;
-  joinedAt?: number;
-  status: AgentStatus;
-  attestations: number;
-  tasksCompleted: number;
-  tagline?: string;
-  source: WireSource;
+export interface RepositorySummary {
+  fullName: string;
+  url: string;
+  description: string | null;
+  language: string | null;
+  defaultBranch: string;
+  stars: number;
+  isPrivate: boolean;
 }
 
-export interface AgentMessage {
+export interface AuditJob {
   id: string;
-  msgType: WireType;
-  agentId: string;
-  peerId: string;
-  name: string;
-  capabilities: string[];
-  endpoint?: string;
-  timestamp: number;
-  signature?: string;
-  payload?: string;
-  targetPeerId?: string;
-  location?: string;
-  attestations?: number;
-  tasksCompleted?: number;
-  source: WireSource;
+  transactionId: string;
+  repository: RepositorySummary;
+  compensation: string;
+  currency: string;
+  scope: string[];
+  status: AuditStatus;
+  deliveryState: DeliveryState;
+  requesterAgentId: string;
+  workerAgentId?: string;
+  createdAt: number;
+  updatedAt: number;
+  lastEventHash: string;
+  acknowledgedPeers: number;
+  origin: "local" | "remote";
 }
 
-export interface MyAgent {
-  name: string;
-  peerId: string;
-  capabilities: string[];
-  isOnline: boolean;
-  openClawConnected: boolean;
-  openClawStatus: "checking" | "connected" | "missing";
+export interface LegacyAuditJob {
+  id: string;
+  repository: RepositorySummary;
+  compensation: string;
+  currency: string;
+  scope: string[];
+  requesterPeerId: string;
+  createdAt: number;
 }
 
-export interface NetworkStats {
-  localPeers: number;
-  globalPeers: number;
-  messages: number;
-  sync: number;
+export interface AtpAck {
+  accepted: boolean;
+  duplicate: boolean;
+  event_hash: string;
+  transaction_id: string;
+  state?: string;
+  receiver_agent_id: string;
+  committed_at: string;
+  reason_code?: string;
+  reason?: string;
 }
 
 export interface BackendPeerInfo {
   peer_id: string;
-  name?: string;
-  capabilities: string[];
-  endpoint?: string;
   last_seen: number;
-  source: WireSource;
 }

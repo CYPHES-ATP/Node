@@ -1,9 +1,15 @@
+mod atp;
 mod commands;
 mod p2p;
 mod state;
+mod store;
 
-use commands::{broadcast_advertise, get_peers, send_ping, start_node};
+use commands::{
+    accept_offer, create_audit, get_peers, list_audits, migrate_legacy_jobs, offer_audit,
+    start_node,
+};
 use state::P2pState;
+use store::AtpStore;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -58,8 +64,10 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let store = AtpStore::open_default().expect("failed to initialize ATP database");
     tauri::Builder::default()
         .manage(P2pState::default())
+        .manage(store)
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             setup_tray(app)?;
@@ -67,9 +75,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             start_node,
-            broadcast_advertise,
-            send_ping,
-            get_peers
+            get_peers,
+            list_audits,
+            create_audit,
+            offer_audit,
+            accept_offer,
+            migrate_legacy_jobs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

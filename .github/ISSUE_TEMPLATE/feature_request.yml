@@ -1,0 +1,48 @@
+name: Contribution proposal
+description: Propose a focused ATP, networking, worker, verification, or desktop contribution.
+title: "[Proposal]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Which concrete limitation or roadmap item does this address?
+    validations:
+      required: true
+  - type: dropdown
+    id: track
+    attributes:
+      label: Contribution track
+      options:
+        - ATP kernel
+        - Internet P2P
+        - Audit execution
+        - Receipt verification
+        - Settlement or attestation
+        - Desktop client
+        - Testing or documentation
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest implementation that proves the behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Protocol and truth invariants
+      description: Explain how signatures, persistence, ACK ordering, and truthful UI state remain intact.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Which tests or two-node evidence will prove the contribution?
+    validations:
+      required: true

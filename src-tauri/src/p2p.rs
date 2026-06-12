@@ -1,63 +1,44 @@
-use std::{
-    fs,
-    path::PathBuf,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
 
 use futures::StreamExt;
 use libp2p::{
-    gossipsub::{self, IdentTopic, MessageAuthenticity, ValidationMode},
-    identity, mdns, noise,
-    swarm::{NetworkBehaviour, SwarmEvent},
+    identity, mdns, noise, request_response,
+    request_response::{OutboundRequestId, ProtocolSupport},
+    swarm::{NetworkBehaviour, StreamProtocol, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use tokio::{select, sync::mpsc, time};
+use tokio::{select, sync::mpsc};
 
-use crate::state::{P2pState, PeerInfo};
+use crate::{
+    atp::{agent_id, AtpAck, AtpEnvelope},
+    state::{P2pState, PeerInfo},
+    store::{now_millis, rejection_ack, AtpStore},
+};
 
-pub const WIRE_TOPIC: &str = "cyphes-v0.1-wire";
-const HEARTBEAT_EVERY: Duration = Duration::from_secs(30);
-
-const BOOTSTRAP_RELAYS: &[&str] = &[];
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentMessage {
-    pub msg_type: String,
-    pub agent_id: String,
-    pub name: String,
-    pub capabilities: Vec<String>,
-    pub endpoint: Option<String>,
-    pub timestamp: u64,
-    pub signature: Option<String>,
-    pub payload: Option<String>,
-    pub target_peer_id: Option<String>,
-    pub location: Option<String>,
-    pub source: Option<String>,
-}
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.3";
 
 #[derive(Debug, Clone)]
 pub enum SwarmCommand {
-    Publish(AgentMessage),
+    SendEnvelope(AtpEnvelope),
 }
 
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "AgentBehaviourEvent")]
 struct AgentBehaviour {
-    gossipsub: gossipsub::Behaviour,
+    request_response: request_response::cbor::Behaviour<AtpEnvelope, AtpAck>,
     mdns: mdns::tokio::Behaviour,
 }
 
 #[derive(Debug)]
 enum AgentBehaviourEvent {
-    Gossipsub(gossipsub::Event),
+    RequestResponse(request_response::Event<AtpEnvelope, AtpAck>),
     Mdns(mdns::Event),
 }
 
-impl From<gossipsub::Event> for AgentBehaviourEvent {
-    fn from(event: gossipsub::Event) -> Self {
-        Self::Gossipsub(event)
+impl From<request_response::Event<AtpEnvelope, AtpAck>> for AgentBehaviourEvent {
+    fn from(event: request_response::Event<AtpEnvelope, AtpAck>) -> Self {
+        Self::RequestResponse(event)
     }
 }
 
@@ -71,6 +52,7 @@ pub fn load_or_create_identity() -> Result<identity::Keypair, String> {
     let identity_path = identity_path()?;
 
     if identity_path.exists() {
+        secure_identity_file(&identity_path)?;
         let bytes = fs::read(&identity_path).map_err(|error| error.to_string())?;
         return identity::Keypair::from_protobuf_encoding(&bytes)
             .map_err(|error| error.to_string());
@@ -84,24 +66,36 @@ pub fn load_or_create_identity() -> Result<identity::Keypair, String> {
     let encoded = keypair
         .to_protobuf_encoding()
         .map_err(|error| error.to_string())?;
-    fs::write(&identity_path, encoded).map_err(|error| error.to_string())?;
+
+    #[cfg(unix)]
+    {
+        use std::{fs::OpenOptions, io::Write, os::unix::fs::OpenOptionsExt};
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&identity_path)
+            .map_err(|error| error.to_string())?;
+        file.write_all(&encoded)
+            .map_err(|error| error.to_string())?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(&identity_path, encoded).map_err(|error| error.to_string())?;
+    }
+
     Ok(keypair)
 }
 
 pub async fn spawn_swarm(
     app: AppHandle,
     state: P2pState,
+    store: AtpStore,
     keypair: identity::Keypair,
     mut rx: mpsc::UnboundedReceiver<SwarmCommand>,
 ) -> Result<(String, Vec<String>), String> {
     let local_peer_id = keypair.public().to_peer_id();
-    let topic = IdentTopic::new(WIRE_TOPIC);
-
-    let gossipsub_config = gossipsub::ConfigBuilder::default()
-        .heartbeat_interval(Duration::from_secs(10))
-        .validation_mode(ValidationMode::Permissive)
-        .build()
-        .map_err(|error| error.to_string())?;
+    let local_agent_id = agent_id(&keypair.public());
 
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
@@ -116,15 +110,15 @@ pub async fn spawn_swarm(
         .map_err(|error| error.to_string())?
         .with_behaviour(move |key| {
             let peer_id = key.public().to_peer_id();
-            let mut gossipsub = gossipsub::Behaviour::new(
-                MessageAuthenticity::Signed(key.clone()),
-                gossipsub_config.clone(),
-            )?;
-            gossipsub.subscribe(&topic)?;
-
+            let request_response = request_response::cbor::Behaviour::new(
+                [(StreamProtocol::new(ATP_PROTOCOL), ProtocolSupport::Full)],
+                request_response::Config::default().with_request_timeout(Duration::from_secs(15)),
+            );
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
-
-            Ok(AgentBehaviour { gossipsub, mdns })
+            Ok(AgentBehaviour {
+                request_response,
+                mdns,
+            })
         })
         .map_err(|error| error.to_string())?
         .build();
@@ -144,64 +138,36 @@ pub async fn spawn_swarm(
         )
         .map_err(|error| error.to_string())?;
 
-    for relay in BOOTSTRAP_RELAYS {
-        if let Ok(address) = relay.parse::<Multiaddr>() {
-            let _ = swarm.dial(address);
-        }
-    }
-
     let listen_addrs = swarm
         .listeners()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    let topic_for_publish = IdentTopic::new(WIRE_TOPIC);
-    let topic_for_heartbeat = IdentTopic::new(WIRE_TOPIC);
-    let mut heartbeat = time::interval(HEARTBEAT_EVERY);
-    let mut local_name = "CYPHES_NODE".to_string();
-    let mut local_capabilities: Vec<String> = Vec::new();
-    let mut local_endpoint: Option<String> = None;
 
     tauri::async_runtime::spawn(async move {
+        let mut outbound = HashMap::<OutboundRequestId, String>::new();
         loop {
             select! {
                 maybe_command = rx.recv() => {
                     let Some(command) = maybe_command else {
                         break;
                     };
-
                     match command {
-                        SwarmCommand::Publish(message) => {
-                            local_name = message.name.clone();
-                            local_capabilities = message.capabilities.clone();
-                            local_endpoint = message.endpoint.clone();
-
-                            if let Ok(bytes) = serde_json::to_vec(&message) {
-                                let _ = swarm.behaviour_mut().gossipsub.publish(topic_for_publish.clone(), bytes);
-                            }
+                        SwarmCommand::SendEnvelope(envelope) => {
+                            send_to_known_peers(&mut swarm, &state, envelope, &mut outbound);
                         }
                     }
                 }
-                _ = heartbeat.tick() => {
-                    let message = AgentMessage {
-                        msg_type: "heartbeat".to_string(),
-                        agent_id: local_peer_id.to_string(),
-                        name: local_name.clone(),
-                        capabilities: local_capabilities.clone(),
-                        endpoint: local_endpoint.clone(),
-                        timestamp: current_millis(),
-                        signature: None,
-                        payload: Some("checked in on cyphes-v0.1-wire".to_string()),
-                        target_peer_id: None,
-                        location: None,
-                        source: Some("local".to_string()),
-                    };
-
-                    if let Ok(bytes) = serde_json::to_vec(&message) {
-                        let _ = swarm.behaviour_mut().gossipsub.publish(topic_for_heartbeat.clone(), bytes);
-                    }
-                }
                 event = swarm.select_next_some() => {
-                    handle_swarm_event(event, &mut swarm, &app, &state, local_peer_id);
+                    handle_swarm_event(
+                        event,
+                        &mut swarm,
+                        &app,
+                        &state,
+                        &store,
+                        local_peer_id,
+                        &local_agent_id,
+                        &mut outbound,
+                    );
                 }
             }
         }
@@ -215,79 +181,104 @@ fn handle_swarm_event(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     app: &AppHandle,
     state: &P2pState,
+    store: &AtpStore,
     local_peer_id: PeerId,
+    local_agent_id: &str,
+    outbound: &mut HashMap<OutboundRequestId, String>,
 ) {
     match event {
-        SwarmEvent::Behaviour(AgentBehaviourEvent::Gossipsub(gossipsub::Event::Message {
-            propagation_source,
-            message,
-            ..
-        })) => {
-            if propagation_source == local_peer_id {
-                return;
-            }
-
-            if let Ok(mut agent_message) = serde_json::from_slice::<AgentMessage>(&message.data) {
-                if agent_message.source.is_none() {
-                    agent_message.source = Some("global".to_string());
-                }
-
-                upsert_peer(state, &agent_message);
-
-                let event_name = match agent_message.msg_type.as_str() {
-                    "advertise" => "p2p:advertise",
-                    "heartbeat" => "p2p:heartbeat",
-                    "ping" => "p2p:ping",
-                    "pong" => "p2p:pong",
-                    _ => "p2p:advertise",
+        SwarmEvent::Behaviour(AgentBehaviourEvent::RequestResponse(
+            request_response::Event::Message { peer, message, .. },
+        )) => match message {
+            request_response::Message::Request {
+                request, channel, ..
+            } => {
+                touch_peer(state, peer);
+                let ack = match store.commit_envelope(
+                    &request,
+                    local_agent_id,
+                    Some(&peer.to_string()),
+                ) {
+                    Ok(ack) => {
+                        if !ack.duplicate {
+                            let _ = app.emit("atp:jobs_changed", ());
+                        }
+                        ack
+                    }
+                    Err(reason) => rejection_ack(&request, local_agent_id, reason),
                 };
-                let _ = app.emit(event_name, agent_message);
+                let _ = swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_response(channel, ack);
             }
+            request_response::Message::Response {
+                request_id,
+                response,
+            } => {
+                outbound.remove(&request_id);
+                touch_peer(state, peer);
+                if let Err(error) = store.mark_delivery(&peer.to_string(), &response) {
+                    let _ = app.emit(
+                        "atp:delivery_failed",
+                        serde_json::json!({ "peerId": peer.to_string(), "reason": error }),
+                    );
+                } else {
+                    let _ = app.emit("atp:jobs_changed", ());
+                    let _ = app.emit("atp:delivery_acknowledged", response);
+                }
+            }
+        },
+        SwarmEvent::Behaviour(AgentBehaviourEvent::RequestResponse(
+            request_response::Event::OutboundFailure {
+                peer,
+                request_id,
+                error,
+                ..
+            },
+        )) => {
+            let event_hash = outbound.remove(&request_id).unwrap_or_default();
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({
+                    "peerId": peer.to_string(),
+                    "eventHash": event_hash,
+                    "reason": error.to_string(),
+                }),
+            );
         }
         SwarmEvent::Behaviour(AgentBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-            for (peer_id, _addr) in list {
+            for (peer_id, addr) in list {
                 if peer_id == local_peer_id {
                     continue;
                 }
 
-                swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-
-                if let Ok(mut inner) = state.inner.lock() {
-                    inner.peers.insert(
-                        peer_id.to_string(),
-                        PeerInfo {
-                            peer_id: peer_id.to_string(),
-                            name: None,
-                            capabilities: Vec::new(),
-                            endpoint: None,
-                            last_seen: current_millis(),
-                            source: "local".to_string(),
-                        },
-                    );
+                swarm.add_peer_address(peer_id, addr);
+                touch_peer(state, peer_id);
+                let peer_agent_id = format!("urn:libp2p:{peer_id}");
+                if let Ok(envelopes) = store.envelopes_for_peer(local_agent_id, &peer_agent_id) {
+                    for envelope in envelopes {
+                        let event_hash = crate::atp::event_hash(&envelope).unwrap_or_default();
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_request(&peer_id, envelope);
+                        outbound.insert(request_id, event_hash);
+                    }
                 }
-
                 let _ = app.emit(
                     "p2p:peer_connected",
-                    serde_json::json!({
-                        "peer_id": peer_id.to_string(),
-                        "source": "local"
-                    }),
+                    serde_json::json!({ "peerId": peer_id.to_string() }),
                 );
             }
         }
         SwarmEvent::Behaviour(AgentBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
             if let Ok(mut inner) = state.inner.lock() {
                 for (peer_id, _addr) in list {
-                    swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .remove_explicit_peer(&peer_id);
                     inner.peers.remove(&peer_id.to_string());
                     let _ = app.emit(
                         "p2p:peer_disconnected",
-                        serde_json::json!({
-                            "peer_id": peer_id.to_string()
-                        }),
+                        serde_json::json!({ "peerId": peer_id.to_string() }),
                     );
                 }
             }
@@ -296,33 +287,65 @@ fn handle_swarm_event(
     }
 }
 
-fn upsert_peer(state: &P2pState, message: &AgentMessage) {
+fn send_to_known_peers(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    envelope: AtpEnvelope,
+    outbound: &mut HashMap<OutboundRequestId, String>,
+) {
+    let peers = state
+        .inner
+        .lock()
+        .map(|inner| inner.peers.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let hash = crate::atp::event_hash(&envelope).unwrap_or_default();
+
+    for peer in peers {
+        let Ok(peer_id) = peer.parse::<PeerId>() else {
+            continue;
+        };
+        let peer_agent_id = format!("urn:libp2p:{peer_id}");
+        if envelope
+            .audience
+            .as_deref()
+            .is_some_and(|audience| audience != peer_agent_id)
+        {
+            continue;
+        }
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, envelope.clone());
+        outbound.insert(request_id, hash.clone());
+    }
+}
+
+fn touch_peer(state: &P2pState, peer_id: PeerId) {
     if let Ok(mut inner) = state.inner.lock() {
         inner.peers.insert(
-            message.agent_id.clone(),
+            peer_id.to_string(),
             PeerInfo {
-                peer_id: message.agent_id.clone(),
-                name: Some(message.name.clone()),
-                capabilities: message.capabilities.clone(),
-                endpoint: message.endpoint.clone(),
-                last_seen: message.timestamp,
-                source: message
-                    .source
-                    .clone()
-                    .unwrap_or_else(|| "global".to_string()),
+                peer_id: peer_id.to_string(),
+                last_seen: now_millis(),
             },
         );
     }
 }
 
-pub fn current_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+fn secure_identity_file(path: &PathBuf) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn identity_path() -> Result<PathBuf, String> {
+    if let Ok(data_dir) = std::env::var("CYPHES_DATA_DIR") {
+        return Ok(PathBuf::from(data_dir).join("identity.key"));
+    }
     let home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
     Ok(home.join(".cyphes").join("identity.key"))
 }
