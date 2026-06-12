@@ -48,7 +48,7 @@ src-tauri/src/p2p.rs
 
 ### Audit Execution and Verification
 
-- Define the signed audit contract.
+- Extend the signed audit contract without breaking its versioned schemas or fixtures.
 - Add a bounded repository capability.
 - Run an isolated audit worker.
 - Produce a Proof of Cognition receipt bundle.

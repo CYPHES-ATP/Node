@@ -1,4 +1,5 @@
 mod atp;
+pub mod audit_profile;
 mod commands;
 mod p2p;
 mod state;

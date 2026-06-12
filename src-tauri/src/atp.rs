@@ -105,6 +105,18 @@ pub fn create_signed_envelope(
     prev: Option<String>,
     body: Value,
 ) -> Result<AtpEnvelope, String> {
+    create_signed_envelope_with_expiry(keypair, verb, transaction_id, audience, prev, body, None)
+}
+
+pub fn create_signed_envelope_with_expiry(
+    keypair: &identity::Keypair,
+    verb: AtpVerb,
+    transaction_id: String,
+    audience: Option<String>,
+    prev: Option<String>,
+    body: Value,
+    expires_at: Option<String>,
+) -> Result<AtpEnvelope, String> {
     let public_key = keypair.public();
     let issuer = agent_id(&public_key);
     let mut envelope = AtpEnvelope {
@@ -115,7 +127,7 @@ pub fn create_signed_envelope(
         issuer: issuer.clone(),
         audience,
         created_at: now_rfc3339(),
-        expires_at: None,
+        expires_at,
         nonce: Uuid::new_v4().to_string(),
         prev,
         body,

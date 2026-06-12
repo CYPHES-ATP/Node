@@ -7,8 +7,9 @@ use std::{
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
-use crate::atp::{
-    event_hash, now_rfc3339, transition, verify_envelope, AtpAck, AtpEnvelope, AtpVerb,
+use crate::{
+    atp::{event_hash, now_rfc3339, transition, verify_envelope, AtpAck, AtpEnvelope, AtpVerb},
+    audit_profile::{contract_hash, validate_contract, AuditContract, RepositoryTarget},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,8 @@ pub struct RepositorySummary {
     pub default_branch: String,
     pub stars: u64,
     pub is_private: bool,
+    #[serde(default)]
+    pub commit_sha: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +54,7 @@ pub struct AuditJob {
     pub created_at: u64,
     pub updated_at: u64,
     pub last_event_hash: String,
+    pub contract_hash: Option<String>,
     pub acknowledged_peers: u64,
     pub origin: String,
 }
@@ -64,10 +68,12 @@ pub enum AuditEventBody {
     WorkerOffer {
         job_id: String,
         worker_agent_id: String,
+        contract: AuditContract,
     },
     WorkerSelected {
         job_id: String,
         worker_agent_id: String,
+        contract_hash: String,
     },
 }
 
@@ -89,6 +95,11 @@ pub struct TransactionContext {
     pub last_event_hash: Option<String>,
     pub requester_agent_id: Option<String>,
     pub worker_agent_id: Option<String>,
+    pub repository: Option<RepositorySummary>,
+    pub scope: Option<Vec<String>>,
+    pub compensation: Option<String>,
+    pub currency: Option<String>,
+    pub contract_hash: Option<String>,
 }
 
 #[derive(Clone)]
@@ -145,7 +156,10 @@ impl AtpStore {
             .prepare(
                 "SELECT id, transaction_id, repository_json, compensation, currency, scope_json,
                         status, delivery_state, requester_agent_id, worker_agent_id, created_at,
-                        updated_at, last_event_hash, origin,
+                        updated_at, last_event_hash,
+                        (SELECT contract_hash FROM audit_contracts c
+                         WHERE c.transaction_id = audit_jobs.transaction_id),
+                        origin,
                         (SELECT COUNT(*) FROM deliveries d
                          WHERE d.transaction_id = audit_jobs.transaction_id
                            AND d.accepted = 1)
@@ -167,7 +181,10 @@ impl AtpStore {
             .query_row(
                 "SELECT id, transaction_id, repository_json, compensation, currency, scope_json,
                         status, delivery_state, requester_agent_id, worker_agent_id, created_at,
-                        updated_at, last_event_hash, origin,
+                        updated_at, last_event_hash,
+                        (SELECT contract_hash FROM audit_contracts c
+                         WHERE c.transaction_id = audit_jobs.transaction_id),
+                        origin,
                         (SELECT COUNT(*) FROM deliveries d
                          WHERE d.transaction_id = audit_jobs.transaction_id
                            AND d.accepted = 1)
@@ -408,6 +425,16 @@ impl AtpStore {
                     origin TEXT NOT NULL
                  );
 
+                 CREATE TABLE IF NOT EXISTS audit_contracts (
+                    transaction_id TEXT PRIMARY KEY,
+                    profile TEXT NOT NULL,
+                    contract_hash TEXT NOT NULL UNIQUE,
+                    contract_json TEXT NOT NULL,
+                    accepted INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    accepted_at INTEGER
+                 );
+
                  CREATE TABLE IF NOT EXISTS deliveries (
                     event_hash TEXT NOT NULL,
                     transaction_id TEXT NOT NULL,
@@ -424,6 +451,11 @@ impl AtpStore {
 }
 
 pub fn rejection_ack(envelope: &AtpEnvelope, receiver_agent_id: &str, reason: String) -> AtpAck {
+    let reason_code = reason
+        .split_once(':')
+        .map(|(prefix, _)| prefix)
+        .filter(|prefix| prefix.starts_with("ATP_"))
+        .unwrap_or("ATP_VALIDATION_FAILED");
     AtpAck {
         accepted: false,
         duplicate: false,
@@ -432,7 +464,7 @@ pub fn rejection_ack(envelope: &AtpEnvelope, receiver_agent_id: &str, reason: St
         state: None,
         receiver_agent_id: receiver_agent_id.to_string(),
         committed_at: now_rfc3339(),
-        reason_code: Some("ATP_VALIDATION_FAILED".to_string()),
+        reason_code: Some(reason_code.to_string()),
         reason: Some(reason),
     }
 }
@@ -475,16 +507,40 @@ fn transaction_context_in(
 ) -> Result<TransactionContext, String> {
     transaction
         .query_row(
-            "SELECT status, last_event_hash, requester_agent_id, worker_agent_id
+            "SELECT status, last_event_hash, requester_agent_id, worker_agent_id,
+                    repository_json, scope_json, compensation, currency,
+                    (SELECT contract_hash FROM audit_contracts c
+                     WHERE c.transaction_id = audit_jobs.transaction_id)
              FROM audit_jobs
              WHERE transaction_id = ?1",
             params![transaction_id],
             |row| {
+                let repository_json: String = row.get(4)?;
+                let scope_json: String = row.get(5)?;
+                let repository = serde_json::from_str(&repository_json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        4,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+                let scope = serde_json::from_str(&scope_json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        5,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
                 Ok(TransactionContext {
                     state: Some(row.get(0)?),
                     last_event_hash: Some(row.get(1)?),
                     requester_agent_id: Some(row.get(2)?),
                     worker_agent_id: row.get(3)?,
+                    repository: Some(repository),
+                    scope: Some(scope),
+                    compensation: Some(row.get(6)?),
+                    currency: Some(row.get(7)?),
+                    contract_hash: row.get(8)?,
                 })
             },
         )
@@ -495,6 +551,11 @@ fn transaction_context_in(
                 last_event_hash: None,
                 requester_agent_id: None,
                 worker_agent_id: None,
+                repository: None,
+                scope: None,
+                compensation: None,
+                currency: None,
+                contract_hash: None,
             })
         })
         .map_err(|error| error.to_string())
@@ -529,10 +590,17 @@ fn validate_body(
             if job.repository.is_private {
                 return Err("Private repositories are not supported".to_string());
             }
+            if !crate::audit_profile::is_git_commit_sha(&job.repository.commit_sha) {
+                return Err(
+                    "ATP_BAD_STATE: AUDIT_REQUEST_REPOSITORY_UNPINNED: audit requests must pin an exact repository commit"
+                        .to_string(),
+                );
+            }
         }
         AuditEventBody::WorkerOffer {
             job_id,
             worker_agent_id,
+            contract,
         } => {
             if envelope.verb != AtpVerb::Negotiate || job_id != &envelope.transaction_id {
                 return Err(
@@ -542,13 +610,58 @@ fn validate_body(
             if worker_agent_id != &envelope.issuer {
                 return Err("Worker offer must be issued by the proposed worker".to_string());
             }
+            if envelope.audience.as_deref() != current.requester_agent_id.as_deref() {
+                return Err(
+                    "ATP_BAD_STATE: AUDIT_CONTRACT_AUDIENCE_MISMATCH: worker offer must target the requester"
+                        .to_string(),
+                );
+            }
             if current.requester_agent_id.as_deref() == Some(worker_agent_id) {
                 return Err("The requester cannot offer to fulfill its own audit".to_string());
+            }
+            validate_contract(contract).map_err(|error| error.to_string())?;
+            if contract.transaction_id != envelope.transaction_id
+                || contract.worker_agent_id != *worker_agent_id
+                || current.requester_agent_id.as_deref()
+                    != Some(contract.requester_agent_id.as_str())
+            {
+                return Err(
+                    "ATP_BAD_STATE: AUDIT_CONTRACT_PARTY_MISMATCH: contract parties must match the committed transaction"
+                        .to_string(),
+                );
+            }
+            let repository = current.repository.as_ref().ok_or_else(|| {
+                "ATP_BAD_STATE: AUDIT_CONTRACT_REQUEST_MISSING: committed request is unavailable"
+                    .to_string()
+            })?;
+            let expected_repository = RepositoryTarget {
+                full_name: repository.full_name.clone(),
+                url: repository.url.clone(),
+                commit_sha: repository.commit_sha.clone(),
+            };
+            if contract.repository != expected_repository
+                || current.scope.as_ref() != Some(&contract.scope)
+                || current.compensation.as_deref()
+                    != Some(contract.proposed_compensation.amount.as_str())
+                || current.currency.as_deref()
+                    != Some(contract.proposed_compensation.asset.as_str())
+            {
+                return Err(
+                    "ATP_BAD_STATE: AUDIT_CONTRACT_REQUEST_MISMATCH: contract must preserve the requested repository, commit, scope, and proposed compensation"
+                        .to_string(),
+                );
+            }
+            if envelope.expires_at.as_deref() != Some(contract.expires_at.as_str()) {
+                return Err(
+                    "ATP_BAD_STATE: AUDIT_CONTRACT_EXPIRY_MISMATCH: offer and contract expiry must match"
+                        .to_string(),
+                );
             }
         }
         AuditEventBody::WorkerSelected {
             job_id,
             worker_agent_id,
+            contract_hash,
         } => {
             if envelope.verb != AtpVerb::Negotiate || job_id != &envelope.transaction_id {
                 return Err(
@@ -558,8 +671,20 @@ fn validate_body(
             if current.requester_agent_id.as_deref() != Some(envelope.issuer.as_str()) {
                 return Err("Only the requester can select a worker".to_string());
             }
+            if envelope.audience.as_deref() != Some(worker_agent_id.as_str()) {
+                return Err(
+                    "ATP_BAD_STATE: AUDIT_CONTRACT_AUDIENCE_MISMATCH: worker selection must target the offered worker"
+                        .to_string(),
+                );
+            }
             if current.worker_agent_id.as_deref() != Some(worker_agent_id) {
                 return Err("Selected worker does not match the committed offer".to_string());
+            }
+            if current.contract_hash.as_deref() != Some(contract_hash.as_str()) {
+                return Err(
+                    "ATP_BAD_STATE: AUDIT_CONTRACT_HASH_MISMATCH: selection must bind the offered contract hash"
+                        .to_string(),
+                );
             }
         }
     }
@@ -616,8 +741,27 @@ fn apply_audit_event(
                 .map_err(|error| error.to_string())?;
         }
         AuditEventBody::WorkerOffer {
-            worker_agent_id, ..
+            worker_agent_id,
+            contract,
+            ..
         } => {
+            let canonical_contract_hash = contract_hash(contract)?;
+            let contract_json =
+                serde_json::to_string(contract).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO audit_contracts
+                        (transaction_id, profile, contract_hash, contract_json, accepted, created_at)
+                     VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+                    params![
+                        envelope.transaction_id,
+                        contract.profile,
+                        canonical_contract_hash,
+                        contract_json,
+                        now_millis() as i64,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
             transaction
                 .execute(
                     "UPDATE audit_jobs
@@ -633,7 +777,15 @@ fn apply_audit_event(
                 )
                 .map_err(|error| error.to_string())?;
         }
-        AuditEventBody::WorkerSelected { .. } => {
+        AuditEventBody::WorkerSelected { contract_hash, .. } => {
+            transaction
+                .execute(
+                    "UPDATE audit_contracts
+                     SET accepted = 1, accepted_at = ?3
+                     WHERE transaction_id = ?1 AND contract_hash = ?2",
+                    params![envelope.transaction_id, contract_hash, now_millis() as i64,],
+                )
+                .map_err(|error| error.to_string())?;
             transaction
                 .execute(
                     "UPDATE audit_jobs
@@ -676,8 +828,9 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditJob> {
         created_at: row.get::<_, i64>(10)? as u64,
         updated_at: row.get::<_, i64>(11)? as u64,
         last_event_hash: row.get(12)?,
-        origin: row.get(13)?,
-        acknowledged_peers: row.get::<_, i64>(14)? as u64,
+        contract_hash: row.get(13)?,
+        origin: row.get(14)?,
+        acknowledged_peers: row.get::<_, i64>(15)? as u64,
     })
 }
 
@@ -696,7 +849,11 @@ fn database_path() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::atp::{agent_id, create_signed_envelope};
+    use crate::{
+        atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry},
+        audit_profile::{contract_hash, AuditContract, RepositoryTarget},
+    };
+    use chrono::{Duration, SecondsFormat, Utc};
 
     fn test_store() -> AtpStore {
         let connection = Connection::open_in_memory().unwrap();
@@ -722,6 +879,7 @@ mod tests {
                 default_branch: "master".to_string(),
                 stars: 1,
                 is_private: false,
+                commit_sha: "0000000000000000000000000000000000000001".to_string(),
             },
             compensation: "100".to_string(),
             currency: "USDC".to_string(),
@@ -768,6 +926,7 @@ mod tests {
                 default_branch: "main".to_string(),
                 stars: 0,
                 is_private: false,
+                commit_sha: "0000000000000000000000000000000000000002".to_string(),
             },
             compensation: "100".to_string(),
             currency: "USDC".to_string(),
@@ -788,7 +947,45 @@ mod tests {
             .commit_envelope(&discover, &requester_agent, None)
             .unwrap();
 
-        let offer = create_signed_envelope(
+        let expiry =
+            (Utc::now() + Duration::minutes(30)).to_rfc3339_opts(SecondsFormat::Millis, true);
+        let contract = AuditContract::repository_audit(
+            "audit-2".to_string(),
+            requester_agent.clone(),
+            worker_agent.clone(),
+            RepositoryTarget {
+                full_name: "cyphes/example".to_string(),
+                url: "https://github.com/cyphes/example".to_string(),
+                commit_sha: "0000000000000000000000000000000000000002".to_string(),
+            },
+            vec!["Repository audit".to_string()],
+            "100".to_string(),
+            expiry.clone(),
+        );
+        let offered_contract_hash = contract_hash(&contract).unwrap();
+        let mut altered_contract = contract.clone();
+        altered_contract.proposed_compensation.amount = "999".to_string();
+        let altered_offer = create_signed_envelope_with_expiry(
+            &worker,
+            AtpVerb::Negotiate,
+            "audit-2".to_string(),
+            Some(requester_agent.clone()),
+            Some(discover_ack.event_hash.clone()),
+            serde_json::to_value(AuditEventBody::WorkerOffer {
+                job_id: "audit-2".to_string(),
+                worker_agent_id: worker_agent.clone(),
+                contract: altered_contract,
+            })
+            .unwrap(),
+            Some(expiry.clone()),
+        )
+        .unwrap();
+        let error = store
+            .commit_envelope(&altered_offer, &requester_agent, None)
+            .unwrap_err();
+        assert!(error.contains("AUDIT_CONTRACT_REQUEST_MISMATCH"));
+
+        let offer = create_signed_envelope_with_expiry(
             &worker,
             AtpVerb::Negotiate,
             "audit-2".to_string(),
@@ -797,14 +994,22 @@ mod tests {
             serde_json::to_value(AuditEventBody::WorkerOffer {
                 job_id: "audit-2".to_string(),
                 worker_agent_id: worker_agent.clone(),
+                contract,
             })
             .unwrap(),
+            Some(expiry),
         )
         .unwrap();
         let offer_ack = store
             .commit_envelope(&offer, &requester_agent, None)
             .unwrap();
         assert_eq!(offer_ack.state.as_deref(), Some("negotiating"));
+        let offered = store.get_job("audit-2").unwrap();
+        assert_eq!(offered.last_event_hash, offer_ack.event_hash);
+        assert_eq!(
+            offered.contract_hash.as_deref(),
+            Some(offered_contract_hash.as_str())
+        );
 
         let selection = create_signed_envelope(
             &requester,
@@ -815,6 +1020,7 @@ mod tests {
             serde_json::to_value(AuditEventBody::WorkerSelected {
                 job_id: "audit-2".to_string(),
                 worker_agent_id: worker_agent.clone(),
+                contract_hash: offered_contract_hash.clone(),
             })
             .unwrap(),
         )
@@ -829,6 +1035,10 @@ mod tests {
         assert_eq!(
             committed.worker_agent_id.as_deref(),
             Some(worker_agent.as_str())
+        );
+        assert_eq!(
+            committed.contract_hash.as_deref(),
+            Some(offered_contract_hash.as_str())
         );
     }
 }
