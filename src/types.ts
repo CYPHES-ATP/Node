@@ -19,6 +19,7 @@ export interface RepositorySummary {
   defaultBranch: string;
   stars: number;
   isPrivate: boolean;
+  commitSha: string;
 }
 
 export interface AuditJob {
@@ -35,6 +36,7 @@ export interface AuditJob {
   createdAt: number;
   updatedAt: number;
   lastEventHash: string;
+  contractHash?: string;
   acknowledgedPeers: number;
   origin: "local" | "remote";
 }

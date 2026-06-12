@@ -16,7 +16,10 @@ The current slice proves:
 - authenticated peer-to-issuer binding;
 - persistent event ordering and replay defense;
 - atomic receiver commit before acknowledgement;
-- durable audit discovery and worker negotiation.
+- durable audit discovery and worker negotiation;
+- exact repository commit pinning;
+- a typed, zero-value audit contract accepted by canonical hash;
+- versioned contract and receipt schemas with canonical fixtures.
 
 It does not yet prove work routing, bounded execution, settlement, attestation,
 or Proof of Cognition receipt verification.
@@ -25,8 +28,8 @@ or Proof of Cognition receipt verification.
 
 | ATP verb | Status | Current behavior | Required next work |
 | --- | --- | --- | --- |
-| `DISCOVER` | Implemented | Requester signs and announces a public repository audit | Capability cards, expiry policy, internet discovery |
-| `NEGOTIATE` | Partial | Worker offer and requester selection are signed and chained | Complete contract, counters, rejection, reason codes |
+| `DISCOVER` | Implemented | Requester signs a public repository audit pinned to an exact commit | Capability cards, expiry policy, internet discovery |
+| `NEGOTIATE` | Partial | Worker offers a typed zero-value contract; requester accepts its canonical hash | Counters, rejection paths, full reason-code registry |
 | `ROUTE` | Not implemented | State transition is modeled only | Work session, encrypted descriptors, leases |
 | `EXECUTE` | Not implemented | State transition is modeled only | Isolated worker, progress events, artifacts |
 | `SETTLE` | Not implemented | UI explicitly reports no payment rail | Zero-value adapter, approval, dispute, escrow adapter |
@@ -49,8 +52,8 @@ or Proof of Cognition receipt verification.
 | Idempotency defense | Implemented | SQLite uniqueness by issuer and idempotency key |
 | Expiry validation | Implemented | RFC3339 expiry rejection when present |
 | Clock-skew policy | Not implemented | Needs explicit bounds and fixtures |
-| Deterministic reason codes | Partial | ACK has reason fields; registry is incomplete |
-| Cross-language fixtures | Not implemented | Needed before claiming interoperability |
+| Deterministic reason codes | Partial | Contract and receipt profile failures carry ATP plus profile codes; registry is incomplete |
+| Cross-language fixtures | Partial | JSON Schemas and canonical body fixtures exist; signed envelope vectors remain |
 
 ## Storage and Delivery
 

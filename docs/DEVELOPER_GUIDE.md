@@ -18,6 +18,7 @@ responses, global-network labels, or payment claims.
 | `src/components/providers/P2PProvider.tsx` | Native events and backend refresh |
 | `src/styles/globals.css` | Desktop visual system |
 | `src-tauri/src/atp.rs` | ATP data model, proofs, canonicalization, event hashes, transition rules |
+| `src-tauri/src/audit_profile.rs` | Repository-audit contract, receipt types, canonical hashes, validation |
 | `src-tauri/src/store.rs` | SQLite schema, replay protection, atomic commits, job projections, ACK receipts |
 | `src-tauri/src/p2p.rs` | Identity file, swarm, mDNS, request/response, peer synchronization |
 | `src-tauri/src/commands.rs` | Product operations exposed to Tauri |
@@ -38,8 +39,9 @@ The UI is intentionally small:
 - `src/styles/globals.css` carries the CYPHES AMOLED design system.
 
 Repository creation performs a live lookup against GitHub's public repository
-API before the backend signs and commits a request. The browser preview is
-read-only. The legacy localStorage key is used only as one-time migration input.
+API and resolves its default branch to an exact commit before the backend signs
+and commits a request. The browser preview is read-only. The legacy localStorage
+key is used only as one-time migration input.
 
 ## Native Backend
 
@@ -60,8 +62,11 @@ The Rust backend:
 Current audit negotiation uses:
 
 1. requester `DISCOVER`;
-2. worker `NEGOTIATE` offer;
-3. requester `NEGOTIATE` worker selection.
+2. worker `NEGOTIATE` offer carrying the typed audit contract;
+3. requester `NEGOTIATE` selection accepting its canonical `contractHash`.
+
+The public cross-implementation boundary lives in `protocol/schemas/` and
+`protocol/fixtures/`.
 
 ## Local Data
 

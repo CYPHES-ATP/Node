@@ -1,0 +1,101 @@
+{
+  "receiptType": "ProofOfCognition",
+  "atp": "0.3",
+  "profile": "cyphes.repository-security-audit-receipt/0.1",
+  "profileVersion": "0.1",
+  "transactionId": "atp_audit_fixture_001",
+  "requested": {
+    "contractHash": "sha256:d952d3231c167245774341d82e127118b51d1ecc4154c545ecd7f868ac53b4f4",
+    "repository": {
+      "fullName": "CYPHES-ATP/Node",
+      "url": "https://github.com/CYPHES-ATP/Node",
+      "commitSha": "1d523ceb684227961c3254b5e6a1536946c56dc1"
+    },
+    "scope": [
+      "Dependency and supply-chain risk",
+      "Secrets, permissions, and exposed configuration",
+      "CI workflow and repository security posture",
+      "Prioritized findings with reproducible evidence"
+    ]
+  },
+  "accessed": {
+    "leases": [
+      "lease_repository_read_fixture_001"
+    ],
+    "resources": [
+      "github:CYPHES-ATP/Node@1d523ceb684227961c3254b5e6a1536946c56dc1"
+    ]
+  },
+  "changed": {
+    "artifactPaths": [
+      "artifacts/audit-report.md",
+      "artifacts/findings.json",
+      "artifacts/results.sarif",
+      "artifacts/checks.json",
+      "artifacts/manifest.json"
+    ],
+    "externalState": "none"
+  },
+  "approved": {
+    "by": "urn:libp2p:12D3KooWRequesterFixture",
+    "method": "requester-approval",
+    "time": "2099-01-01T00:20:00.000Z"
+  },
+  "paid": {
+    "rail": "zero-value",
+    "amount": "0",
+    "asset": "none",
+    "condition": "verified-receipt-and-requester-approval",
+    "proofOfPayment": "waived",
+    "refundPolicy": "not-applicable",
+    "disputePolicy": "manual"
+  },
+  "artifacts": [
+    {
+      "path": "artifacts/audit-report.md",
+      "mediaType": "text/markdown",
+      "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "size": 1024
+    },
+    {
+      "path": "artifacts/findings.json",
+      "mediaType": "application/json",
+      "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "size": 2048
+    },
+    {
+      "path": "artifacts/results.sarif",
+      "mediaType": "application/sarif+json",
+      "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "size": 3072
+    },
+    {
+      "path": "artifacts/checks.json",
+      "mediaType": "application/json",
+      "sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "size": 4096
+    },
+    {
+      "path": "artifacts/manifest.json",
+      "mediaType": "application/json",
+      "sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "size": 5120
+    }
+  ],
+  "eventRoot": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "receiptHash": "sha256:fac6aa5e2ec11e1ed74e27adb132a8f33470240de0263d51ef12d0631dfc7e07",
+  "signatures": [
+    {
+      "signer": "urn:libp2p:12D3KooWWorkerFixture",
+      "kid": "urn:libp2p:12D3KooWWorkerFixture#identity",
+      "algorithm": "EdDSA",
+      "signature": "fixture-worker-signature"
+    },
+    {
+      "signer": "urn:libp2p:12D3KooWRequesterFixture",
+      "kid": "urn:libp2p:12D3KooWRequesterFixture#identity",
+      "algorithm": "EdDSA",
+      "signature": "fixture-requester-signature"
+    }
+  ]
+}

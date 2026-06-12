@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/repository-audit-receipt.v0.1.schema.json",
+  "title": "CYPHES Repository Audit Proof of Cognition Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receiptType",
+    "atp",
+    "profile",
+    "profileVersion",
+    "transactionId",
+    "requested",
+    "accessed",
+    "changed",
+    "approved",
+    "paid",
+    "artifacts",
+    "eventRoot",
+    "receiptHash",
+    "signatures"
+  ],
+  "properties": {
+    "receiptType": {
+      "const": "ProofOfCognition"
+    },
+    "atp": {
+      "const": "0.3"
+    },
+    "profile": {
+      "const": "cyphes.repository-security-audit-receipt/0.1"
+    },
+    "profileVersion": {
+      "const": "0.1"
+    },
+    "transactionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractHash",
+        "repository",
+        "scope"
+      ],
+      "properties": {
+        "contractHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "accessed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "leases",
+        "resources"
+      ],
+      "properties": {
+        "leases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifactPaths",
+        "externalState"
+      ],
+      "properties": {
+        "artifactPaths": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^artifacts/"
+          }
+        },
+        "externalState": {
+          "const": "none"
+        }
+      }
+    },
+    "approved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "by",
+        "method",
+        "time"
+      ],
+      "properties": {
+        "by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "paid": {
+      "$ref": "#/$defs/zeroValueSettlement"
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "mediaType",
+          "sha256",
+          "size"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^artifacts/"
+          },
+          "mediaType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "eventRoot": {
+      "$ref": "#/$defs/sha256"
+    },
+    "receiptHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "signer",
+          "kid",
+          "algorithm",
+          "signature"
+        ],
+        "properties": {
+          "signer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kid": {
+            "type": "string",
+            "minLength": 1
+          },
+          "algorithm": {
+            "const": "EdDSA"
+          },
+          "signature": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-fA-F]{64}$"
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fullName",
+        "url",
+        "commitSha"
+      ],
+      "properties": {
+        "fullName": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[^/]+/[^/]+$"
+        },
+        "commitSha": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"
+        }
+      }
+    },
+    "zeroValueSettlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rail",
+        "amount",
+        "asset",
+        "condition",
+        "proofOfPayment",
+        "refundPolicy",
+        "disputePolicy"
+      ],
+      "properties": {
+        "rail": {
+          "const": "zero-value"
+        },
+        "amount": {
+          "const": "0"
+        },
+        "asset": {
+          "const": "none"
+        },
+        "condition": {
+          "const": "verified-receipt-and-requester-approval"
+        },
+        "proofOfPayment": {
+          "const": "waived"
+        },
+        "refundPolicy": {
+          "const": "not-applicable"
+        },
+        "disputePolicy": {
+          "const": "manual"
+        }
+      }
+    }
+  }
+}
