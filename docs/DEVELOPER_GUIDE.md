@@ -76,6 +76,30 @@ Set `CYPHES_DATA_DIR` to run an isolated development identity. The database is
 configured for WAL mode and foreign-key enforcement. On Unix the identity and
 database are restricted to the current user.
 
+## Application Icon
+
+The original CYPHES helmet artwork is retained at:
+
+```text
+src-tauri/icons/source/cyphes.png
+```
+
+Because platform application icons require a square source, the artwork is
+centered without distortion on a square white canvas:
+
+```text
+src-tauri/icons/source/cyphes-square.png
+```
+
+Regenerate the desktop icon set with:
+
+```bash
+npm run tauri icon src-tauri/icons/source/cyphes-square.png -- -o src-tauri/icons
+```
+
+The Tauri bundle consumes `icon.icns`, `icon.ico`, and the configured PNG
+sizes from `src-tauri/icons/`.
+
 ## Inbound Commit Sequence
 
 An inbound request is processed in this order:
