@@ -34,8 +34,8 @@ src-tauri/src/store.rs
 
 ### Network
 
-- Deploy and operate redundant public relays.
-- Add rendezvous and signed capability-card discovery.
+- Deploy and operate redundant public relay/rendezvous nodes.
+- Add signed capability-card advertisement and matching.
 - Add AutoNAT and verify direct DCUtR upgrades.
 - Persist peer addresses and retry audience-specific delivery.
 - Preserve commit-before-ACK behavior.

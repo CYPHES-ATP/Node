@@ -77,5 +77,8 @@ export interface NetworkInfo {
   protocol: string;
   listen_addrs: string[];
   relay_configured: boolean;
+  relay_connected: boolean;
+  rendezvous_registered: boolean;
+  bootstrap_source?: string;
   connected_peers: number;
 }

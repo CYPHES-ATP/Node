@@ -37,7 +37,7 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
   protocol/fixtures/atp-l1-repository-audit.valid
 ```
 
-## Relay
+## Relay And Automatic Discovery
 
 ```bash
 cd relay
@@ -45,8 +45,15 @@ cargo test
 docker compose up --build
 ```
 
-See [JOIN_NETWORK.md](JOIN_NETWORK.md) for relay deployment and the complete
-two-node UI flow.
+Verify two-node rendezvous discovery:
+
+```bash
+cargo run --bin cyphes-network-smoke -- \
+  /ip4/127.0.0.1/tcp/4001/p2p/RELAY_PEER_ID
+```
+
+See [JOIN_NETWORK.md](JOIN_NETWORK.md) for public deployment, default-network
+publication, and the complete two-node UI flow.
 
 ## Build Checks
 

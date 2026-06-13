@@ -401,19 +401,21 @@ can include both the ATP error and the more specific Artifact Two reason code.
 
 ### Required libp2p Behaviours
 
-The current mDNS and gossipsub behaviours are insufficient for an internet
-network. Compose:
+The current node composes:
 
 - QUIC and TCP transports,
 - Noise authentication,
 - Yamux multiplexing,
 - Identify,
 - Ping,
-- AutoNAT,
 - Circuit Relay v2 client,
 - DCUtR hole punching,
 - Rendezvous client,
-- request-response for ATP envelopes,
+- request-response for ATP envelopes.
+
+The remaining network behaviours are:
+
+- AutoNAT reachability scoring,
 - gossipsub only for short-lived public announcements,
 - optional Kademlia after the first rendezvous-based network is stable.
 
@@ -812,12 +814,12 @@ bad signatures, stale messages, replay, incorrect `prev`, and invalid state.
 
 ### Milestone 2: Internet P2P
 
-Implementation status: partial. Identify, Ping, QUIC, Relay v2, DCUtR, manual
-dialing, a standalone relay, and a reservation smoke test are live. Hosted
-infrastructure, Rendezvous, AutoNAT, and durable retries remain.
+Implementation status: partial. Identify, Ping, QUIC, Relay v2, DCUtR,
+Rendezvous registration/discovery, reconnect attempts, manual fallback
+dialing, a combined infrastructure service, and automatic two-node smoke test
+are live. Hosted infrastructure, AutoNAT, and durable message retries remain.
 
-- Add Identify, Ping, AutoNAT, Relay v2 client, DCUtR, Rendezvous, QUIC, and
-  request-response.
+- Add AutoNAT reachability scoring and verify direct DCUtR upgrades.
 - Deploy three public bootstrap/rendezvous/relay nodes.
 - Add reliable acknowledgements and retrying outbox delivery.
 
@@ -907,12 +909,14 @@ ATP.
 
 The signed six-envelope transaction, leases, bounded worker, zero-value
 settlement, Proof of Cognition bundle, Artifact Two verification, relay client,
-and standalone relay are implemented.
+and combined relay/rendezvous service are implemented.
 
 The next implementation slice is:
 
-1. deploy redundant public relays and run the full flow across two networks;
-2. add rendezvous and signed `ADVERTISE` capability cards;
+1. provision `relay.cyphes.com`, externally verify it, publish the default
+   manifest, and run the full flow across two networks;
+2. deploy a second infrastructure node and add signed `ADVERTISE` capability
+   cards;
 3. harden the worker inside an OS-enforced sandbox;
 4. persist peer addresses and reliable audience-specific retries;
 5. implement reject, revoke, cancellation, expiry, and dispute paths;

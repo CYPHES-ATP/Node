@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "network": "cyphes-dev",
+  "operator": "CYPHES-ATP",
+  "status": "awaiting-public-host",
+  "relayAddr": null,
+  "rendezvousAddr": null,
+  "rendezvousNamespace": "cyphes.repository-audit.v0.1",
+  "updatedAt": "2026-06-13T00:00:00Z"
+}

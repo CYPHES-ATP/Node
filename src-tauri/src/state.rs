@@ -23,6 +23,9 @@ pub struct P2pShared {
     pub peers: HashMap<String, PeerInfo>,
     pub listen_addrs: Vec<String>,
     pub relay_configured: bool,
+    pub relay_connected: bool,
+    pub rendezvous_registered: bool,
+    pub bootstrap_source: Option<String>,
 }
 
 #[derive(Default, Clone)]

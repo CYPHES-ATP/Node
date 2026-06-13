@@ -59,11 +59,13 @@ an ATP v0.3 wire verb.
 | mDNS LAN discovery | Implemented |
 | Identify and Ping | Implemented |
 | Circuit Relay v2 client and reservation | Implemented and smoke tested |
-| Standalone deployable relay | Implemented |
+| Combined deployable relay/rendezvous service | Implemented |
+| Signed rendezvous registration and automatic peer discovery | Implemented and locally smoke tested |
+| Default network manifest and runtime overrides | Implemented |
 | Manual direct/relay multiaddress dialing | Implemented |
 | DCUtR behavior | Implemented |
-| CYPHES-hosted public relay | Not deployed in this repository |
-| Rendezvous/public work index | Not implemented |
+| CYPHES-hosted public endpoint | Awaiting public Linux host and DNS |
+| Durable public work index | Not implemented |
 | AutoNAT and reachability scoring | Not implemented |
 | Offline mailbox and durable retry | Not implemented |
 
@@ -78,13 +80,15 @@ The live network and protocol assertions are intentionally separate:
 
 1. the transaction test completes the real pinned-repository work order and
    exports a valid bundle;
-2. the relay smoke client proves a circuit reservation with a 64 MiB,
-   ten-minute relay limit;
-3. the desktop command path exposes every transaction operation to two
+2. the network smoke client proves two fresh nodes reserve circuits, register
+   signed peer records, discover each other, and connect automatically;
+3. the relay smoke client independently proves a reservation with a 64 MiB,
+   ten-minute circuit limit;
+4. the desktop command path exposes every transaction operation to two
    independently running clients.
 
-A public different-network two-laptop run remains an operational acceptance
-test after a relay is deployed.
+A public different-network two-laptop run remains the final operational
+acceptance test after the CYPHES endpoint is deployed.
 
 ## Production Exit Criteria
 

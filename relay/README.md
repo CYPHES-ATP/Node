@@ -1,7 +1,8 @@
-# CYPHES Relay
+# CYPHES Network Service
 
-The relay is a small libp2p circuit-relay v2 service. It stores only its
-Ed25519 identity. It does not store ATP work orders, contracts, results, or
+The service combines libp2p Circuit Relay v2 and Rendezvous on one persistent
+Ed25519 identity. It stores only that identity and in-memory rendezvous
+registrations. It does not store ATP work orders, contracts, results, or
 receipts.
 
 Run it on a public host with TCP and UDP port `4001` open:
@@ -46,3 +47,29 @@ cargo run --bin cyphes-relay-smoke -- \
 
 The command exits successfully only after the relay accepts a circuit
 reservation.
+
+Verify the complete automatic-discovery path:
+
+```bash
+cargo run --bin cyphes-network-smoke -- \
+  /dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID
+```
+
+This launches two fresh identities. Both reserve relay circuits and register
+signed peer records; they then discover and connect to each other without
+sharing addresses.
+
+## Production Host
+
+Build and install on a public Linux host:
+
+```bash
+cargo build --release
+sudo ./deploy/install-systemd.sh \
+  target/release/cyphes-relay \
+  /dns4/relay.cyphes.com/tcp/4001
+```
+
+Create an `A` or `AAAA` record for `relay.cyphes.com`, open `4001/tcp` and
+`4001/udp`, and run `cyphes-network-smoke` from a different network. Only then
+publish the address in `../network/bootstrap.json`.

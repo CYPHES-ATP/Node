@@ -23,11 +23,12 @@ responses, global-network labels, or payment claims.
 | `src-tauri/src/store.rs` | SQLite schema, replay protection, atomic commits, job projections, ACK receipts |
 | `src-tauri/src/worker.rs` | Context leases, guarded source access, deterministic audit artifacts |
 | `src-tauri/src/bundle.rs` | Artifact Two-compatible receipt export |
-| `src-tauri/src/p2p.rs` | mDNS, direct/relay transport, result delivery, peer synchronization |
+| `src-tauri/src/p2p.rs` | mDNS, relay/rendezvous discovery, result delivery, peer synchronization |
 | `src-tauri/src/commands.rs` | Product operations exposed to Tauri |
 | `src-tauri/src/state.rs` | In-process peer and node runtime state |
 | `src-tauri/src/lib.rs` | Native application composition |
-| `relay/` | Standalone Circuit Relay v2 service and reservation smoke client |
+| `relay/` | Combined Relay v2/Rendezvous service and network smoke clients |
+| `network/` | Default network publication manifest |
 
 The Rust backend is authoritative. React may request an operation and render
 the returned projection, but it must not manufacture transaction state.
@@ -57,7 +58,8 @@ The Rust backend:
 - canonicalizes ATP payloads with RFC 8785 JCS;
 - signs and verifies envelopes with the libp2p Ed25519 identity;
 - enforces event hashes, `prev`, nonces, idempotency, and transaction order;
-- discovers LAN peers through mDNS;
+- discovers LAN peers through mDNS and internet peers through signed
+  rendezvous registrations;
 - connects peers directly or through Circuit Relay v2;
 - exposes QUIC, TCP, WebSocket, Identify, Ping, and DCUtR behavior;
 - negotiates `/cyphes/atp/0.3` request/response streams;
@@ -138,7 +140,7 @@ Never move ACK generation before the database commit.
 
 ## Explicitly Unavailable
 
-- A CYPHES-operated public relay, rendezvous service, or offline mailbox.
+- A deployed CYPHES-operated public host or offline mailbox.
 - Real escrow or payment settlement.
 - Hardened container or VM isolation for the worker.
 - Private GitHub repository authorization.

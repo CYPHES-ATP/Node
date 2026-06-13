@@ -366,27 +366,36 @@ function AppContent() {
           </div>
           <div>
             <RadioTower size={15} />
-            <span>Internet relay</span>
-            <strong className={networkInfo?.relay_configured ? "" : "warning"}>
-              {networkInfo?.relay_configured ? "Configured" : "Not configured"}
+            <span>Internet network</span>
+            <strong className={networkInfo?.rendezvous_registered ? "" : "warning"}>
+              {networkInfo?.rendezvous_registered
+                ? "Discoverable"
+                : networkInfo?.relay_connected
+                  ? "Registering"
+                  : networkInfo?.relay_configured
+                    ? "Connecting"
+                    : "Not configured"}
             </strong>
           </div>
         </section>
 
-        <form className="connect-strip" onSubmit={(event) => void handleConnect(event)}>
-          <Link size={15} />
-          <label htmlFor="peer-address">Connect to node</label>
-          <input
-            id="peer-address"
-            onChange={(event) => setPeerAddress(event.currentTarget.value)}
-            placeholder="/dns4/relay.example/tcp/4001/p2p/.../p2p-circuit/p2p/..."
-            spellCheck={false}
-            value={peerAddress}
-          />
-          <button disabled={connecting || !peerAddress.trim()} type="submit">
-            {connecting ? "Dialing" : "Connect"}
-          </button>
-        </form>
+        <details className="manual-connect" open={!networkInfo?.relay_configured}>
+          <summary>Manual peer connection</summary>
+          <form className="connect-strip" onSubmit={(event) => void handleConnect(event)}>
+            <Link size={15} />
+            <label htmlFor="peer-address">Peer multiaddress</label>
+            <input
+              id="peer-address"
+              onChange={(event) => setPeerAddress(event.currentTarget.value)}
+              placeholder="Optional multiaddress fallback"
+              spellCheck={false}
+              value={peerAddress}
+            />
+            <button disabled={connecting || !peerAddress.trim()} type="submit">
+              {connecting ? "Dialing" : "Connect"}
+            </button>
+          </form>
+        </details>
 
         {relayAddress ? (
           <div className="share-address">
@@ -485,7 +494,7 @@ function AppContent() {
                 <div className="empty-state">
                   <Github size={24} />
                   <strong>No committed audit requests</strong>
-                  <span>Post a repository or connect another CYPHES node by multiaddress.</span>
+                  <span>Post a repository or wait for signed work from another CYPHES node.</span>
                 </div>
               ) : (
                 sortedJobs.map((job) => {
