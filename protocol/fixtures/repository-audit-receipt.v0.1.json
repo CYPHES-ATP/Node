@@ -27,18 +27,43 @@
     ]
   },
   "changed": {
-    "artifactPaths": [
-      "artifacts/audit-report.md",
-      "artifacts/findings.json",
-      "artifacts/results.sarif",
-      "artifacts/checks.json",
-      "artifacts/manifest.json"
+    "artifacts": [
+      {
+        "path": "artifacts/audit-report.md",
+        "mediaType": "text/markdown",
+        "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "sizeBytes": 1024
+      },
+      {
+        "path": "artifacts/findings.json",
+        "mediaType": "application/json",
+        "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "sizeBytes": 2048
+      },
+      {
+        "path": "artifacts/results.sarif",
+        "mediaType": "application/sarif+json",
+        "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "sizeBytes": 3072
+      },
+      {
+        "path": "artifacts/checks.json",
+        "mediaType": "application/json",
+        "sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "sizeBytes": 4096
+      },
+      {
+        "path": "artifacts/manifest.json",
+        "mediaType": "application/json",
+        "sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "sizeBytes": 5120
+      }
     ],
     "externalState": "none"
   },
   "approved": {
     "by": "urn:libp2p:12D3KooWRequesterFixture",
-    "method": "requester-approval",
+    "method": "requester-verified-result",
     "time": "2099-01-01T00:20:00.000Z"
   },
   "paid": {
@@ -50,52 +75,14 @@
     "refundPolicy": "not-applicable",
     "disputePolicy": "manual"
   },
-  "artifacts": [
-    {
-      "path": "artifacts/audit-report.md",
-      "mediaType": "text/markdown",
-      "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-      "size": 1024
-    },
-    {
-      "path": "artifacts/findings.json",
-      "mediaType": "application/json",
-      "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-      "size": 2048
-    },
-    {
-      "path": "artifacts/results.sarif",
-      "mediaType": "application/sarif+json",
-      "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-      "size": 3072
-    },
-    {
-      "path": "artifacts/checks.json",
-      "mediaType": "application/json",
-      "sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-      "size": 4096
-    },
-    {
-      "path": "artifacts/manifest.json",
-      "mediaType": "application/json",
-      "sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-      "size": 5120
-    }
-  ],
   "eventRoot": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
-  "receiptHash": "sha256:fac6aa5e2ec11e1ed74e27adb132a8f33470240de0263d51ef12d0631dfc7e07",
+  "receiptHash": "sha256:ba5245faa57789138966afe0ca8c1c40d2326024668f729b84e812400c529499",
   "signatures": [
     {
       "signer": "urn:libp2p:12D3KooWWorkerFixture",
       "kid": "urn:libp2p:12D3KooWWorkerFixture#identity",
-      "algorithm": "EdDSA",
+      "type": "Ed25519",
       "signature": "fixture-worker-signature"
-    },
-    {
-      "signer": "urn:libp2p:12D3KooWRequesterFixture",
-      "kid": "urn:libp2p:12D3KooWRequesterFixture#identity",
-      "algorithm": "EdDSA",
-      "signature": "fixture-requester-signature"
     }
   ]
 }

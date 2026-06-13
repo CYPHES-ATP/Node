@@ -1,0 +1,38 @@
+[
+  {
+    "id": "lease-artifacts-write-187822a6-7918-4343-ae5d-ea862df972e1",
+    "issuer": "urn:libp2p:12D3KooWNvUTfDdJq4twsLsryjj5DwAWm9GCiJVsaTmmvGyMxe5m",
+    "resourceRef": "artifacts:audit-e2e-82be7153-b093-41ed-9d9d-21f5c46dd4dc",
+    "operations": [
+      "write"
+    ],
+    "purpose": "repository-security-audit-artifacts",
+    "boundary": "artifacts:audit-e2e-82be7153-b093-41ed-9d9d-21f5c46dd4dc",
+    "retention": "retain-verification-bundle",
+    "audit": true,
+    "nonce": "664c701d-b232-4947-904b-b85bf5550c58",
+    "ttl": {
+      "start": "2026-06-13T01:33:41.679Z",
+      "end": "2026-06-13T02:03:41.667Z"
+    },
+    "sig": "pCgK5GSG-qiwG8eVW6h0ZBtJ95GsI_G3QHoFR1-blYbi-VOGIQpeLGK6cccwZ9YBeS0_SSCyfC7HOvTDIjQbCA"
+  },
+  {
+    "id": "lease-repository-read-e5a56dfb-5f1e-401c-b6b4-b6020797ade1",
+    "issuer": "urn:libp2p:12D3KooWNvUTfDdJq4twsLsryjj5DwAWm9GCiJVsaTmmvGyMxe5m",
+    "resourceRef": "github:octocat/Hello-World@7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+    "operations": [
+      "read"
+    ],
+    "purpose": "repository-security-audit",
+    "boundary": "github:octocat/Hello-World@7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+    "retention": "delete-checkout-after-receipt",
+    "audit": true,
+    "nonce": "e77106a6-83c2-40f8-8d35-5dd3118e1a8e",
+    "ttl": {
+      "start": "2026-06-13T01:33:41.679Z",
+      "end": "2026-06-13T02:03:41.667Z"
+    },
+    "sig": "FzwGTZnY_JO1CxWCWEdSLgc7Q2Em6-xftKzuw2LEKTe1ia0NA3EASKvCeE-Z5xmXb34o3EHQ8ax7SOyuhTIeCA"
+  }
+]

@@ -3,14 +3,17 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 
 use crate::{
-    atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
-    audit_profile::{is_git_commit_sha, AuditContract, RepositoryTarget},
+    atp::{
+        agent_id, create_signed_envelope, create_signed_envelope_with_expiry, now_rfc3339, AtpVerb,
+    },
+    audit_profile::{is_git_commit_sha, AuditContract, ReceiptApproval, RepositoryTarget},
     p2p::{load_or_create_identity, spawn_swarm, SwarmCommand, ATP_PROTOCOL},
     state::{P2pState, PeerInfo},
     store::{
-        now_millis, AtpStore, AuditEventBody, AuditJob, AuditJobPayload, LegacyAuditJob,
+        data_dir, now_millis, AtpStore, AuditEventBody, AuditJob, AuditJobPayload, LegacyAuditJob,
         RepositorySummary,
     },
+    worker::{create_repository_leases, execute_repository_audit},
 };
 
 #[derive(Debug, Serialize)]
@@ -25,6 +28,16 @@ pub struct StartNodeResponse {
 pub struct MigrationResult {
     pub migrated: usize,
     pub skipped: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NetworkInfo {
+    pub peer_id: String,
+    pub agent_id: String,
+    pub protocol: String,
+    pub listen_addrs: Vec<String>,
+    pub relay_configured: bool,
+    pub connected_peers: usize,
 }
 
 #[tauri::command]
@@ -44,7 +57,7 @@ pub async fn start_node(
                 peer_id: inner.local_peer_id.clone().unwrap_or_default(),
                 agent_id: agent_id(&keypair.public()),
                 protocol: ATP_PROTOCOL.to_string(),
-                listen_addrs: Vec::new(),
+                listen_addrs: inner.listen_addrs.clone(),
             });
         }
     }
@@ -66,6 +79,7 @@ pub async fn start_node(
     inner.local_peer_id = Some(peer_id.clone());
     inner.keypair = Some(keypair);
     inner.sender = Some(tx);
+    inner.listen_addrs = listen_addrs.clone();
 
     Ok(StartNodeResponse {
         peer_id,
@@ -73,6 +87,34 @@ pub async fn start_node(
         protocol: ATP_PROTOCOL.to_string(),
         listen_addrs,
     })
+}
+
+#[tauri::command]
+pub async fn get_network_info(state: State<'_, P2pState>) -> Result<NetworkInfo, String> {
+    let inner = state.inner.lock().map_err(|error| error.to_string())?;
+    let keypair = inner
+        .keypair
+        .as_ref()
+        .ok_or_else(|| "P2P node has not started".to_string())?;
+    Ok(NetworkInfo {
+        peer_id: inner.local_peer_id.clone().unwrap_or_default(),
+        agent_id: agent_id(&keypair.public()),
+        protocol: ATP_PROTOCOL.to_string(),
+        listen_addrs: inner.listen_addrs.clone(),
+        relay_configured: inner.relay_configured,
+        connected_peers: inner.peers.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn connect_peer(state: State<'_, P2pState>, address: String) -> Result<(), String> {
+    let address = address
+        .parse::<libp2p::Multiaddr>()
+        .map_err(|error| format!("invalid libp2p multiaddress: {error}"))?;
+    let (_, sender) = node_runtime(&state)?;
+    sender
+        .send(SwarmCommand::Dial(address))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -237,6 +279,143 @@ pub async fn accept_offer(
             job_id: job.id.clone(),
             worker_agent_id,
             contract_hash,
+        })
+        .map_err(|error| error.to_string())?,
+    )?;
+
+    store.commit_envelope(&envelope, &requester_agent_id, None)?;
+    sender
+        .send(SwarmCommand::SendEnvelope(envelope))
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("atp:jobs_changed", ());
+    store.get_job(&job_id)
+}
+
+#[tauri::command]
+pub async fn route_audit(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    job_id: String,
+) -> Result<AuditJob, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let requester_agent_id = agent_id(&keypair.public());
+    let job = store.get_job(&job_id)?;
+    if job.requester_agent_id != requester_agent_id {
+        return Err("only the requester can issue the audit context lease".to_string());
+    }
+    if job.status != "negotiated" {
+        return Err("the audit must have an accepted worker before it can be routed".to_string());
+    }
+    let worker_agent_id = job
+        .worker_agent_id
+        .clone()
+        .ok_or_else(|| "accepted audit has no worker".to_string())?;
+    let contract_hash = job
+        .contract_hash
+        .clone()
+        .ok_or_else(|| "accepted audit has no contract hash".to_string())?;
+    let contract = store.get_contract(&job.transaction_id)?;
+    let leases = create_repository_leases(&keypair, &contract)?;
+    let envelope = create_signed_envelope(
+        &keypair,
+        AtpVerb::Route,
+        job.transaction_id.clone(),
+        Some(worker_agent_id),
+        Some(job.last_event_hash.clone()),
+        serde_json::to_value(AuditEventBody::RouteAudit {
+            job_id: job.id.clone(),
+            contract_hash,
+            leases,
+        })
+        .map_err(|error| error.to_string())?,
+    )?;
+
+    store.commit_envelope(&envelope, &requester_agent_id, None)?;
+    sender
+        .send(SwarmCommand::SendEnvelope(envelope))
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("atp:jobs_changed", ());
+    store.get_job(&job_id)
+}
+
+#[tauri::command]
+pub async fn run_audit(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    job_id: String,
+) -> Result<AuditJob, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let worker_agent_id = agent_id(&keypair.public());
+    let job = store.get_job(&job_id)?;
+    if job.worker_agent_id.as_deref() != Some(worker_agent_id.as_str()) {
+        return Err("only the selected worker can execute this audit".to_string());
+    }
+    if job.status != "routed" {
+        return Err("the requester must issue an active context lease first".to_string());
+    }
+    let contract_hash = job
+        .contract_hash
+        .clone()
+        .ok_or_else(|| "routed audit has no contract hash".to_string())?;
+    let contract = store.get_contract(&job.transaction_id)?;
+    let leases = store.get_leases(&job.transaction_id)?;
+    let result =
+        execute_repository_audit(&keypair, &contract, &contract_hash, &leases, &data_dir()?)
+            .await?;
+    store.save_execution_result(&result)?;
+    sender
+        .send(SwarmCommand::SendExecutionResult {
+            result,
+            audience: contract.requester_agent_id,
+        })
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("atp:jobs_changed", ());
+    store.get_job(&job_id)
+}
+
+#[tauri::command]
+pub async fn approve_result(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    job_id: String,
+) -> Result<AuditJob, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let requester_agent_id = agent_id(&keypair.public());
+    let job = store.get_job(&job_id)?;
+    if job.requester_agent_id != requester_agent_id {
+        return Err("only the requester can approve the worker result".to_string());
+    }
+    if job.status != "routed" {
+        return Err("the audit result can only settle from the routed state".to_string());
+    }
+    let worker_agent_id = job
+        .worker_agent_id
+        .clone()
+        .ok_or_else(|| "routed audit has no worker".to_string())?;
+    let contract_hash = job
+        .contract_hash
+        .clone()
+        .ok_or_else(|| "routed audit has no contract hash".to_string())?;
+    let result = store.get_execution_result(&job.transaction_id)?;
+    let approved = ReceiptApproval {
+        by: requester_agent_id.clone(),
+        method: "requester-verified-result".to_string(),
+        time: now_rfc3339(),
+    };
+    let envelope = create_signed_envelope(
+        &keypair,
+        AtpVerb::Settle,
+        job.transaction_id.clone(),
+        Some(worker_agent_id),
+        Some(job.last_event_hash.clone()),
+        serde_json::to_value(AuditEventBody::SettlementApproved {
+            job_id: job.id.clone(),
+            contract_hash,
+            result_hash: result.result_hash,
+            approved,
         })
         .map_err(|error| error.to_string())?,
     )?;

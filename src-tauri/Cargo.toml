@@ -4,6 +4,7 @@ version = "0.1.0-dev"
 description = "CYPHES v0.1 desktop shell for the autonomous internet"
 authors = ["CYPHES-ATP"]
 edition = "2021"
+default-run = "cyphes-desktop"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,14 +22,18 @@ tauri-build = { version = "2", features = [] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
+flate2 = "1"
 futures = "0.3"
-libp2p = { version = "0.56", features = ["cbor", "dns", "gossipsub", "macros", "mdns", "noise", "request-response", "tcp", "tokio", "websocket", "yamux"] }
+libp2p = { version = "0.56", features = ["cbor", "dcutr", "dns", "identify", "macros", "mdns", "noise", "ping", "quic", "relay", "request-response", "tcp", "tokio", "websocket", "yamux"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.2"
 serde_json = "1"
 sha2 = "0.10"
+tar = "0.4"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
+walkdir = "2"

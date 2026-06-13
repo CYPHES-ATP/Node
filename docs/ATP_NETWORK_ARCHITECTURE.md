@@ -1,6 +1,6 @@
 # CYPHES Node: ATP Network Architecture
 
-Status: target architecture with the audit ATP-L0 vertical slice in progress
+Status: ATP-L1 repository-audit slice implemented; production network remains
 
 Specification basis: ATP, dated May 21, 2026
 
@@ -28,29 +28,29 @@ until an ATP-L3 settlement adapter is active.
 
 ## Current State
 
-The current Node implements the honest durable baseline and a narrow ATP-L0
-vertical slice for repository-audit discovery and bilateral negotiation. It is
-not yet fully ATP-L0 conforming because routing, execution, settlement,
-attestation, receipt production, and deterministic cross-implementation error
-fixtures remain incomplete.
+The current Node completes a narrow ATP-L1 repository-audit transaction and
+uses L2-style signed context leases. A real pinned-repository receipt bundle is
+committed in `protocol/fixtures/` and verifies independently with Artifact Two.
+The remaining work is production hardening, broader ATP terminal paths, public
+infrastructure, asynchronous discovery, and real settlement.
 
 | Area | Current implementation | ATP requirement |
 | --- | --- | --- |
 | Identity | Persistent libp2p Ed25519 key and signed ATP objects | Owner binding and key rotation |
-| Transport | TCP/WebSocket, Noise, Yamux | Any transport that preserves ATP semantics |
+| Transport | TCP, WebSocket, QUIC, Noise, Yamux, Identify, Ping, Relay v2, DCUtR | Public operations and reachability policy |
 | Discovery | mDNS on one LAN | Signed cards, endpoints, policy, capability, freshness |
-| Work posting | Signed ATP `DISCOVER` envelope | Public internet reachability and richer intent policy |
-| Acceptance | Worker offer plus requester selection as signed `NEGOTIATE` events | Full contract schema and policy |
-| Routing | None | `ROUTE` work session plus encrypted descriptors and leases |
-| Execution | None | Worker runtime operating under contract and lease policy |
-| Leases | None | Signed, scoped, time-bound, attenuating authority |
-| Settlement | Display-only USDC term | Committed settlement condition and proof |
-| Receipt | None in Node | Signed Proof of Cognition receipt |
-| Verification | External Artifact Two prototype | Integrated verification before approval or release |
+| Work posting | Signed ATP `DISCOVER` envelope | Public indexing and richer intent policy |
+| Acceptance | Typed contract offer and hash-bound requester selection | Counters and rejection paths |
+| Routing | `ROUTE` with requester-signed repository and artifact leases | Encrypted private descriptors |
+| Execution | Deterministic bounded worker; no repository code execution | Hardened OS sandbox and richer analyzers |
+| Leases | Signed, scoped, time-bound, operation-bound authority | Attenuation and live revocation |
+| Settlement | Verified zero-value requester approval | Funded adapter, refund, dispute |
+| Receipt | Worker-signed Proof of Cognition and portable bundle | More terminal profiles and selective disclosure |
+| Verification | Artifact Two accepts the committed real fixture | Stable library/CLI integration in release builds |
 | Event log | SQLite append-only hash-linked ATP event chain | Receipt and artifact roots |
 | Replay defense | Persistent nonce, idempotency, signature, and `prev` checks | Shared deterministic fixtures |
-| Persistence | SQLite jobs, envelopes, state, and delivery receipts | Artifact and execution stores |
-| Internet reachability | None | Bootstrap, relay, NAT detection, and direct upgrade |
+| Persistence | SQLite events, jobs, contracts, leases, results, receipts, delivery ACKs | Offline outbox and peer store |
+| Internet reachability | Deployable relay, reservation client, manual circuit dialing | Hosted redundant relays, rendezvous, AutoNAT |
 
 Useful pieces should remain:
 
@@ -595,9 +595,23 @@ If future work can open a pull request, do not send a general GitHub token to
 the worker. Use a requester-controlled GitHub App or capability proxy that
 exposes only the repository, branch, and operations granted by the lease.
 
-### EXECUTE
+### Worker Activity After ROUTE
 
-The worker runs in an isolated session:
+ATP v0.3 does not require an `EXECUTE` wire envelope in this profile. The
+worker's activity is authorized by `ROUTE`, returned as a signed result, and
+approved through `SETTLE`.
+
+The current worker:
+
+- downloads the exact GitHub codeload archive;
+- rejects oversized archives, path escape, symlinks, and hardlinks;
+- makes the checkout read-only;
+- executes no repository code;
+- reads only through the repository lease;
+- writes only through the artifact lease;
+- deletes the checkout after result production.
+
+Production hardening should run the worker in an isolated session with:
 
 - immutable checkout of the pinned commit,
 - read-only source mount,
@@ -784,7 +798,8 @@ the UI corresponds to a persisted backend fact.
 
 ### Milestone 1: ATP-L0 Core
 
-Implementation status: partial. `DISCOVER` and bilateral `NEGOTIATE` are live.
+Implementation status: complete for the repository-audit success sequence;
+broader terminal paths remain.
 
 - Implement canonical ATP v0.3 schemas.
 - Sign and verify envelopes.
@@ -797,6 +812,10 @@ bad signatures, stale messages, replay, incorrect `prev`, and invalid state.
 
 ### Milestone 2: Internet P2P
 
+Implementation status: partial. Identify, Ping, QUIC, Relay v2, DCUtR, manual
+dialing, a standalone relay, and a reservation smoke test are live. Hosted
+infrastructure, Rendezvous, AutoNAT, and durable retries remain.
+
 - Add Identify, Ping, AutoNAT, Relay v2 client, DCUtR, Rendezvous, QUIC, and
   request-response.
 - Deploy three public bootstrap/rendezvous/relay nodes.
@@ -807,6 +826,9 @@ authenticated direct or relayed connection and exchange acknowledged ATP
 envelopes.
 
 ### Milestone 3: ATP-L1 Repository Audit
+
+Implementation status: complete as a local integration proof and desktop
+command path. A public two-machine staging run remains.
 
 - Publish signed worker cards.
 - Implement signed discovery intents.
@@ -821,6 +843,10 @@ Exit criterion: two independently controlled nodes complete a repository audit
 from discovery through a verified, signed receipt with no shared database.
 
 ### Milestone 4: ATP-L2 Leases
+
+Implementation status: partial. Signed operation, boundary, and TTL enforcement
+plus access evidence are live; sandbox enforcement, attenuation, and revocation
+remain.
 
 - Implement owner-signed leases.
 - Enforce lease boundaries through a worker sandbox and resource proxy.
@@ -879,18 +905,18 @@ ATP.
 
 ## Immediate Build Order
 
-The SQLite migration, signed envelope kernel, event chain, replay checks, and
-commit-before-ACK LAN exchange are now implemented for the audit workflow.
+The signed six-envelope transaction, leases, bounded worker, zero-value
+settlement, Proof of Cognition bundle, Artifact Two verification, relay client,
+and standalone relay are implemented.
 
-The versioned audit contract and receipt profile are now implemented. The next
-implementation slice is:
+The next implementation slice is:
 
-1. emit `ROUTE` with the accepted contract hash and a read-only repository lease,
-2. emit `EXECUTE`, `SETTLE`, and `ATTEST` bodies for that profile,
-3. integrate Artifact Two verification against one real repository audit,
-4. add an isolated worker runtime and bounded GitHub capability,
-5. add public relay, rendezvous, Identify, Ping, AutoNAT, and direct upgrade,
-6. add a settlement adapter only after zero-value completion verifies end to end.
+1. deploy redundant public relays and run the full flow across two networks;
+2. add rendezvous and signed `ADVERTISE` capability cards;
+3. harden the worker inside an OS-enforced sandbox;
+4. persist peer addresses and reliable audience-specific retries;
+5. implement reject, revoke, cancellation, expiry, and dispute paths;
+6. add real settlement only after the staging network is repeatable.
 
 That keeps the product centered on one faithful ATP work order instead of
 expanding the marketplace surface ahead of protocol truth.

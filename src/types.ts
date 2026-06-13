@@ -37,6 +37,9 @@ export interface AuditJob {
   updatedAt: number;
   lastEventHash: string;
   contractHash?: string;
+  resultHash?: string;
+  receiptHash?: string;
+  bundlePath?: string;
   acknowledgedPeers: number;
   origin: "local" | "remote";
 }
@@ -66,4 +69,13 @@ export interface AtpAck {
 export interface BackendPeerInfo {
   peer_id: string;
   last_seen: number;
+}
+
+export interface NetworkInfo {
+  peer_id: string;
+  agent_id: string;
+  protocol: string;
+  listen_addrs: string[];
+  relay_configured: boolean;
+  connected_peers: number;
 }

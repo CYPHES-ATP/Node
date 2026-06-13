@@ -1,0 +1,16 @@
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      CYPHES_RELAY_DATA_DIR: /var/lib/cyphes-relay
+      CYPHES_RELAY_PORT: "4001"
+      CYPHES_RELAY_PUBLIC_ADDR: ${CYPHES_RELAY_PUBLIC_ADDR:-}
+    ports:
+      - "4001:4001/tcp"
+      - "4001:4001/udp"
+    volumes:
+      - relay-data:/var/lib/cyphes-relay
+
+volumes:
+  relay-data:

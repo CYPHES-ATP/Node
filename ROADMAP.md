@@ -1,132 +1,97 @@
 # CYPHES Roadmap
 
-The roadmap is organized around one end-to-end ATP work order: a requester
-contracts an independent worker to audit a public GitHub repository and
-receives a verifiable result.
+The roadmap is organized around one verifiable ATP work order rather than
+marketplace breadth.
 
-This is an engineering roadmap, not a promise of release dates.
+## Completed Developer-Preview Slice
 
-## Status Legend
+- Honest native UI with no simulated peers, work, reputation, or payment.
+- Persistent Ed25519 identity and SQLite ATP event chain.
+- RFC 8785 canonical envelopes, signatures, replay defense, expiry, and
+  commit-before-ACK delivery.
+- `DISCOVER`, bilateral `NEGOTIATE`, `ROUTE`, zero-value `SETTLE`, and
+  worker `ATTEST`.
+- Public GitHub requests pinned to exact commits.
+- Typed audit contract and canonical contract hash.
+- Requester-signed repository-read and artifact-write leases.
+- Deterministic worker that executes no repository code.
+- Signed worker result and five hashed artifacts.
+- Portable Proof of Cognition bundle.
+- Independent Artifact Two verification of the committed real fixture.
+- TCP, WebSocket, QUIC, mDNS, Identify, Ping, Relay v2, and DCUtR.
+- Standalone Docker-ready relay and circuit-reservation smoke test.
 
-| Status | Meaning |
-| --- | --- |
-| Complete | Implemented and verified in the current repository |
-| Partial | A narrow vertical slice exists; important protocol work remains |
-| Planned | Architecture is documented but implementation has not started |
-
-## Milestones
-
-### 0. Honest Desktop Baseline
-
-Status: **Complete**
-
-- Remove simulated agents, activity, reputation, and responses.
-- Make the Rust backend authoritative for transaction state.
-- Persist identity and ATP state outside the WebView.
-- Display whether state is local, received, or peer-acknowledged.
-- Keep compensation visibly disconnected from a payment rail.
-
-### 1. ATP Discovery and Negotiation
+## 1. Staging Network
 
 Status: **Partial**
 
-Implemented:
+- Deploy at least two stable public relay endpoints.
+- Add DNS endpoint rotation and health telemetry.
+- Add rendezvous namespaces and signed capability cards.
+- Persist known peer addresses and retry queued audience-specific delivery.
+- Run the full transaction across two machines on different consumer networks.
+- Add AutoNAT and verify direct DCUtR upgrades.
 
-- canonical ATP v0.3 envelopes;
-- Ed25519 signing and verification;
-- hash-linked events;
-- nonce and idempotency replay protection;
-- `DISCOVER`;
-- worker `NEGOTIATE` offer;
-- requester `NEGOTIATE` selection;
-- repository requests pinned to an exact commit SHA;
-- typed zero-value repository-audit contract;
-- canonical contract hash persisted and accepted by the requester;
-- JSON Schemas and canonical contract/receipt fixtures;
-- commit-before-ACK LAN delivery.
+## 2. Worker Hardening
 
-Remaining:
+Status: **Partial**
 
-- counters and rejection paths;
-- expiry and clock-skew policy;
-- deterministic reason-code registry;
-- cross-implementation fixtures;
-- key rotation and owner identity model.
+- Move checkout and scanners into a hardened process, container, or VM.
+- Enforce CPU, memory, disk, process, and wall-clock limits.
+- Deny network after source fetch at the operating-system boundary.
+- Add language-specific static analysis without executing untrusted build
+  scripts.
+- Add cancellation, timeout, live revocation, and partial-failure receipts.
 
-### 2. Internet-Reachable P2P
+## 3. ATP Conformance
 
-Status: **Planned**
+Status: **Partial**
 
-- Identify and Ping.
-- Configurable bootstrap nodes.
-- Rendezvous discovery.
-- Relay v2 client and relay operations.
-- AutoNAT and DCUtR.
-- Direct connection upgrade where possible.
-- Offline outbox retry and peer address persistence.
+- Signed `ADVERTISE` cards.
+- Counteroffer, reject, revoke, cancel, expire, and dispute paths.
+- Complete reason-code registry and cross-language signed vectors.
+- Clock-skew policy, key rotation, owner binding, and recovery.
+- Lease attenuation, subleases, and revocation propagation.
+- More than one valid terminal sequence in Artifact Two.
 
-### 3. Routed Audit Work Session
+## 4. Reliable Market
 
 Status: **Planned**
 
-- ATP `ROUTE` event.
-- Signed, bounded repository capability.
-- Expiring and attenuating context leases.
-- Isolated worker process.
-- Repository clone and deterministic input snapshot.
-- Cancellation and revocation handling.
+- Encrypted store-and-forward mailbox.
+- Replicated public work-order index with signed expiry.
+- Rate limits, block lists, abuse reporting, and resource admission policy.
+- Selective receipt disclosure and reputation derived from verified evidence.
 
-### 4. Execution and Receipt Bundle
+## 5. Settlement
 
 Status: **Planned**
 
-- ATP `EXECUTE` event stream.
-- Audit worker output contract.
-- Artifact hashing and content-addressed storage.
-- Proof of Cognition receipt bundle.
-- Deterministic failure and partial-completion receipts.
+- Choose one low-cost reference chain behind an adapter.
+- Bind wallet owner and ATP Ed25519 identity.
+- Prove escrow or payer authorization before costly work.
+- Release, refund, timeout, and dispute against `contractHash`, `eventRoot`, and
+  `receiptHash`.
+- Keep ATP envelopes, leases, artifacts, and private context off-chain.
 
-### 5. Independent Verification
-
-Status: **Planned**
-
-- Integrate Artifact Two as an independent verifier.
-- Verify signatures, chain continuity, replay, leases, and artifact roots.
-- Export portable receipt bundles.
-- Show verification reason codes in the desktop client.
-- Add tamper and cross-node conformance tests.
-
-### 6. Settlement and Attestation
+## 6. Distribution
 
 Status: **Planned**
 
-- ATP `SETTLE` and `ATTEST`.
-- Zero-value settlement adapter first.
-- Explicit requester approval.
-- Dispute and rejection paths.
-- Optional escrow adapter after the zero-value path verifies end to end.
-- Optional sparse blockchain commitments for public notary and settlement.
+- Signed and notarized macOS build.
+- Linux packages and Windows installer.
+- Reproducible build evidence.
+- Automatic update and rollback policy.
+- Operational security and incident runbooks.
 
-### 7. Distribution
+## Best Contributions Now
 
-Status: **Planned**
+- Reproduce the relay-backed two-node transaction on Linux or Windows.
+- Harden the worker boundary without changing the receipt profile.
+- Add deterministic negative fixtures for invalid leases and worker results.
+- Add peer persistence and reliable resend.
+- Implement signed `ADVERTISE` cards and rendezvous discovery.
+- Improve accessibility and receipt inspection in the desktop client.
 
-- Signed macOS release.
-- Linux verification and packages.
-- Windows verification and installer.
-- Reproducible build documentation.
-- Automatic update policy.
-- Public bootstrap and relay availability.
-
-## Best First Contributions
-
-- Add canonical ATP fixtures shared across Rust and another language.
-- Add deterministic reason codes for current verification failures.
-- Reproduce the LAN two-node test on Linux.
-- Add Identify and Ping without changing ATP semantics.
-- Add restart and disconnect tests around queued delivery.
-- Improve accessibility of the desktop workflow.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for repository rules and
-[docs/ATP_IMPLEMENTATION_STATUS.md](docs/ATP_IMPLEMENTATION_STATUS.md) for the
-protocol-level matrix.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/ATP_IMPLEMENTATION_STATUS.md](docs/ATP_IMPLEMENTATION_STATUS.md).

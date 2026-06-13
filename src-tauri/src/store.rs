@@ -4,12 +4,21 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use base64::Engine as _;
+use chrono::DateTime;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    atp::{event_hash, now_rfc3339, transition, verify_envelope, AtpAck, AtpEnvelope, AtpVerb},
-    audit_profile::{contract_hash, validate_contract, AuditContract, RepositoryTarget},
+    atp::{
+        event_hash, now_rfc3339, transition, verify_envelope, AtpAck, AtpEnvelope, AtpVerb,
+        ATP_GENESIS_HASH,
+    },
+    audit_profile::{
+        contract_hash, receipt_signature_value, validate_contract, validate_receipt,
+        validate_receipt_parties, AuditContract, AuditReceipt, ReceiptApproval, RepositoryTarget,
+    },
+    worker::{verify_execution_result, ContextLease, SignedExecutionResult},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,12 +64,19 @@ pub struct AuditJob {
     pub updated_at: u64,
     pub last_event_hash: String,
     pub contract_hash: Option<String>,
+    pub result_hash: Option<String>,
+    pub receipt_hash: Option<String>,
+    pub bundle_path: Option<String>,
     pub acknowledged_peers: u64,
     pub origin: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(
+    tag = "action",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum AuditEventBody {
     Announce {
         job: AuditJobPayload,
@@ -74,6 +90,17 @@ pub enum AuditEventBody {
         job_id: String,
         worker_agent_id: String,
         contract_hash: String,
+    },
+    RouteAudit {
+        job_id: String,
+        contract_hash: String,
+        leases: Vec<ContextLease>,
+    },
+    SettlementApproved {
+        job_id: String,
+        contract_hash: String,
+        result_hash: String,
+        approved: ReceiptApproval,
     },
 }
 
@@ -100,6 +127,7 @@ pub struct TransactionContext {
     pub compensation: Option<String>,
     pub currency: Option<String>,
     pub contract_hash: Option<String>,
+    pub result_hash: Option<String>,
 }
 
 #[derive(Clone)]
@@ -159,6 +187,12 @@ impl AtpStore {
                         updated_at, last_event_hash,
                         (SELECT contract_hash FROM audit_contracts c
                          WHERE c.transaction_id = audit_jobs.transaction_id),
+                        (SELECT result_hash FROM audit_execution_results r
+                         WHERE r.transaction_id = audit_jobs.transaction_id),
+                        (SELECT receipt_hash FROM audit_receipts r
+                         WHERE r.transaction_id = audit_jobs.transaction_id),
+                        (SELECT bundle_path FROM audit_receipts r
+                         WHERE r.transaction_id = audit_jobs.transaction_id),
                         origin,
                         (SELECT COUNT(*) FROM deliveries d
                          WHERE d.transaction_id = audit_jobs.transaction_id
@@ -184,6 +218,12 @@ impl AtpStore {
                         updated_at, last_event_hash,
                         (SELECT contract_hash FROM audit_contracts c
                          WHERE c.transaction_id = audit_jobs.transaction_id),
+                        (SELECT result_hash FROM audit_execution_results r
+                         WHERE r.transaction_id = audit_jobs.transaction_id),
+                        (SELECT receipt_hash FROM audit_receipts r
+                         WHERE r.transaction_id = audit_jobs.transaction_id),
+                        (SELECT bundle_path FROM audit_receipts r
+                         WHERE r.transaction_id = audit_jobs.transaction_id),
                         origin,
                         (SELECT COUNT(*) FROM deliveries d
                          WHERE d.transaction_id = audit_jobs.transaction_id
@@ -194,6 +234,156 @@ impl AtpStore {
                 row_to_job,
             )
             .map_err(|error| error.to_string())
+    }
+
+    pub fn get_contract(&self, transaction_id: &str) -> Result<AuditContract, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        contract_in_connection(&connection, transaction_id)
+    }
+
+    pub fn get_leases(&self, transaction_id: &str) -> Result<Vec<ContextLease>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        leases_in_connection(&connection, transaction_id)
+    }
+
+    pub fn save_execution_result(&self, result: &SignedExecutionResult) -> Result<(), String> {
+        result.verify()?;
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let contract = contract_in_connection(&connection, &result.transaction_id)?;
+        let leases = leases_in_connection(&connection, &result.transaction_id)?;
+        verify_execution_result(result, &contract, &leases)?;
+        connection
+            .execute(
+                "INSERT INTO audit_execution_results
+                    (transaction_id, result_hash, result_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(transaction_id) DO UPDATE SET
+                    result_hash = excluded.result_hash,
+                    result_json = excluded.result_json,
+                    created_at = excluded.created_at",
+                params![
+                    result.transaction_id,
+                    result.result_hash,
+                    serde_json::to_string(result).map_err(|error| error.to_string())?,
+                    now_millis() as i64,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_execution_result(
+        &self,
+        transaction_id: &str,
+    ) -> Result<SignedExecutionResult, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        execution_result_in_connection(&connection, transaction_id)
+    }
+
+    pub fn get_receipt(&self, transaction_id: &str) -> Result<AuditReceipt, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let value = connection
+            .query_row(
+                "SELECT receipt_json FROM audit_receipts WHERE transaction_id = ?1",
+                params![transaction_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        serde_json::from_str(&value).map_err(|error| error.to_string())
+    }
+
+    pub fn build_worker_receipt(
+        &self,
+        transaction_id: &str,
+        event_root: &str,
+        approved: ReceiptApproval,
+        keypair: &libp2p::identity::Keypair,
+    ) -> Result<AuditReceipt, String> {
+        let contract = self.get_contract(transaction_id)?;
+        if crate::atp::agent_id(&keypair.public()) != contract.worker_agent_id {
+            return Err("only the selected worker can sign the receipt".to_string());
+        }
+        let result = self.get_execution_result(transaction_id)?;
+        let leases = self.get_leases(transaction_id)?;
+        verify_execution_result(&result, &contract, &leases)?;
+        if approved.by != contract.requester_agent_id {
+            return Err("receipt approval is not from the requester".to_string());
+        }
+
+        let mut receipt = AuditReceipt {
+            receipt_type: "ProofOfCognition".to_string(),
+            atp: crate::atp::ATP_VERSION.to_string(),
+            profile: crate::audit_profile::AUDIT_RECEIPT_PROFILE.to_string(),
+            profile_version: crate::audit_profile::AUDIT_PROFILE_VERSION.to_string(),
+            transaction_id: transaction_id.to_string(),
+            requested: crate::audit_profile::ReceiptRequested {
+                contract_hash: contract_hash(&contract)?,
+                repository: contract.repository.clone(),
+                scope: contract.scope.clone(),
+            },
+            accessed: crate::audit_profile::ReceiptAccessed {
+                leases: result.lease_ids.clone(),
+                resources: vec![format!(
+                    "github:{}@{}",
+                    contract.repository.full_name, contract.repository.commit_sha
+                )],
+            },
+            changed: crate::audit_profile::ReceiptChanged {
+                artifacts: result
+                    .artifacts
+                    .iter()
+                    .map(|artifact| artifact.receipt_record())
+                    .collect(),
+                external_state: "none".to_string(),
+            },
+            approved,
+            paid: contract.settlement.clone(),
+            event_root: event_root.to_string(),
+            receipt_hash: String::new(),
+            signatures: Vec::new(),
+        };
+        receipt.receipt_hash = crate::audit_profile::receipt_hash(&receipt)?;
+        let signature = crate::atp::sign_canonical(keypair, &receipt_signature_value(&receipt)?)?;
+        receipt
+            .signatures
+            .push(crate::audit_profile::ReceiptSignature {
+                signature_type: "Ed25519".to_string(),
+                signer: contract.worker_agent_id.clone(),
+                kid: format!("{}#identity", contract.worker_agent_id),
+                signature,
+            });
+        validate_receipt(&receipt).map_err(|error| error.to_string())?;
+        validate_receipt_parties(&receipt, &contract).map_err(|error| error.to_string())?;
+        Ok(receipt)
+    }
+
+    pub fn set_bundle_path(&self, transaction_id: &str, path: &str) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "UPDATE audit_receipts SET bundle_path = ?2 WHERE transaction_id = ?1",
+                params![transaction_id, path],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn transaction_envelopes(&self, transaction_id: &str) -> Result<Vec<AtpEnvelope>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT envelope_json FROM atp_events
+                 WHERE transaction_id = ?1 ORDER BY sequence",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![transaction_id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let value = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&value).map_err(|error| error.to_string())
+        })
+        .collect()
     }
 
     pub fn commit_envelope(
@@ -242,14 +432,31 @@ impl AtpStore {
 
         ensure_not_replayed(&transaction, envelope)?;
         let current = transaction_context_in(&transaction, &envelope.transaction_id)?;
-        if envelope.prev != current.last_event_hash {
+        let expected_prev = current
+            .last_event_hash
+            .clone()
+            .unwrap_or_else(|| ATP_GENESIS_HASH.to_string());
+        if envelope.prev.as_deref() != Some(expected_prev.as_str()) {
             return Err("ATP event does not extend the committed transaction head".to_string());
         }
 
         let next_state = transition(current.state.as_deref(), envelope.verb)?;
-        let body: AuditEventBody =
-            serde_json::from_value(envelope.body.clone()).map_err(|error| error.to_string())?;
-        validate_body(&body, envelope, &current)?;
+        let audit_body = if envelope.verb == AtpVerb::Attest {
+            None
+        } else {
+            let body: AuditEventBody =
+                serde_json::from_value(envelope.body.clone()).map_err(|error| error.to_string())?;
+            validate_body(&transaction, &body, envelope, &current)?;
+            Some(body)
+        };
+        let receipt = if envelope.verb == AtpVerb::Attest {
+            let receipt: AuditReceipt =
+                serde_json::from_value(envelope.body.clone()).map_err(|error| error.to_string())?;
+            validate_attestation(&transaction, &receipt, envelope, &current)?;
+            Some(receipt)
+        } else {
+            None
+        };
         let sequence = next_sequence(&transaction, &envelope.transaction_id)?;
         let envelope_json = serde_json::to_string(envelope).map_err(|error| error.to_string())?;
 
@@ -287,14 +494,19 @@ impl AtpStore {
             )
             .map_err(|error| error.to_string())?;
 
-        apply_audit_event(
-            &transaction,
-            &body,
-            envelope,
-            &hash,
-            next_state,
-            receiver_agent_id,
-        )?;
+        if let Some(body) = audit_body.as_ref() {
+            apply_audit_event(
+                &transaction,
+                body,
+                envelope,
+                &hash,
+                next_state,
+                receiver_agent_id,
+            )?;
+        }
+        if let Some(receipt) = receipt.as_ref() {
+            apply_attestation(&transaction, receipt, envelope, &hash, next_state)?;
+        }
         transaction.commit().map_err(|error| error.to_string())?;
 
         Ok(AtpAck {
@@ -435,6 +647,28 @@ impl AtpStore {
                     accepted_at INTEGER
                  );
 
+                 CREATE TABLE IF NOT EXISTS audit_leases (
+                    transaction_id TEXT NOT NULL,
+                    lease_id TEXT PRIMARY KEY,
+                    lease_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                 );
+
+                 CREATE TABLE IF NOT EXISTS audit_execution_results (
+                    transaction_id TEXT PRIMARY KEY,
+                    result_hash TEXT NOT NULL UNIQUE,
+                    result_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                 );
+
+                 CREATE TABLE IF NOT EXISTS audit_receipts (
+                    transaction_id TEXT PRIMARY KEY,
+                    receipt_hash TEXT NOT NULL UNIQUE,
+                    receipt_json TEXT NOT NULL,
+                    bundle_path TEXT,
+                    created_at INTEGER NOT NULL
+                 );
+
                  CREATE TABLE IF NOT EXISTS deliveries (
                     event_hash TEXT NOT NULL,
                     transaction_id TEXT NOT NULL,
@@ -510,7 +744,9 @@ fn transaction_context_in(
             "SELECT status, last_event_hash, requester_agent_id, worker_agent_id,
                     repository_json, scope_json, compensation, currency,
                     (SELECT contract_hash FROM audit_contracts c
-                     WHERE c.transaction_id = audit_jobs.transaction_id)
+                     WHERE c.transaction_id = audit_jobs.transaction_id),
+                    (SELECT result_hash FROM audit_execution_results r
+                     WHERE r.transaction_id = audit_jobs.transaction_id)
              FROM audit_jobs
              WHERE transaction_id = ?1",
             params![transaction_id],
@@ -541,6 +777,7 @@ fn transaction_context_in(
                     compensation: Some(row.get(6)?),
                     currency: Some(row.get(7)?),
                     contract_hash: row.get(8)?,
+                    result_hash: row.get(9)?,
                 })
             },
         )
@@ -556,6 +793,7 @@ fn transaction_context_in(
                 compensation: None,
                 currency: None,
                 contract_hash: None,
+                result_hash: None,
             })
         })
         .map_err(|error| error.to_string())
@@ -572,6 +810,7 @@ fn next_sequence(transaction: &Transaction<'_>, transaction_id: &str) -> Result<
 }
 
 fn validate_body(
+    transaction: &Transaction<'_>,
     body: &AuditEventBody,
     envelope: &AtpEnvelope,
     current: &TransactionContext,
@@ -687,8 +926,228 @@ fn validate_body(
                 );
             }
         }
+        AuditEventBody::RouteAudit {
+            job_id,
+            contract_hash,
+            leases,
+        } => {
+            if envelope.verb != AtpVerb::Route || job_id != &envelope.transaction_id {
+                return Err("Audit route must extend the negotiated transaction".to_string());
+            }
+            if current.requester_agent_id.as_deref() != Some(envelope.issuer.as_str()) {
+                return Err("Only the requester can route the accepted audit".to_string());
+            }
+            if envelope.audience.as_deref() != current.worker_agent_id.as_deref() {
+                return Err("ATP_BAD_STATE: AUDIT_ROUTE_AUDIENCE_MISMATCH".to_string());
+            }
+            if current.contract_hash.as_deref() != Some(contract_hash.as_str()) {
+                return Err("ATP_BAD_STATE: AUDIT_ROUTE_CONTRACT_MISMATCH".to_string());
+            }
+            let contract = contract_in(transaction, &envelope.transaction_id)?;
+            let requester_key = envelope_public_key(envelope)?;
+            crate::worker::verify_leases(leases, &requester_key, &contract)
+                .map_err(|reason| format!("ATP_LEASE_DENIED: {reason}"))?;
+        }
+        AuditEventBody::SettlementApproved {
+            job_id,
+            contract_hash,
+            result_hash,
+            approved,
+        } => {
+            if envelope.verb != AtpVerb::Settle || job_id != &envelope.transaction_id {
+                return Err("Audit settlement must extend the routed transaction".to_string());
+            }
+            if current.requester_agent_id.as_deref() != Some(envelope.issuer.as_str())
+                || approved.by != envelope.issuer
+                || approved.method != "requester-verified-result"
+            {
+                return Err("Only the requester can approve the verified result".to_string());
+            }
+            if envelope.audience.as_deref() != current.worker_agent_id.as_deref()
+                || current.contract_hash.as_deref() != Some(contract_hash.as_str())
+                || current.result_hash.as_deref() != Some(result_hash.as_str())
+            {
+                return Err("ATP_BAD_STATE: AUDIT_SETTLEMENT_BINDING_MISMATCH".to_string());
+            }
+            DateTime::parse_from_rfc3339(&approved.time)
+                .map_err(|_| "Audit approval time must be RFC3339".to_string())?;
+            let contract = contract_in(transaction, &envelope.transaction_id)?;
+            let result = execution_result_in(transaction, &envelope.transaction_id)?;
+            let leases = leases_in(transaction, &envelope.transaction_id)?;
+            verify_execution_result(&result, &contract, &leases)
+                .map_err(|reason| format!("ATP_PROOF_UNSATISFIED: {reason}"))?;
+        }
     }
     Ok(())
+}
+
+fn validate_attestation(
+    transaction: &Transaction<'_>,
+    receipt: &AuditReceipt,
+    envelope: &AtpEnvelope,
+    current: &TransactionContext,
+) -> Result<(), String> {
+    validate_receipt(receipt).map_err(|error| error.to_string())?;
+    let contract = contract_in(transaction, &envelope.transaction_id)?;
+    validate_receipt_parties(receipt, &contract).map_err(|error| error.to_string())?;
+    if envelope.issuer != contract.worker_agent_id
+        || envelope.audience.as_deref() != Some(contract.requester_agent_id.as_str())
+        || receipt.event_root != current.last_event_hash.as_deref().unwrap_or_default()
+    {
+        return Err("ATP_PROOF_UNSATISFIED: AUDIT_RECEIPT_EVENT_BINDING_INVALID".to_string());
+    }
+    let result = execution_result_in(transaction, &envelope.transaction_id)?;
+    let public_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&result.public_key_base64_url)
+        .map_err(|_| "worker receipt key is not valid base64url".to_string())?;
+    let public_key = crate::atp::public_key_from_raw_ed25519(&public_bytes)?;
+    let worker_signature = receipt
+        .signatures
+        .iter()
+        .find(|signature| signature.signer == contract.worker_agent_id)
+        .ok_or_else(|| "worker receipt signature missing".to_string())?;
+    crate::atp::verify_canonical(
+        &public_key,
+        &receipt_signature_value(receipt)?,
+        &worker_signature.signature,
+    )?;
+    Ok(())
+}
+
+fn apply_attestation(
+    transaction: &Transaction<'_>,
+    receipt: &AuditReceipt,
+    envelope: &AtpEnvelope,
+    hash: &str,
+    next_state: &str,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "INSERT INTO audit_receipts
+                (transaction_id, receipt_hash, receipt_json, bundle_path, created_at)
+             VALUES (?1, ?2, ?3, NULL, ?4)
+             ON CONFLICT(transaction_id) DO UPDATE SET
+                receipt_hash = excluded.receipt_hash,
+                receipt_json = excluded.receipt_json,
+                created_at = excluded.created_at",
+            params![
+                envelope.transaction_id,
+                receipt.receipt_hash,
+                serde_json::to_string(receipt).map_err(|error| error.to_string())?,
+                now_millis() as i64,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    update_job_state(transaction, envelope, hash, next_state)
+}
+
+fn envelope_public_key(envelope: &AtpEnvelope) -> Result<libp2p::identity::PublicKey, String> {
+    use base64::Engine as _;
+    let proof = envelope
+        .proofs
+        .first()
+        .ok_or_else(|| "ATP envelope proof missing".to_string())?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&proof.public_key)
+        .map_err(|_| "ATP proof public key is not valid base64url".to_string())?;
+    libp2p::identity::PublicKey::try_decode_protobuf(&bytes)
+        .map_err(|_| "ATP proof public key is invalid".to_string())
+}
+
+fn contract_in(
+    transaction: &Transaction<'_>,
+    transaction_id: &str,
+) -> Result<AuditContract, String> {
+    let json = transaction
+        .query_row(
+            "SELECT contract_json FROM audit_contracts WHERE transaction_id = ?1",
+            params![transaction_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn execution_result_in(
+    transaction: &Transaction<'_>,
+    transaction_id: &str,
+) -> Result<SignedExecutionResult, String> {
+    let json = transaction
+        .query_row(
+            "SELECT result_json FROM audit_execution_results WHERE transaction_id = ?1",
+            params![transaction_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn leases_in(
+    transaction: &Transaction<'_>,
+    transaction_id: &str,
+) -> Result<Vec<ContextLease>, String> {
+    let mut statement = transaction
+        .prepare(
+            "SELECT lease_json FROM audit_leases
+             WHERE transaction_id = ?1 ORDER BY lease_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![transaction_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
+fn contract_in_connection(
+    connection: &Connection,
+    transaction_id: &str,
+) -> Result<AuditContract, String> {
+    let json = connection
+        .query_row(
+            "SELECT contract_json FROM audit_contracts WHERE transaction_id = ?1",
+            params![transaction_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn execution_result_in_connection(
+    connection: &Connection,
+    transaction_id: &str,
+) -> Result<SignedExecutionResult, String> {
+    let json = connection
+        .query_row(
+            "SELECT result_json FROM audit_execution_results WHERE transaction_id = ?1",
+            params![transaction_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn leases_in_connection(
+    connection: &Connection,
+    transaction_id: &str,
+) -> Result<Vec<ContextLease>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT lease_json FROM audit_leases
+             WHERE transaction_id = ?1 ORDER BY lease_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![transaction_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
 }
 
 fn apply_audit_event(
@@ -800,7 +1259,50 @@ fn apply_audit_event(
                 )
                 .map_err(|error| error.to_string())?;
         }
+        AuditEventBody::RouteAudit { leases, .. } => {
+            for lease in leases {
+                transaction
+                    .execute(
+                        "INSERT INTO audit_leases
+                            (transaction_id, lease_id, lease_json, created_at)
+                         VALUES (?1, ?2, ?3, ?4)",
+                        params![
+                            envelope.transaction_id,
+                            lease.id,
+                            serde_json::to_string(lease).map_err(|error| error.to_string())?,
+                            now_millis() as i64,
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            update_job_state(transaction, envelope, hash, next_state)?;
+        }
+        AuditEventBody::SettlementApproved { .. } => {
+            update_job_state(transaction, envelope, hash, next_state)?;
+        }
     }
+    Ok(())
+}
+
+fn update_job_state(
+    transaction: &Transaction<'_>,
+    envelope: &AtpEnvelope,
+    hash: &str,
+    next_state: &str,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "UPDATE audit_jobs
+             SET status = ?2, last_event_hash = ?3, updated_at = ?4
+             WHERE transaction_id = ?1",
+            params![
+                envelope.transaction_id,
+                next_state,
+                hash,
+                now_millis() as i64,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -829,8 +1331,11 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditJob> {
         updated_at: row.get::<_, i64>(11)? as u64,
         last_event_hash: row.get(12)?,
         contract_hash: row.get(13)?,
-        origin: row.get(14)?,
-        acknowledged_peers: row.get::<_, i64>(15)? as u64,
+        result_hash: row.get(14)?,
+        receipt_hash: row.get(15)?,
+        bundle_path: row.get(16)?,
+        origin: row.get(17)?,
+        acknowledged_peers: row.get::<_, i64>(18)? as u64,
     })
 }
 
@@ -838,20 +1343,26 @@ pub fn now_millis() -> u64 {
     chrono::Utc::now().timestamp_millis() as u64
 }
 
-fn database_path() -> Result<PathBuf, String> {
+pub fn data_dir() -> Result<PathBuf, String> {
     if let Ok(data_dir) = std::env::var("CYPHES_DATA_DIR") {
-        return Ok(PathBuf::from(data_dir).join("atp.sqlite3"));
+        return Ok(PathBuf::from(data_dir));
     }
     let home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
-    Ok(home.join(".cyphes").join("atp.sqlite3"))
+    Ok(home.join(".cyphes"))
+}
+
+fn database_path() -> Result<PathBuf, String> {
+    Ok(data_dir()?.join("atp.sqlite3"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry},
-        audit_profile::{contract_hash, AuditContract, RepositoryTarget},
+        atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
+        audit_profile::{contract_hash, AuditContract, ReceiptApproval, RepositoryTarget},
+        bundle::export_receipt_bundle_to,
+        worker::{create_repository_leases, execute_repository_audit},
     };
     use chrono::{Duration, SecondsFormat, Utc};
 
@@ -1040,5 +1551,180 @@ mod tests {
             committed.contract_hash.as_deref(),
             Some(offered_contract_hash.as_str())
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads a pinned GitHub archive and exports a real receipt bundle"]
+    async fn completes_a_real_atp_l1_repository_transaction() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let requester_agent = agent_id(&requester.public());
+        let worker_agent = agent_id(&worker.public());
+        let transaction_id = format!("audit-e2e-{}", uuid::Uuid::new_v4());
+        let repository = RepositorySummary {
+            full_name: "octocat/Hello-World".to_string(),
+            url: "https://github.com/octocat/Hello-World".to_string(),
+            description: Some("ATP-L1 integration fixture".to_string()),
+            language: None,
+            default_branch: "master".to_string(),
+            stars: 0,
+            is_private: false,
+            commit_sha: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d".to_string(),
+        };
+        let scope = vec!["Deterministic repository security posture".to_string()];
+        let discover = create_signed_envelope(
+            &requester,
+            AtpVerb::Discover,
+            transaction_id.clone(),
+            None,
+            None,
+            serde_json::to_value(AuditEventBody::Announce {
+                job: AuditJobPayload {
+                    id: transaction_id.clone(),
+                    repository: repository.clone(),
+                    compensation: "100".to_string(),
+                    currency: "USDC".to_string(),
+                    scope: scope.clone(),
+                    requester_agent_id: requester_agent.clone(),
+                    created_at: now_millis(),
+                },
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let discover_ack = store
+            .commit_envelope(&discover, &requester_agent, None)
+            .unwrap();
+
+        let expiry =
+            (Utc::now() + Duration::minutes(30)).to_rfc3339_opts(SecondsFormat::Millis, true);
+        let contract = AuditContract::repository_audit(
+            transaction_id.clone(),
+            requester_agent.clone(),
+            worker_agent.clone(),
+            RepositoryTarget {
+                full_name: repository.full_name.clone(),
+                url: repository.url.clone(),
+                commit_sha: repository.commit_sha.clone(),
+            },
+            scope,
+            "100".to_string(),
+            expiry.clone(),
+        );
+        let expected_contract_hash = contract_hash(&contract).unwrap();
+        let offer = create_signed_envelope_with_expiry(
+            &worker,
+            AtpVerb::Negotiate,
+            transaction_id.clone(),
+            Some(requester_agent.clone()),
+            Some(discover_ack.event_hash),
+            serde_json::to_value(AuditEventBody::WorkerOffer {
+                job_id: transaction_id.clone(),
+                worker_agent_id: worker_agent.clone(),
+                contract: contract.clone(),
+            })
+            .unwrap(),
+            Some(expiry),
+        )
+        .unwrap();
+        let offer_ack = store
+            .commit_envelope(&offer, &requester_agent, None)
+            .unwrap();
+
+        let selection = create_signed_envelope(
+            &requester,
+            AtpVerb::Negotiate,
+            transaction_id.clone(),
+            Some(worker_agent.clone()),
+            Some(offer_ack.event_hash),
+            serde_json::to_value(AuditEventBody::WorkerSelected {
+                job_id: transaction_id.clone(),
+                worker_agent_id: worker_agent.clone(),
+                contract_hash: expected_contract_hash.clone(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let selection_ack = store
+            .commit_envelope(&selection, &requester_agent, None)
+            .unwrap();
+
+        let leases = create_repository_leases(&requester, &contract).unwrap();
+        let route = create_signed_envelope(
+            &requester,
+            AtpVerb::Route,
+            transaction_id.clone(),
+            Some(worker_agent.clone()),
+            Some(selection_ack.event_hash),
+            serde_json::to_value(AuditEventBody::RouteAudit {
+                job_id: transaction_id.clone(),
+                contract_hash: expected_contract_hash.clone(),
+                leases: leases.clone(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let route_ack = store.commit_envelope(&route, &worker_agent, None).unwrap();
+        assert_eq!(route_ack.state.as_deref(), Some("routed"));
+
+        let work_root = std::env::temp_dir().join(format!("cyphes-{transaction_id}"));
+        let result = execute_repository_audit(
+            &worker,
+            &contract,
+            &expected_contract_hash,
+            &leases,
+            &work_root,
+        )
+        .await
+        .unwrap();
+        store.save_execution_result(&result).unwrap();
+
+        let approval = ReceiptApproval {
+            by: requester_agent.clone(),
+            method: "requester-verified-result".to_string(),
+            time: crate::atp::now_rfc3339(),
+        };
+        let settle = create_signed_envelope(
+            &requester,
+            AtpVerb::Settle,
+            transaction_id.clone(),
+            Some(worker_agent.clone()),
+            Some(route_ack.event_hash),
+            serde_json::to_value(AuditEventBody::SettlementApproved {
+                job_id: transaction_id.clone(),
+                contract_hash: expected_contract_hash,
+                result_hash: result.result_hash.clone(),
+                approved: approval.clone(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let settle_ack = store.commit_envelope(&settle, &worker_agent, None).unwrap();
+
+        let receipt = store
+            .build_worker_receipt(&transaction_id, &settle_ack.event_hash, approval, &worker)
+            .unwrap();
+        let attest = create_signed_envelope(
+            &worker,
+            AtpVerb::Attest,
+            transaction_id.clone(),
+            Some(requester_agent),
+            Some(settle_ack.event_hash),
+            serde_json::to_value(receipt).unwrap(),
+        )
+        .unwrap();
+        let attest_ack = store.commit_envelope(&attest, &worker_agent, None).unwrap();
+        assert_eq!(attest_ack.state.as_deref(), Some("attested"));
+
+        let receipt_root = work_root.join("verified-receipts");
+        let bundle = export_receipt_bundle_to(&store, &transaction_id, &receipt_root).unwrap();
+        assert!(bundle.join("receipt.json").is_file());
+        assert!(bundle.join("artifacts/audit-report.md").is_file());
+        assert_eq!(
+            store.transaction_envelopes(&transaction_id).unwrap().len(),
+            6
+        );
+        println!("ATP_E2E_BUNDLE={}", bundle.display());
     }
 }
