@@ -3,10 +3,10 @@
 `bootstrap.json` is the default network control document fetched by CYPHES
 desktop nodes at startup.
 
-The document is intentionally committed with null infrastructure addresses
-until a CYPHES-operated public host has passed the external smoke test. This
-keeps released clients honest: they remain usable on a LAN and by explicit
-multiaddress, but do not claim to be connected to a nonexistent service.
+The document currently publishes the externally verified CYPHES-operated
+developer endpoint. Its `online-ipv6-preview` status is intentional: relay and
+rendezvous work over public IPv6, while universal IPv4 reachability still
+requires a dedicated IPv4.
 
 After deployment, publish the stable relay identity:
 
@@ -14,6 +14,15 @@ After deployment, publish the stable relay identity:
 ./scripts/publish-network-config.sh \
   /dns4/relay.cyphes.com/tcp/4001 \
   RELAY_PEER_ID
+```
+
+Use an explicit preview status for an IPv6-only endpoint:
+
+```bash
+./scripts/publish-network-config.sh \
+  /dns6/cyphes-atp-network.fly.dev/tcp/4001 \
+  RELAY_PEER_ID \
+  online-ipv6-preview
 ```
 
 The same infrastructure identity serves Circuit Relay v2 and libp2p

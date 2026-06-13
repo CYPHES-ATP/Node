@@ -26,8 +26,9 @@ marketplace breadth.
 
 Status: **Partial**
 
-- Provision `relay.cyphes.com`, pass the external automatic-discovery smoke
-  test, and publish it in `network/bootstrap.json`.
+- Add dedicated IPv4 reachability and point `relay.cyphes.com` at the verified
+  CYPHES-operated Fly endpoint. The IPv6 developer endpoint and automatic
+  discovery smoke test are live.
 - Deploy a second independent relay/rendezvous endpoint.
 - Add DNS endpoint rotation and health telemetry.
 - Add signed capability cards and namespace-aware capability matching.

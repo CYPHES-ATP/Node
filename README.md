@@ -76,9 +76,9 @@ Artifact Two independently returns:
 
 ## What Is Not Production Ready
 
-- The automatic discovery path is implemented, but the committed
-  [`network/bootstrap.json`](network/bootstrap.json) remains offline until a
-  CYPHES-operated public host is provisioned and externally verified.
+- The CYPHES-operated developer network is live and externally verified, but
+  its first endpoint is IPv6-only until Fly.io billing enables a dedicated
+  IPv4. Nodes on IPv4-only networks cannot reach it yet.
 - Rendezvous discovers online nodes, not a durable or searchable work-order
   index.
 - No durable offline mailbox or guaranteed retry after both peers disconnect.
@@ -128,9 +128,9 @@ rendezvous addresses are published, a desktop node automatically:
 3. registers a signed peer record in the repository-audit namespace;
 4. discovers and dials other online CYPHES nodes.
 
-No manual address exchange is required for that path. The current manifest is
-deliberately offline because no permanent CYPHES-operated host has been
-provisioned yet.
+No manual address exchange is required for that path. The current manifest
+points to the externally verified CYPHES-operated IPv6 developer endpoint.
+Dedicated IPv4, branded DNS, and redundant relays remain staging work.
 
 ## Operate The Network
 
@@ -174,6 +174,14 @@ After the external smoke test passes, publish the endpoint:
 ./scripts/publish-network-config.sh \
   /dns4/relay.cyphes.com/tcp/4001 \
   RELAY_PEER_ID
+```
+
+To provision the first TCP endpoint on Fly.io instead:
+
+```bash
+cd relay
+~/.fly/bin/flyctl auth login
+./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4
 ```
 
 See [Join the CYPHES Network](docs/JOIN_NETWORK.md) and

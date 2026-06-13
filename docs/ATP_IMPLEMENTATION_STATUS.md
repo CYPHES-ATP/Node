@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-Last reviewed: June 12, 2026
+Last reviewed: June 13, 2026
 
 ## Conformance Position
 
@@ -60,11 +60,11 @@ an ATP v0.3 wire verb.
 | Identify and Ping | Implemented |
 | Circuit Relay v2 client and reservation | Implemented and smoke tested |
 | Combined deployable relay/rendezvous service | Implemented |
-| Signed rendezvous registration and automatic peer discovery | Implemented and locally smoke tested |
+| Signed rendezvous registration and automatic peer discovery | Implemented and externally smoke tested |
 | Default network manifest and runtime overrides | Implemented |
 | Manual direct/relay multiaddress dialing | Implemented |
 | DCUtR behavior | Implemented |
-| CYPHES-hosted public endpoint | Awaiting public Linux host and DNS |
+| CYPHES-hosted public endpoint | IPv6 developer endpoint live; dedicated IPv4 and branded DNS pending |
 | Durable public work index | Not implemented |
 | AutoNAT and reachability scoring | Not implemented |
 | Offline mailbox and durable retry | Not implemented |
@@ -87,8 +87,8 @@ The live network and protocol assertions are intentionally separate:
 4. the desktop command path exposes every transaction operation to two
    independently running clients.
 
-A public different-network two-laptop run remains the final operational
-acceptance test after the CYPHES endpoint is deployed.
+A complete work-order run between two independently controlled consumer
+networks remains the next operational acceptance test.
 
 ## Production Exit Criteria
 

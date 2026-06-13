@@ -75,6 +75,7 @@ impl TestNode {
                 yamux::Config::default,
             )?
             .with_quic()
+            .with_dns()?
             .with_relay_client(noise::Config::new, yamux::Config::default)?
             .with_behaviour(move |key, relay| ClientBehaviour {
                 relay,
