@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "note",
+          "message": {
+            "text": "Repository does not publish SECURITY.md"
+          },
+          "ruleId": "CYPHES-SECURITY-POLICY-MISSING"
+        },
+        {
+          "level": "warning",
+          "message": {
+            "text": "No GitHub Actions workflow detected"
+          },
+          "ruleId": "CYPHES-CI-WORKFLOW-MISSING"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "CYPHES deterministic repository auditor",
+          "version": "0.1.0-dev"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

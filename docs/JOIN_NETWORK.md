@@ -1,29 +1,21 @@
 # Join the CYPHES Network
 
-## What Joining Means Today
+## Current Network Model
 
-CYPHES is currently a LAN-only developer network. There is no public
-bootstrap server, relay, hosted marketplace, account system, or downloadable
-signed release.
+CYPHES nodes can connect in three real ways:
 
-A node can currently:
+1. automatic mDNS discovery on one LAN;
+2. direct dialing of a reachable libp2p multiaddress;
+3. Circuit Relay v2 dialing through an operator-provided public relay.
 
-1. create a persistent signing identity;
-2. discover another node on the same LAN using mDNS;
-3. sign and commit an ATP audit request;
-4. send that request directly to the discovered peer;
-5. receive an ACK only after the peer verifies and commits it;
-6. exchange a worker offer and requester selection as signed ATP events.
+There is no central work-order database. Each participant verifies signed ATP
+messages and commits its own SQLite event chain.
 
-## Requirements
+The repository ships relay software, not a permanent CYPHES-operated public
+endpoint. A community or protocol operator must deploy one before unrelated
+internet users can connect without direct reachability.
 
-- Both computers must be on the same local network and broadcast domain.
-- Local firewall rules must allow the Tauri application and local peer traffic.
-- Node.js 20.19+ or 22.12+, npm 10+, Rust stable, and Tauri platform
-  dependencies.
-- The current verified desktop path is macOS.
-
-## Install From Source
+## Install
 
 ```bash
 git clone https://github.com/CYPHES-ATP/Node.git
@@ -32,100 +24,129 @@ npm install
 npm run tauri dev
 ```
 
-On first launch the node creates:
+Each node creates:
 
 ```text
 ~/.cyphes/identity.key
 ~/.cyphes/atp.sqlite3
+~/.cyphes/receipts/
 ```
 
-The identity key is the node's signing authority. Do not copy it to another
-person, commit it, or use the same file for two simultaneous nodes.
+`identity.key` is the node's signing authority. Never share it.
 
-## Join From Two Computers
+## Connect On A LAN
 
-1. Clone and start the app on both computers.
-2. Confirm each app changes from `0 LAN peers` to `1 LAN peer`.
-3. On the requester, enter a public GitHub repository URL and compensation.
-4. Select **Sign and post request**.
-5. Confirm the requester initially shows a locally signed state.
-6. Confirm the worker receives the same repository request.
-7. Confirm the requester shows `1 peer receipt`.
-8. On the worker, select **Offer to audit**.
-9. Confirm the requester shows the worker offer.
-10. On the requester, select **Select worker**.
-11. Confirm both nodes show `NEGOTIATED`.
+Start the app on two computers on the same broadcast network. mDNS should
+populate the connected-peer count automatically. Guest Wi-Fi may isolate
+clients.
 
-No payment is transferred.
+## Connect Through A Relay
 
-## Run Two Identities on One Machine
-
-Start the primary application:
+On a public Linux host:
 
 ```bash
+cd relay
+export CYPHES_RELAY_PUBLIC_ADDR=/dns4/relay.example.com/tcp/4001
+docker compose up --build -d
+docker compose logs relay
+```
+
+Open `4001/tcp` and `4001/udp`. Persist the relay data volume so the relay peer
+ID does not change.
+
+Verify the deployment from another machine:
+
+```bash
+cargo run --manifest-path relay/Cargo.toml \
+  --bin cyphes-relay-smoke -- \
+  /dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID
+```
+
+Start each desktop node with:
+
+```bash
+export CYPHES_RELAY_ADDR=/dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID
 npm run tauri dev
 ```
 
-After the Rust binary has been built, start a second identity from another
-terminal:
+The node reserves and advertises a circuit address:
 
-```bash
-mkdir -p /tmp/cyphes-peer-2
-cd src-tauri
-CYPHES_DATA_DIR=/tmp/cyphes-peer-2 target/debug/cyphes-desktop
+```text
+/dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID/p2p-circuit/p2p/NODE_PEER_ID
 ```
 
-The second node stores its identity and database under
-`/tmp/cyphes-peer-2`. Use a persistent directory instead of `/tmp` if the
-identity should survive a restart.
+Send that address to the counterparty and paste it into **Connect to node**.
+The nodes authenticate each other end to end. The relay sees transport
+metadata and encrypted bytes but cannot create valid ATP events.
 
-## How to Read the UI
+## Complete One Audit
 
-| UI state | Meaning |
+1. Requester posts a public GitHub repository.
+2. Worker selects **Offer to audit**.
+3. Requester selects **Select worker**.
+4. Requester selects **Issue context lease**.
+5. Worker selects **Run bounded audit**.
+6. Requester waits for the signed result and selects
+   **Approve verified result**.
+7. Worker automatically emits `ATTEST`.
+8. Both nodes show `ATTESTED` and export a receipt under
+   `~/.cyphes/receipts/<transaction-id>/`.
+
+The proposed USDC amount is not transferred. The current contract settles at
+zero value.
+
+## State Meaning
+
+| State | Meaning |
 | --- | --- |
-| `Signed + SQLite` | The native backend owns signed ATP state in SQLite |
-| `0 LAN peers` | No other node is currently discovered |
-| `SIGNED LOCALLY, NO PEER RECEIPT` | Local commit succeeded; no peer has acknowledged it |
-| `1 PEER RECEIPT` | One peer verified and committed the event, then returned an ACK |
-| `DISCOVERED` | A valid ATP `DISCOVER` event is committed |
-| `NEGOTIATING` | A valid worker offer is committed |
-| `NEGOTIATED` | The requester selected the offered worker |
-| `Payment rail: Not connected` | Compensation is a term only |
+| `DISCOVERED` | Request is signed and committed |
+| `NEGOTIATING` | Worker offer is committed |
+| `NEGOTIATED` | Requester selected the exact contract hash |
+| `ROUTED` | Worker has verified active requester-signed leases |
+| `ROUTED` plus result hash | Signed worker result is stored and verified |
+| `SETTLED` | Requester approved the verified result at zero value |
+| `ATTESTED` | Worker receipt is committed and a bundle is exported |
+
+## Two Identities On One Machine
+
+```bash
+# First node
+CYPHES_DATA_DIR=/tmp/cyphes-requester npm run tauri dev
+
+# Second node, after the binary is built
+CYPHES_DATA_DIR=/tmp/cyphes-worker src-tauri/target/debug/cyphes-desktop
+```
+
+Use separate data directories. One identity must not run as both parties.
 
 ## Troubleshooting
 
-### Nodes Stay at Zero Peers
+**Relay reservation fails**
 
-- Confirm both nodes are on the same LAN.
-- Avoid guest Wi-Fi networks that isolate clients.
-- Check macOS firewall prompts and allow the application.
-- Confirm only one node is using each identity/data directory.
-- Restart both nodes after changing network interfaces.
+- Confirm the relay advertises `CYPHES_RELAY_PUBLIC_ADDR`.
+- Confirm the relay peer ID in the client address matches the log.
+- Open both TCP and UDP port `4001`.
+- Run `cyphes-relay-smoke` from outside the relay host.
 
-### Request Is Signed but Has No Receipt
+**Nodes connect but do not exchange a work order**
 
-- Confirm the peer count is non-zero.
-- Keep both nodes running long enough for discovery and resend.
-- Check the receiving node's database exists and is writable.
-- Confirm both builds support `/cyphes/atp/0.3`.
+- Confirm both support `/cyphes/atp/0.3`.
+- Keep both online; offline mailbox delivery is not implemented.
+- Confirm the target multiaddress ends with the counterparty node peer ID.
+- Check the client notice for signature, `prev`, expiry, or lease rejection.
 
-### Reset a Development Identity
+**Audit execution fails**
 
-Stop the node and move the data directory instead of deleting it immediately:
+- Confirm the contract and lease have not expired.
+- Confirm the pinned GitHub archive remains publicly downloadable.
+- The worker rejects archives over 100 MiB, unsafe paths, links, and more than
+  25,000 scanned files.
+
+**Reset a development identity**
 
 ```bash
 mv ~/.cyphes ~/.cyphes.backup
 ```
 
-The next launch creates a new identity and empty database. The new node is not
-the same ATP issuer as the old node.
-
-## Join Development
-
-The next network milestone is public internet reachability through bootstrap,
-rendezvous, Relay v2, AutoNAT, and direct upgrade. The next protocol milestone
-is a complete repository-audit work order through verification and attestation.
-
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution tracks and
-[ATP_NETWORK_ARCHITECTURE.md](ATP_NETWORK_ARCHITECTURE.md) for the implementation
-roadmap.
+The replacement node has a new ATP identity and no authority over old
+transactions.

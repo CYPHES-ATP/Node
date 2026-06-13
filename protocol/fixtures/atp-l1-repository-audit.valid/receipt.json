@@ -1,0 +1,86 @@
+{
+  "receiptType": "ProofOfCognition",
+  "atp": "0.3",
+  "profile": "cyphes.repository-security-audit-receipt/0.1",
+  "profileVersion": "0.1",
+  "transactionId": "audit-e2e-82be7153-b093-41ed-9d9d-21f5c46dd4dc",
+  "requested": {
+    "contractHash": "sha256:94f4942d50edd5896210d330da760b1fb0df7fe8f1ed589f969d7f183f0fb90d",
+    "repository": {
+      "fullName": "octocat/Hello-World",
+      "url": "https://github.com/octocat/Hello-World",
+      "commitSha": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+    },
+    "scope": [
+      "Deterministic repository security posture"
+    ]
+  },
+  "accessed": {
+    "leases": [
+      "lease-repository-read-e5a56dfb-5f1e-401c-b6b4-b6020797ade1",
+      "lease-artifacts-write-187822a6-7918-4343-ae5d-ea862df972e1"
+    ],
+    "resources": [
+      "github:octocat/Hello-World@7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+    ]
+  },
+  "changed": {
+    "artifacts": [
+      {
+        "path": "artifacts/audit-report.md",
+        "mediaType": "text/markdown",
+        "sha256": "sha256:de9fcf1171b408ef9d5ef98f75232572ae7b5baac2c298fa0d89a9f091d39d04",
+        "sizeBytes": 381
+      },
+      {
+        "path": "artifacts/findings.json",
+        "mediaType": "application/json",
+        "sha256": "sha256:c4a27243ea923f14950f0d3bd8d9db5d5ac5e2c0860456a6d124ee18daeeca6d",
+        "sizeBytes": 664
+      },
+      {
+        "path": "artifacts/results.sarif",
+        "mediaType": "application/sarif+json",
+        "sha256": "sha256:389c6c4cafa8652548f2d919d3ae42ccdbb8f269e78e69e7d14ec6fa99d38354",
+        "sizeBytes": 683
+      },
+      {
+        "path": "artifacts/checks.json",
+        "mediaType": "application/json",
+        "sha256": "sha256:aab07ef9f22f5f3995bad23d1ef03d2cb2f360a0e445a47936547ec4f7c322e3",
+        "sizeBytes": 478
+      },
+      {
+        "path": "artifacts/manifest.json",
+        "mediaType": "application/json",
+        "sha256": "sha256:32f547c851734a7a3f8ed815b86bba0647787c315dc440704fa0723e52f14ee7",
+        "sizeBytes": 1217
+      }
+    ],
+    "externalState": "none"
+  },
+  "approved": {
+    "by": "urn:libp2p:12D3KooWNvUTfDdJq4twsLsryjj5DwAWm9GCiJVsaTmmvGyMxe5m",
+    "method": "requester-verified-result",
+    "time": "2026-06-13T01:33:41.940Z"
+  },
+  "paid": {
+    "rail": "zero-value",
+    "amount": "0",
+    "asset": "none",
+    "condition": "verified-receipt-and-requester-approval",
+    "proofOfPayment": "waived",
+    "refundPolicy": "not-applicable",
+    "disputePolicy": "manual"
+  },
+  "eventRoot": "sha256:62a0af590d9d5240e2c271cf6b78b7e3b59999f1c257adac05ed580caeadc0a1",
+  "receiptHash": "sha256:3bb23bf09d123a0d3e95f5467db3714a1d29a278d95d5e2757912c297aa02438",
+  "signatures": [
+    {
+      "type": "Ed25519",
+      "signer": "urn:libp2p:12D3KooWRSc4ieusmeN6djVxsN7afmPL5wRX5CnYQE9X5zTiKZU6",
+      "kid": "urn:libp2p:12D3KooWRSc4ieusmeN6djVxsN7afmPL5wRX5CnYQE9X5zTiKZU6#identity",
+      "signature": "u1cAsAfxuDEhAg3Vxb_Zd3GQ1Nv0hXRSPC5YUd1-x8HCd7An73EYuhCQcAofLG0xpSEjKTVD2NclX8OzXwVOCQ"
+    }
+  ]
+}

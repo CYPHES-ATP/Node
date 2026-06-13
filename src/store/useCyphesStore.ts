@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AuditJob, LegacyAuditJob, NodeStatus } from "@/types";
+import type { AuditJob, LegacyAuditJob, NetworkInfo, NodeStatus } from "@/types";
 
 export const LEGACY_STORAGE_KEY = "cyphes.audit-jobs.v1";
 
@@ -22,11 +22,13 @@ interface CyphesState {
   peerId: string;
   agentId: string;
   peerCount: number;
+  networkInfo: NetworkInfo | null;
   jobs: AuditJob[];
   notice: string | null;
   setNodeOnline: (peerId: string, agentId: string) => void;
   setNodeError: (message: string) => void;
   setPeerCount: (count: number) => void;
+  setNetworkInfo: (networkInfo: NetworkInfo) => void;
   replaceJobs: (jobs: AuditJob[]) => void;
   setNotice: (notice: string | null) => void;
 }
@@ -37,6 +39,7 @@ export const useCyphesStore = create<CyphesState>((set) => ({
   peerId: "",
   agentId: "",
   peerCount: 0,
+  networkInfo: null,
   jobs: [],
   notice: null,
 
@@ -44,6 +47,8 @@ export const useCyphesStore = create<CyphesState>((set) => ({
     set({ nodeStatus: "online", nodeError: null, peerId, agentId }),
   setNodeError: (message) => set({ nodeStatus: "error", nodeError: message }),
   setPeerCount: (peerCount) => set({ peerCount }),
+  setNetworkInfo: (networkInfo) =>
+    set({ networkInfo, peerCount: networkInfo.connected_peers }),
   replaceJobs: (jobs) => set({ jobs }),
   setNotice: (notice) => set({ notice }),
 }));

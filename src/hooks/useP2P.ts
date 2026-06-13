@@ -5,6 +5,7 @@ import type {
   AuditJob,
   BackendPeerInfo,
   LegacyAuditJob,
+  NetworkInfo,
   RepositorySummary,
 } from "@/types";
 
@@ -23,6 +24,7 @@ interface MigrationResult {
 export function useP2P() {
   const setNodeOnline = useCyphesStore((state) => state.setNodeOnline);
   const setPeerCount = useCyphesStore((state) => state.setPeerCount);
+  const setNetworkInfo = useCyphesStore((state) => state.setNetworkInfo);
   const replaceJobs = useCyphesStore((state) => state.replaceJobs);
 
   async function startNode() {
@@ -50,6 +52,20 @@ export function useP2P() {
     const peers = await invoke<BackendPeerInfo[]>("get_peers");
     setPeerCount(peers.length);
     return peers;
+  }
+
+  async function refreshNetworkInfo() {
+    if (!isTauriRuntime()) return null;
+    const info = await invoke<NetworkInfo>("get_network_info");
+    setNetworkInfo(info);
+    return info;
+  }
+
+  async function connectPeer(address: string) {
+    if (!isTauriRuntime()) {
+      throw new Error("Peer connections require the native CYPHES app.");
+    }
+    await invoke("connect_peer", { address });
   }
 
   async function loadAudits() {
@@ -104,13 +120,36 @@ export function useP2P() {
     return job;
   }
 
+  async function routeAudit(jobId: string) {
+    const job = await invoke<AuditJob>("route_audit", { jobId });
+    await loadAudits();
+    return job;
+  }
+
+  async function runAudit(jobId: string) {
+    const job = await invoke<AuditJob>("run_audit", { jobId });
+    await loadAudits();
+    return job;
+  }
+
+  async function approveResult(jobId: string) {
+    const job = await invoke<AuditJob>("approve_result", { jobId });
+    await loadAudits();
+    return job;
+  }
+
   return {
     startNode,
     refreshPeers,
+    refreshNetworkInfo,
+    connectPeer,
     loadAudits,
     migrateLegacyJobs,
     createAudit,
     offerAudit,
     acceptOffer,
+    routeAudit,
+    runAudit,
+    approveResult,
   };
 }

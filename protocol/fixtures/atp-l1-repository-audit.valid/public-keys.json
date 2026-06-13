@@ -1,0 +1,12 @@
+{
+  "urn:libp2p:12D3KooWNvUTfDdJq4twsLsryjj5DwAWm9GCiJVsaTmmvGyMxe5m": {
+    "alg": "Ed25519",
+    "kid": "urn:libp2p:12D3KooWNvUTfDdJq4twsLsryjj5DwAWm9GCiJVsaTmmvGyMxe5m#identity",
+    "publicKeyBase64Url": "wriHZLUnChKrW-rdfma1uyGscEpoz1iK81hU_oyGRGA"
+  },
+  "urn:libp2p:12D3KooWRSc4ieusmeN6djVxsN7afmPL5wRX5CnYQE9X5zTiKZU6": {
+    "alg": "Ed25519",
+    "kid": "urn:libp2p:12D3KooWRSc4ieusmeN6djVxsN7afmPL5wRX5CnYQE9X5zTiKZU6#identity",
+    "publicKeyBase64Url": "6Cfs53M0Osi_cduEJSQEQshD5gPb6tqWkF1pFMq7A4M"
+  }
+}

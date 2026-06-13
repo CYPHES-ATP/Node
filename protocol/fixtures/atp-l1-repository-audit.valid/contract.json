@@ -1,0 +1,75 @@
+{
+  "profile": "cyphes.repository-security-audit/0.1",
+  "profileVersion": "0.1",
+  "transactionId": "audit-e2e-82be7153-b093-41ed-9d9d-21f5c46dd4dc",
+  "requesterAgentId": "urn:libp2p:12D3KooWNvUTfDdJq4twsLsryjj5DwAWm9GCiJVsaTmmvGyMxe5m",
+  "workerAgentId": "urn:libp2p:12D3KooWRSc4ieusmeN6djVxsN7afmPL5wRX5CnYQE9X5zTiKZU6",
+  "repository": {
+    "fullName": "octocat/Hello-World",
+    "url": "https://github.com/octocat/Hello-World",
+    "commitSha": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+  },
+  "scope": [
+    "Deterministic repository security posture"
+  ],
+  "exclusions": [
+    "No write access to the repository",
+    "No access outside the pinned repository checkout",
+    "No credential discovery or secret use",
+    "No external state changes"
+  ],
+  "deliverables": [
+    {
+      "path": "artifacts/audit-report.md",
+      "mediaType": "text/markdown",
+      "required": true
+    },
+    {
+      "path": "artifacts/findings.json",
+      "mediaType": "application/json",
+      "required": true
+    },
+    {
+      "path": "artifacts/results.sarif",
+      "mediaType": "application/sarif+json",
+      "required": true
+    },
+    {
+      "path": "artifacts/checks.json",
+      "mediaType": "application/json",
+      "required": true
+    },
+    {
+      "path": "artifacts/manifest.json",
+      "mediaType": "application/json",
+      "required": true
+    }
+  ],
+  "execution": {
+    "repositoryAccess": "read-only-pinned-commit",
+    "networkAccess": "deny-unless-contract-extension",
+    "maxDurationSeconds": 3600,
+    "deleteCheckoutAfterReceipt": true
+  },
+  "proposedCompensation": {
+    "amount": "100",
+    "asset": "USDC",
+    "status": "non-payable-term"
+  },
+  "settlement": {
+    "rail": "zero-value",
+    "amount": "0",
+    "asset": "none",
+    "condition": "verified-receipt-and-requester-approval",
+    "proofOfPayment": "waived",
+    "refundPolicy": "not-applicable",
+    "disputePolicy": "manual"
+  },
+  "proofPolicy": {
+    "workerSignature": true,
+    "requesterApproval": true,
+    "artifactHashes": true,
+    "eventChain": true
+  },
+  "expiresAt": "2026-06-13T02:03:41.667Z"
+}

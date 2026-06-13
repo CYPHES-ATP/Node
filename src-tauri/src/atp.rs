@@ -7,14 +7,16 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub const ATP_VERSION: &str = "0.3";
+pub const ATP_GENESIS_HASH: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum AtpVerb {
+    Advertise,
     Discover,
     Negotiate,
     Route,
-    Execute,
     Settle,
     Attest,
     Reject,
@@ -24,10 +26,10 @@ pub enum AtpVerb {
 impl AtpVerb {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Advertise => "ADVERTISE",
             Self::Discover => "DISCOVER",
             Self::Negotiate => "NEGOTIATE",
             Self::Route => "ROUTE",
-            Self::Execute => "EXECUTE",
             Self::Settle => "SETTLE",
             Self::Attest => "ATTEST",
             Self::Reject => "REJECT",
@@ -37,6 +39,7 @@ impl AtpVerb {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AtpProof {
     #[serde(rename = "type")]
     pub proof_type: String,
@@ -46,6 +49,7 @@ pub struct AtpProof {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AtpEnvelope {
     pub atp: String,
     pub verb: AtpVerb,
@@ -75,6 +79,7 @@ pub struct AtpAck {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SigningPayload<'a> {
     atp: &'a str,
     verb: AtpVerb,
@@ -105,7 +110,17 @@ pub fn create_signed_envelope(
     prev: Option<String>,
     body: Value,
 ) -> Result<AtpEnvelope, String> {
-    create_signed_envelope_with_expiry(keypair, verb, transaction_id, audience, prev, body, None)
+    let expires_at =
+        (Utc::now() + chrono::Duration::hours(24)).to_rfc3339_opts(SecondsFormat::Millis, true);
+    create_signed_envelope_with_expiry(
+        keypair,
+        verb,
+        transaction_id,
+        audience,
+        prev,
+        body,
+        Some(expires_at),
+    )
 }
 
 pub fn create_signed_envelope_with_expiry(
@@ -129,7 +144,7 @@ pub fn create_signed_envelope_with_expiry(
         created_at: now_rfc3339(),
         expires_at,
         nonce: Uuid::new_v4().to_string(),
-        prev,
+        prev: Some(prev.unwrap_or_else(|| ATP_GENESIS_HASH.to_string())),
         body,
         proofs: Vec::new(),
     };
@@ -140,7 +155,7 @@ pub fn create_signed_envelope_with_expiry(
         .map_err(|error| error.to_string())?;
 
     envelope.proofs.push(AtpProof {
-        proof_type: "Ed25519Signature2020".to_string(),
+        proof_type: "Ed25519".to_string(),
         kid: format!("{issuer}#identity"),
         public_key: URL_SAFE_NO_PAD.encode(public_key.encode_protobuf()),
         signature: URL_SAFE_NO_PAD.encode(signature),
@@ -170,6 +185,9 @@ pub fn verify_envelope(envelope: &AtpEnvelope) -> Result<(), String> {
     if proof.kid != format!("{}#identity", envelope.issuer) {
         return Err("ATP proof key identifier does not match the issuer".to_string());
     }
+    if proof.proof_type != "Ed25519" {
+        return Err("ATP proof type must be Ed25519".to_string());
+    }
 
     let signature = URL_SAFE_NO_PAD
         .decode(&proof.signature)
@@ -191,7 +209,7 @@ pub fn verify_envelope(envelope: &AtpEnvelope) -> Result<(), String> {
 
 pub fn event_hash(envelope: &AtpEnvelope) -> Result<String, String> {
     let canonical_body = serde_jcs::to_vec(&envelope.body).map_err(|error| error.to_string())?;
-    let body_hash = hex_sha256(&canonical_body);
+    let body_hash = format!("sha256:{}", hex_sha256(&canonical_body));
     let preimage = format!(
         "{}{}{}{}{}{}",
         envelope.prev.as_deref().unwrap_or_default(),
@@ -210,8 +228,7 @@ pub fn transition(current: Option<&str>, verb: AtpVerb) -> Result<&'static str, 
         (Some("discovered"), AtpVerb::Negotiate) => Ok("negotiating"),
         (Some("negotiating"), AtpVerb::Negotiate) => Ok("negotiated"),
         (Some("negotiated"), AtpVerb::Route) => Ok("routed"),
-        (Some("routed"), AtpVerb::Execute) => Ok("executing"),
-        (Some("executing"), AtpVerb::Settle) => Ok("settled"),
+        (Some("routed"), AtpVerb::Settle) => Ok("settled"),
         (Some("settled"), AtpVerb::Attest) => Ok("attested"),
         (Some(_), AtpVerb::Reject) => Ok("rejected"),
         (Some(_), AtpVerb::Revoke) => Ok("revoked"),
@@ -221,6 +238,46 @@ pub fn transition(current: Option<&str>, verb: AtpVerb) -> Result<&'static str, 
             state.unwrap_or("new")
         )),
     }
+}
+
+pub fn raw_ed25519_public_key(public_key: &identity::PublicKey) -> Result<Vec<u8>, String> {
+    public_key
+        .clone()
+        .try_into_ed25519()
+        .map(|key| key.to_bytes().to_vec())
+        .map_err(|_| "ATP identity is not Ed25519".to_string())
+}
+
+pub fn public_key_from_raw_ed25519(bytes: &[u8]) -> Result<identity::PublicKey, String> {
+    let key = identity::ed25519::PublicKey::try_from_bytes(bytes)
+        .map_err(|_| "ATP public key is not valid Ed25519".to_string())?;
+    Ok(identity::PublicKey::from(key))
+}
+
+pub fn sign_canonical<T: Serialize>(
+    keypair: &identity::Keypair,
+    value: &T,
+) -> Result<String, String> {
+    let bytes = serde_jcs::to_vec(value).map_err(|error| error.to_string())?;
+    keypair
+        .sign(&bytes)
+        .map(|signature| URL_SAFE_NO_PAD.encode(signature))
+        .map_err(|error| error.to_string())
+}
+
+pub fn verify_canonical<T: Serialize>(
+    public_key: &identity::PublicKey,
+    value: &T,
+    signature: &str,
+) -> Result<(), String> {
+    let bytes = serde_jcs::to_vec(value).map_err(|error| error.to_string())?;
+    let signature = URL_SAFE_NO_PAD
+        .decode(signature)
+        .map_err(|_| "signature is not valid base64url".to_string())?;
+    if !public_key.verify(&bytes, &signature) {
+        return Err("canonical signature verification failed".to_string());
+    }
+    Ok(())
 }
 
 fn signing_bytes(envelope: &AtpEnvelope) -> Result<Vec<u8>, String> {
@@ -274,6 +331,6 @@ mod tests {
             transition(Some("discovered"), AtpVerb::Negotiate).unwrap(),
             "negotiating"
         );
-        assert!(transition(Some("discovered"), AtpVerb::Execute).is_err());
+        assert!(transition(Some("discovered"), AtpVerb::Route).is_err());
     }
 }

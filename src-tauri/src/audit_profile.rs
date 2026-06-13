@@ -176,7 +176,7 @@ pub struct AuditArtifact {
     pub path: String,
     pub media_type: String,
     pub sha256: String,
-    pub size: u64,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -197,7 +197,7 @@ pub struct ReceiptAccessed {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiptChanged {
-    pub artifact_paths: Vec<String>,
+    pub artifacts: Vec<AuditArtifact>,
     pub external_state: String,
 }
 
@@ -212,9 +212,10 @@ pub struct ReceiptApproval {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiptSignature {
+    #[serde(rename = "type")]
+    pub signature_type: String,
     pub signer: String,
     pub kid: String,
-    pub algorithm: String,
     pub signature: String,
 }
 
@@ -231,7 +232,6 @@ pub struct AuditReceipt {
     pub changed: ReceiptChanged,
     pub approved: ReceiptApproval,
     pub paid: AuditSettlement,
-    pub artifacts: Vec<AuditArtifact>,
     pub event_root: String,
     pub receipt_hash: String,
     pub signatures: Vec<ReceiptSignature>,
@@ -284,6 +284,15 @@ pub fn receipt_hash(receipt: &AuditReceipt) -> Result<String, String> {
     object.remove("receiptHash");
     object.remove("signatures");
     canonical_hash(&value)
+}
+
+pub fn receipt_signature_value(receipt: &AuditReceipt) -> Result<serde_json::Value, String> {
+    let mut value = serde_json::to_value(receipt).map_err(|error| error.to_string())?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "ATP receipt must serialize as an object".to_string())?;
+    object.remove("signatures");
+    Ok(value)
 }
 
 pub fn validate_contract(contract: &AuditContract) -> Result<(), AuditProfileError> {
@@ -417,43 +426,40 @@ pub fn validate_receipt(receipt: &AuditReceipt) -> Result<(), AuditProfileError>
         .iter()
         .map(|signature| signature.signer.as_str())
         .collect::<HashSet<_>>();
-    if receipt.signatures.len() < 2
+    if receipt.signatures.is_empty()
         || signers.len() != receipt.signatures.len()
-        || !signers.contains(receipt.approved.by.as_str())
         || receipt.signatures.iter().any(|signature| {
-            signature.kid.trim().is_empty()
-                || signature.algorithm != "EdDSA"
+            signature.signature_type != "Ed25519"
+                || signature.signer.trim().is_empty()
+                || signature.kid != format!("{}#identity", signature.signer)
                 || signature.signature.trim().is_empty()
         })
     {
         return Err(AuditProfileError::proof_unsatisfied(
             "AUDIT_RECEIPT_SIGNATURE_SET_INVALID",
-            "receipt must carry distinct worker and requester EdDSA signature records",
+            "receipt must carry at least one distinct Ed25519 signer",
         ));
     }
 
-    let changed_paths = receipt
-        .changed
-        .artifact_paths
-        .iter()
-        .map(String::as_str)
-        .collect::<HashSet<_>>();
+    if receipt.approved.by.trim().is_empty()
+        || receipt.approved.method != "requester-verified-result"
+    {
+        return Err(AuditProfileError::proof_unsatisfied(
+            "AUDIT_RECEIPT_APPROVAL_INVALID",
+            "receipt approval must identify the requester verification decision",
+        ));
+    }
+
     let mut artifact_paths = HashSet::new();
-    for artifact in &receipt.artifacts {
+    for artifact in &receipt.changed.artifacts {
         if !artifact_paths.insert(artifact.path.as_str())
             || !is_sha256_ref(&artifact.sha256)
-            || artifact.size == 0
+            || artifact.size_bytes == 0
             || artifact.media_type.trim().is_empty()
         {
             return Err(AuditProfileError::proof_unsatisfied(
                 "AUDIT_RECEIPT_ARTIFACT_INVALID",
                 "artifacts must have unique paths, non-zero sizes, and SHA-256 hashes",
-            ));
-        }
-        if !changed_paths.contains(artifact.path.as_str()) {
-            return Err(AuditProfileError::proof_unsatisfied(
-                "AUDIT_RECEIPT_ARTIFACT_UNBOUND",
-                "every artifact must be named in the changed set",
             ));
         }
     }
@@ -474,6 +480,31 @@ pub fn validate_receipt(receipt: &AuditReceipt) -> Result<(), AuditProfileError>
         return Err(AuditProfileError::proof_unsatisfied(
             "AUDIT_RECEIPT_HASH_MISMATCH",
             "receiptHash does not match the canonical receipt body",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_receipt_parties(
+    receipt: &AuditReceipt,
+    contract: &AuditContract,
+) -> Result<(), AuditProfileError> {
+    if receipt.transaction_id != contract.transaction_id
+        || receipt.requested.contract_hash
+            != contract_hash(contract).map_err(|error| {
+                AuditProfileError::proof_unsatisfied("AUDIT_RECEIPT_CONTRACT_HASH_FAILED", error)
+            })?
+        || receipt.requested.repository != contract.repository
+        || receipt.requested.scope != contract.scope
+        || receipt.approved.by != contract.requester_agent_id
+        || !receipt
+            .signatures
+            .iter()
+            .any(|signature| signature.signer == contract.worker_agent_id)
+    {
+        return Err(AuditProfileError::proof_unsatisfied(
+            "AUDIT_RECEIPT_PARTY_BINDING_INVALID",
+            "receipt must bind the accepted contract, requester approval, and worker signature",
         ));
     }
     Ok(())
@@ -572,14 +603,14 @@ mod tests {
             "../../protocol/fixtures/repository-audit-receipt.v0.1.json"
         ))
         .unwrap();
-        receipt.artifacts[0].sha256 =
+        receipt.changed.artifacts[0].sha256 =
             "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
         let error = validate_receipt(&receipt).unwrap_err();
         assert_eq!(error.reason_code, "AUDIT_RECEIPT_HASH_MISMATCH");
     }
 
     #[test]
-    fn receipt_requires_worker_and_requester_signature_records() {
+    fn receipt_requires_a_worker_signature_record() {
         let mut receipt: AuditReceipt = serde_json::from_str(include_str!(
             "../../protocol/fixtures/repository-audit-receipt.v0.1.json"
         ))
