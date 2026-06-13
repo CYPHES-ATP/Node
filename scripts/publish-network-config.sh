@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 <public-multiaddr-without-peer-id> <relay-peer-id>" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "usage: $0 <public-multiaddr-without-peer-id> <relay-peer-id> [status]" >&2
   exit 1
 fi
 
 public_addr="${1%/}"
 peer_id="$2"
+status="${3:-online}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target="$root/network/bootstrap.json"
 
@@ -23,8 +24,9 @@ trap 'rm -f "$tmp"' EXIT
 
 jq \
   --arg address "$full_addr" \
+  --arg status "$status" \
   --arg updated_at "$updated_at" \
-  '.status = "online"
+  '.status = $status
    | .relayAddr = $address
    | .rendezvousAddr = $address
    | .updatedAt = $updated_at' \

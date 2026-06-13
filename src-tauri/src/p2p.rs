@@ -1307,4 +1307,22 @@ mod tests {
         assert!(config.relay_addr.is_none());
         assert!(config.rendezvous_addr.is_none());
     }
+
+    #[test]
+    fn network_bootstrap_accepts_the_ipv6_preview_hostname() {
+        let peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+        let address = format!("/dns6/cyphes-atp-network.fly.dev/tcp/4001/p2p/{peer_id}");
+        let network = build_network_bootstrap(
+            Some(address.clone()),
+            None,
+            None,
+            Some("published manifest".to_string()),
+        )
+        .expect("valid IPv6 preview address");
+
+        assert_eq!(
+            network.relay.expect("relay target").address.to_string(),
+            address
+        );
+    }
 }

@@ -73,3 +73,31 @@ sudo ./deploy/install-systemd.sh \
 Create an `A` or `AAAA` record for `relay.cyphes.com`, open `4001/tcp` and
 `4001/udp`, and run `cyphes-network-smoke` from a different network. Only then
 publish the address in `../network/bootstrap.json`.
+
+## Fly.io Bootstrap
+
+The repository also includes a first-network deployment for Fly.io. It keeps
+one machine running, persists the relay identity on a volume, and exposes raw
+libp2p TCP on a dedicated IPv4 address:
+
+```bash
+curl -L https://fly.io/install.sh | sh
+~/.fly/bin/flyctl auth login
+./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4
+```
+
+The script creates the app, one-gigabyte identity volume, and dedicated IPv4;
+deploys the container; reads the stable relay peer ID; runs the automatic
+two-node smoke test; and prepares `../network/bootstrap.json`.
+
+Fly requires a dedicated IPv4 for raw TCP without Fly TLS termination. The
+initial public endpoint uses `<app>.fly.dev`, so CYPHES DNS can be attached
+after launch without delaying network availability. The Fly deployment exposes
+TCP only; the VPS/systemd deployment remains the path for public QUIC/UDP.
+
+For an IPv6-only developer preview before billing is enabled, pass `6` as the
+last argument. The generated manifest is marked `online-ipv6-preview`; do not
+position that endpoint as universally reachable.
+
+Review current Fly pricing before deployment:
+https://fly.io/docs/about/pricing/

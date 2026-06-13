@@ -11,9 +11,10 @@ CYPHES nodes can connect in three real ways:
 There is no central work-order database. Each participant verifies signed ATP
 messages and commits its own SQLite event chain.
 
-The default network manifest is fetched from
-`network/bootstrap.json`. Its addresses are currently null until a permanent
-CYPHES-operated host passes the external acceptance test.
+The default network manifest is fetched from `network/bootstrap.json`. It
+currently points to the externally verified CYPHES-operated IPv6 developer
+endpoint. Nodes on IPv4-only networks need an explicit reachable relay until
+the default endpoint receives a dedicated IPv4.
 
 ## Install
 
@@ -88,6 +89,18 @@ cargo run --manifest-path relay/Cargo.toml \
   --bin cyphes-network-smoke -- \
   /dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID
 ```
+
+For a managed first endpoint, use the Fly.io deployment:
+
+```bash
+cd relay
+~/.fly/bin/flyctl auth login
+./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4
+```
+
+This provisions an always-on TCP relay/rendezvous node with a persistent
+identity, verifies automatic discovery, and prepares the default manifest.
+The script does not commit the manifest for you.
 
 ## Complete One Audit
 
