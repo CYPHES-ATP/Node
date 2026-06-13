@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "network": "cyphes-dev",
   "operator": "CYPHES-ATP",
-  "status": "online-ipv6-preview",
-  "relayAddr": "/dns6/cyphes-atp-network.fly.dev/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
-  "rendezvousAddr": "/dns6/cyphes-atp-network.fly.dev/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
+  "status": "online",
+  "relayAddr": "/dns4/cyphes-atp-network.fly.dev/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
+  "rendezvousAddr": "/dns4/cyphes-atp-network.fly.dev/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
   "rendezvousNamespace": "cyphes.repository-audit.v0.1",
-  "updatedAt": "2026-06-13T13:47:11Z"
+  "updatedAt": "2026-06-13T14:06:44Z"
 }

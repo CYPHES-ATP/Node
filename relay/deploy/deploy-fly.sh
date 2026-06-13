@@ -100,12 +100,21 @@ public_addr="/${dns_protocol}/${public_host}/tcp/4001"
 machines="$("$fly_bin" machines list --app "$app" --json)"
 machine_id="$(
   jq -r \
-    '[.[] | select((.state // .State) == "started")][0].id // empty' \
+    '.[0].id // .[0].ID // empty' \
     <<<"$machines"
 )"
 if [[ -z "$machine_id" ]]; then
   echo "could not find the deployed relay machine" >&2
   exit 1
+fi
+
+machine_state="$(
+  jq -r \
+    '.[0].state // .[0].State // empty' \
+    <<<"$machines"
+)"
+if [[ "$machine_state" != "started" ]]; then
+  "$fly_bin" machine start "$machine_id" --app "$app"
 fi
 
 peer_id="$(
@@ -122,9 +131,25 @@ fi
 
 bootstrap_addr="${public_addr}/p2p/${peer_id}"
 
-cargo run --manifest-path "$root/relay/Cargo.toml" \
-  --bin cyphes-network-smoke -- \
-  "$bootstrap_addr"
+smoke_passed=0
+for attempt in 1 2 3 4 5 6; do
+  if cargo run --manifest-path "$root/relay/Cargo.toml" \
+    --bin cyphes-network-smoke -- \
+    "$bootstrap_addr"; then
+    smoke_passed=1
+    break
+  fi
+
+  if [[ "$attempt" -lt 6 ]]; then
+    echo "Network smoke attempt $attempt failed; retrying in 10 seconds..." >&2
+    sleep 10
+  fi
+done
+
+if [[ "$smoke_passed" != "1" ]]; then
+  echo "The public endpoint failed six automatic discovery attempts." >&2
+  exit 1
+fi
 
 "$root/scripts/publish-network-config.sh" \
   "$public_addr" \

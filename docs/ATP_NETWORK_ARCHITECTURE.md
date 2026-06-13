@@ -816,8 +816,9 @@ bad signatures, stale messages, replay, incorrect `prev`, and invalid state.
 
 Implementation status: partial. Identify, Ping, QUIC, Relay v2, DCUtR,
 Rendezvous registration/discovery, reconnect attempts, manual fallback
-dialing, a combined infrastructure service, and automatic two-node smoke test
-are live. Hosted infrastructure, AutoNAT, and durable message retries remain.
+dialing, a combined infrastructure service, one hosted public IPv4 endpoint,
+and automatic two-node smoke test are live. Redundant infrastructure, AutoNAT,
+and durable message retries remain.
 
 - Add AutoNAT reachability scoring and verify direct DCUtR upgrades.
 - Deploy three public bootstrap/rendezvous/relay nodes.
@@ -913,8 +914,8 @@ and combined relay/rendezvous service are implemented.
 
 The next implementation slice is:
 
-1. provision `relay.cyphes.com`, externally verify it, publish the default
-   manifest, and run the full flow across two networks;
+1. attach `relay.cyphes.com` to the externally verified IPv4 endpoint and run
+   the full flow across two independently controlled networks;
 2. deploy a second infrastructure node and add signed `ADVERTISE` capability
    cards;
 3. harden the worker inside an OS-enforced sandbox;

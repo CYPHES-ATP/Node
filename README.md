@@ -76,9 +76,9 @@ Artifact Two independently returns:
 
 ## What Is Not Production Ready
 
-- The CYPHES-operated developer network is live and externally verified, but
-  its first endpoint is IPv6-only until Fly.io billing enables a dedicated
-  IPv4. Nodes on IPv4-only networks cannot reach it yet.
+- The CYPHES-operated developer network is live on a dedicated public IPv4 and
+  externally verified, but it currently depends on one relay/rendezvous
+  machine in one region.
 - Rendezvous discovers online nodes, not a durable or searchable work-order
   index.
 - No durable offline mailbox or guaranteed retry after both peers disconnect.
@@ -129,8 +129,9 @@ rendezvous addresses are published, a desktop node automatically:
 4. discovers and dials other online CYPHES nodes.
 
 No manual address exchange is required for that path. The current manifest
-points to the externally verified CYPHES-operated IPv6 developer endpoint.
-Dedicated IPv4, branded DNS, and redundant relays remain staging work.
+points to the externally verified CYPHES-operated IPv4 developer endpoint.
+Branded DNS, redundant relays, and a durable work-order index remain staging
+work.
 
 ## Operate The Network
 

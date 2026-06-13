@@ -4,9 +4,8 @@
 desktop nodes at startup.
 
 The document currently publishes the externally verified CYPHES-operated
-developer endpoint. Its `online-ipv6-preview` status is intentional: relay and
-rendezvous work over public IPv6, while universal IPv4 reachability still
-requires a dedicated IPv4.
+developer endpoint. Its `online` status means relay and rendezvous passed the
+automatic two-node smoke test over the public dedicated IPv4.
 
 After deployment, publish the stable relay identity:
 
