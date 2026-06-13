@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "evidence": "No root SECURITY.md was present at the pinned commit.",
+      "id": "CYPHES-SECURITY-POLICY-MISSING",
+      "severity": "low",
+      "title": "Repository does not publish SECURITY.md"
+    },
+    {
+      "evidence": "No files were present under .github/workflows at the pinned commit.",
+      "id": "CYPHES-CI-WORKFLOW-MISSING",
+      "severity": "medium",
+      "title": "No GitHub Actions workflow detected"
+    }
+  ],
+  "repository": {
+    "commitSha": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+    "fullName": "octocat/Hello-World",
+    "url": "https://github.com/octocat/Hello-World"
+  },
+  "schemaVersion": "0.1"
+}

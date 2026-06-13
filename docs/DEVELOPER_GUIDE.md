@@ -2,8 +2,9 @@
 
 ## Product Boundary
 
-The current product has one job: allow two CYPHES nodes on the same LAN to
-negotiate a public GitHub repository audit through signed, durable ATP events.
+The current product has one job: allow two CYPHES nodes to complete a bounded
+public GitHub repository audit through signed, durable ATP events and export an
+independently verifiable Proof of Cognition.
 
 Do not add simulated peers, sample jobs, reputation counters, synthetic
 responses, global-network labels, or payment claims.
@@ -20,10 +21,13 @@ responses, global-network labels, or payment claims.
 | `src-tauri/src/atp.rs` | ATP data model, proofs, canonicalization, event hashes, transition rules |
 | `src-tauri/src/audit_profile.rs` | Repository-audit contract, receipt types, canonical hashes, validation |
 | `src-tauri/src/store.rs` | SQLite schema, replay protection, atomic commits, job projections, ACK receipts |
-| `src-tauri/src/p2p.rs` | Identity file, swarm, mDNS, request/response, peer synchronization |
+| `src-tauri/src/worker.rs` | Context leases, guarded source access, deterministic audit artifacts |
+| `src-tauri/src/bundle.rs` | Artifact Two-compatible receipt export |
+| `src-tauri/src/p2p.rs` | mDNS, direct/relay transport, result delivery, peer synchronization |
 | `src-tauri/src/commands.rs` | Product operations exposed to Tauri |
 | `src-tauri/src/state.rs` | In-process peer and node runtime state |
 | `src-tauri/src/lib.rs` | Native application composition |
+| `relay/` | Standalone Circuit Relay v2 service and reservation smoke client |
 
 The Rust backend is authoritative. React may request an operation and render
 the returned projection, but it must not manufacture transaction state.
@@ -54,16 +58,26 @@ The Rust backend:
 - signs and verifies envelopes with the libp2p Ed25519 identity;
 - enforces event hashes, `prev`, nonces, idempotency, and transaction order;
 - discovers LAN peers through mDNS;
+- connects peers directly or through Circuit Relay v2;
+- exposes QUIC, TCP, WebSocket, Identify, Ping, and DCUtR behavior;
 - negotiates `/cyphes/atp/0.3` request/response streams;
 - commits inbound envelopes before returning an ACK;
 - binds each ATP issuer to the authenticated libp2p source;
-- synchronizes locally issued envelopes when a peer is discovered.
+- synchronizes locally issued envelopes when a peer is discovered;
+- verifies requester-signed context leases before work;
+- downloads only the pinned GitHub archive and executes no repository code;
+- verifies signed results before requester settlement;
+- emits and exports the terminal Proof of Cognition.
 
-Current audit negotiation uses:
+Current audit transaction uses:
 
 1. requester `DISCOVER`;
 2. worker `NEGOTIATE` offer carrying the typed audit contract;
 3. requester `NEGOTIATE` selection accepting its canonical `contractHash`.
+4. requester `ROUTE` containing repository-read and artifact-write leases;
+5. worker bounded activity and signed result;
+6. requester zero-value `SETTLE`;
+7. worker `ATTEST`.
 
 The public cross-implementation boundary lives in `protocol/schemas/` and
 `protocol/fixtures/`.
@@ -75,6 +89,7 @@ Default paths:
 ```text
 ~/.cyphes/identity.key
 ~/.cyphes/atp.sqlite3
+~/.cyphes/receipts/
 ```
 
 Set `CYPHES_DATA_DIR` to run an isolated development identity. The database is
@@ -123,11 +138,12 @@ Never move ACK generation before the database commit.
 
 ## Explicitly Unavailable
 
-- Internet relay or bootstrap.
-- Escrow or payment settlement.
-- Repository cloning and audit execution.
-- ATP routing, execution, settlement, attestation, leases, and receipt bundles.
+- A CYPHES-operated public relay, rendezvous service, or offline mailbox.
+- Real escrow or payment settlement.
+- Hardened container or VM isolation for the worker.
 - Private GitHub repository authorization.
+- Lease revocation, cancellation, dispute, key rotation, and recovery.
+- Signed release binaries.
 
 These should appear as unavailable in the product until implemented and tested.
 
@@ -138,4 +154,6 @@ npm run build
 (cd src-tauri && cargo fmt --check)
 (cd src-tauri && cargo check)
 (cd src-tauri && cargo test)
+(cd relay && cargo fmt --check && cargo test)
+./scripts/verify-atp-l1.sh
 ```

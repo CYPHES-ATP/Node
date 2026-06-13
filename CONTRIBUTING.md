@@ -34,10 +34,10 @@ src-tauri/src/store.rs
 
 ### Network
 
-- Add Identify and Ping.
-- Add rendezvous and bootstrap configuration.
-- Add Relay v2 and DCUtR.
-- Add AutoNAT and direct-connection upgrade.
+- Deploy and operate redundant public relays.
+- Add rendezvous and signed capability-card discovery.
+- Add AutoNAT and verify direct DCUtR upgrades.
+- Persist peer addresses and retry audience-specific delivery.
 - Preserve commit-before-ACK behavior.
 
 Primary file:
@@ -49,10 +49,10 @@ src-tauri/src/p2p.rs
 ### Audit Execution and Verification
 
 - Extend the signed audit contract without breaking its versioned schemas or fixtures.
-- Add a bounded repository capability.
-- Run an isolated audit worker.
-- Produce a Proof of Cognition receipt bundle.
-- Verify the bundle through Artifact Two before approval.
+- Harden the bounded worker inside an OS-enforced sandbox.
+- Add richer analyzers without executing untrusted repository code.
+- Add cancellation, revocation, and partial-failure receipts.
+- Extend Artifact Two with negative and alternate-terminal fixtures.
 
 ### Desktop Client
 
@@ -85,6 +85,7 @@ npm run build
 (cd src-tauri && cargo fmt --check)
 (cd src-tauri && cargo check)
 (cd src-tauri && cargo test)
+(cd relay && cargo fmt --check && cargo test)
 ```
 
 ## Pull Requests
@@ -119,6 +120,7 @@ Never commit:
 ```text
 ~/.cyphes/identity.key
 ~/.cyphes/atp.sqlite3
+~/.cyphes/receipts/
 ```
 
 Report security issues using [SECURITY.md](SECURITY.md), not a public issue.

@@ -1,13 +1,15 @@
 mod atp;
 pub mod audit_profile;
+mod bundle;
 mod commands;
 mod p2p;
 mod state;
 mod store;
+mod worker;
 
 use commands::{
-    accept_offer, create_audit, get_peers, list_audits, migrate_legacy_jobs, offer_audit,
-    start_node,
+    accept_offer, approve_result, connect_peer, create_audit, get_network_info, get_peers,
+    list_audits, migrate_legacy_jobs, offer_audit, route_audit, run_audit, start_node,
 };
 use state::P2pState;
 use store::AtpStore;
@@ -76,11 +78,16 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             start_node,
+            get_network_info,
+            connect_peer,
             get_peers,
             list_audits,
             create_audit,
             offer_audit,
             accept_offer,
+            route_audit,
+            run_audit,
+            approve_result,
             migrate_legacy_jobs
         ])
         .run(tauri::generate_context!())

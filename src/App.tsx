@@ -2,10 +2,12 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Check,
-  CircleDollarSign,
   Database,
   Github,
+  Link,
   LoaderCircle,
+  RadioTower,
+  ReceiptText,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -76,12 +78,15 @@ function AppContent() {
   const [compensation, setCompensation] = useState("100");
   const [submitting, setSubmitting] = useState(false);
   const [actionJobId, setActionJobId] = useState<string | null>(null);
+  const [peerAddress, setPeerAddress] = useState("");
+  const [connecting, setConnecting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const nodeStatus = useCyphesStore((state) => state.nodeStatus);
   const nodeError = useCyphesStore((state) => state.nodeError);
   const agentId = useCyphesStore((state) => state.agentId);
   const peerCount = useCyphesStore((state) => state.peerCount);
+  const networkInfo = useCyphesStore((state) => state.networkInfo);
   const jobs = useCyphesStore((state) => state.jobs);
   const notice = useCyphesStore((state) => state.notice);
   const setNotice = useCyphesStore((state) => state.setNotice);
@@ -89,6 +94,9 @@ function AppContent() {
   const sortedJobs = useMemo(
     () => [...jobs].sort((a, b) => b.createdAt - a.createdAt),
     [jobs],
+  );
+  const relayAddress = networkInfo?.listen_addrs.find((address) =>
+    address.includes("/p2p-circuit/"),
   );
 
   useEffect(() => {
@@ -197,6 +205,57 @@ function AppContent() {
     }
   }
 
+  async function handleConnect(event: FormEvent) {
+    event.preventDefault();
+    if (!peerAddress.trim()) return;
+    setConnecting(true);
+    try {
+      await p2p.connectPeer(peerAddress.trim());
+      setNotice("Dialing the supplied libp2p address.");
+      setPeerAddress("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function handleRoute(job: AuditJob) {
+    setActionJobId(job.id);
+    try {
+      await p2p.routeAudit(job.id);
+      setNotice("Requester-signed repository and artifact leases sent to the worker.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
+  async function handleRun(job: AuditJob) {
+    setActionJobId(job.id);
+    try {
+      await p2p.runAudit(job.id);
+      setNotice("Bounded audit completed; signed result sent to the requester.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
+  async function handleApprove(job: AuditJob) {
+    setActionJobId(job.id);
+    try {
+      await p2p.approveResult(job.id);
+      setNotice("Verified result approved; settlement sent for worker attestation.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
   function jobAction(job: AuditJob, isMine: boolean) {
     if (!job.repository.commitSha) {
       return <div className="job-outcome">Legacy unpinned request; repost required</div>;
@@ -225,6 +284,42 @@ function AppContent() {
         </button>
       );
     }
+    if (job.status === "negotiated" && isMine) {
+      return (
+        <button
+          disabled={actionJobId === job.id}
+          onClick={() => void handleRoute(job)}
+          type="button"
+        >
+          {actionJobId === job.id ? "Signing lease" : "Issue context lease"}
+          <ArrowRight size={14} />
+        </button>
+      );
+    }
+    if (job.status === "routed" && !isMine && !job.resultHash) {
+      return (
+        <button
+          disabled={actionJobId === job.id}
+          onClick={() => void handleRun(job)}
+          type="button"
+        >
+          {actionJobId === job.id ? "Running audit" : "Run bounded audit"}
+          <ArrowRight size={14} />
+        </button>
+      );
+    }
+    if (job.status === "routed" && isMine && job.resultHash) {
+      return (
+        <button
+          disabled={actionJobId === job.id}
+          onClick={() => void handleApprove(job)}
+          type="button"
+        >
+          {actionJobId === job.id ? "Signing approval" : "Approve verified result"}
+          <ArrowRight size={14} />
+        </button>
+      );
+    }
 
     let outcome = deliveryLabel(job);
     if (job.status === "negotiating") {
@@ -232,7 +327,23 @@ function AppContent() {
         ? `Offer from ${truncatePeerId(job.workerAgentId || "")}`
         : "Offer committed, awaiting requester";
     } else if (job.status === "negotiated") {
-      outcome = `Worker selected: ${truncatePeerId(job.workerAgentId || "")}`;
+      outcome = isMine
+        ? `Worker selected: ${truncatePeerId(job.workerAgentId || "")}`
+        : "Selected; awaiting requester lease";
+    } else if (job.status === "routed") {
+      outcome = job.resultHash
+        ? isMine
+          ? "Signed result verified"
+          : "Result sent; awaiting approval"
+        : isMine
+          ? "Lease active; awaiting worker result"
+          : "Requester lease verified";
+    } else if (job.status === "settled") {
+      outcome = "Requester approved; awaiting worker receipt";
+    } else if (job.status === "attested") {
+      outcome = job.bundlePath
+        ? `Receipt: ${job.bundlePath}`
+        : `Proof of Cognition: ${job.receiptHash?.slice(0, 19) || "committed"}`;
     }
     return <div className="job-outcome">{outcome}</div>;
   }
@@ -250,15 +361,39 @@ function AppContent() {
           </div>
           <div>
             <Users size={15} />
-            <span>Request / ACK</span>
-            <strong>{peerCount} LAN {peerCount === 1 ? "peer" : "peers"}</strong>
+            <span>Connected</span>
+            <strong>{peerCount} {peerCount === 1 ? "peer" : "peers"}</strong>
           </div>
           <div>
-            <CircleDollarSign size={15} />
-            <span>Payment rail</span>
-            <strong className="warning">Not connected</strong>
+            <RadioTower size={15} />
+            <span>Internet relay</span>
+            <strong className={networkInfo?.relay_configured ? "" : "warning"}>
+              {networkInfo?.relay_configured ? "Configured" : "Not configured"}
+            </strong>
           </div>
         </section>
+
+        <form className="connect-strip" onSubmit={(event) => void handleConnect(event)}>
+          <Link size={15} />
+          <label htmlFor="peer-address">Connect to node</label>
+          <input
+            id="peer-address"
+            onChange={(event) => setPeerAddress(event.currentTarget.value)}
+            placeholder="/dns4/relay.example/tcp/4001/p2p/.../p2p-circuit/p2p/..."
+            spellCheck={false}
+            value={peerAddress}
+          />
+          <button disabled={connecting || !peerAddress.trim()} type="submit">
+            {connecting ? "Dialing" : "Connect"}
+          </button>
+        </form>
+
+        {relayAddress ? (
+          <div className="share-address">
+            <span>Your relay address</span>
+            <code>{relayAddress}</code>
+          </div>
+        ) : null}
 
         {nodeError ? <div className="error-banner">Node error: {nodeError}</div> : null}
         {!isTauriRuntime() ? (
@@ -350,7 +485,7 @@ function AppContent() {
                 <div className="empty-state">
                   <Github size={24} />
                   <strong>No committed audit requests</strong>
-                  <span>Post a repository or connect another CYPHES node on the same network.</span>
+                  <span>Post a repository or connect another CYPHES node by multiaddress.</span>
                 </div>
               ) : (
                 sortedJobs.map((job) => {
@@ -372,6 +507,12 @@ function AppContent() {
                             : ""}
                         </span>
                         <span>{job.repository.stars.toLocaleString()} stars</span>
+                        {job.receiptHash ? (
+                          <span className="receipt-chip">
+                            <ReceiptText size={11} />
+                            Proof of Cognition
+                          </span>
+                        ) : null}
                       </div>
                       <div className="job-footer">
                         <div>
@@ -392,8 +533,8 @@ function AppContent() {
           <span>ATP v0.3 envelopes</span>
           <span>Ed25519 identity proof</span>
           <span>SQLite event chain</span>
-          <span>LAN request / ACK</span>
-          <span>No payment rail</span>
+          <span>Relay + direct libp2p</span>
+          <span>Zero-value settlement</span>
         </footer>
       </main>
 

@@ -38,4 +38,7 @@ publish, or commit them. `CYPHES_DATA_DIR` can isolate development identities.
 - GitHub repository metadata is untrusted input.
 - ATP signatures prove control of a node identity, not real-world identity.
 - Proposed compensation is not escrowed or transferred.
-- Audit execution and receipt verification are not implemented.
+- Audit execution is a narrow deterministic worker and is not yet isolated in
+  a hardened container or VM.
+- Receipt verification is available through Artifact Two, but release-grade
+  verifier packaging and automatic invocation remain incomplete.

@@ -41,6 +41,21 @@ export function P2PProvider({ children }: P2PProviderProps) {
           listen("p2p:peer_disconnected", () => {
             void p2p.refreshPeers();
           }),
+          listen("p2p:listen_address", () => {
+            void p2p.refreshNetworkInfo();
+          }),
+          listen("p2p:relay_ready", () => {
+            void p2p.refreshNetworkInfo();
+            setNotice("Public relay reservation is active.");
+          }),
+          listen<{ bundlePath: string }>("atp:receipt_committed", (event) => {
+            void p2p.loadAudits();
+            setNotice(`Proof of Cognition exported to ${event.payload.bundlePath}.`);
+          }),
+          listen("atp:result_received", () => {
+            void p2p.loadAudits();
+            setNotice("Signed worker result received and verified.");
+          }),
         ]);
       }
 
@@ -59,7 +74,11 @@ export function P2PProvider({ children }: P2PProviderProps) {
         }
       }
 
-      await Promise.all([p2p.refreshPeers(), p2p.loadAudits()]);
+      await Promise.all([
+        p2p.refreshPeers(),
+        p2p.refreshNetworkInfo(),
+        p2p.loadAudits(),
+      ]);
     }
 
     initialize().catch((error) => {
@@ -68,6 +87,7 @@ export function P2PProvider({ children }: P2PProviderProps) {
 
     const peerTimer = window.setInterval(() => {
       void p2p.refreshPeers();
+      void p2p.refreshNetworkInfo();
     }, 5_000);
 
     return () => {

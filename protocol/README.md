@@ -1,20 +1,27 @@
 # ATP Repository Audit Profile
 
-This directory contains the cross-implementation contract for the first CYPHES
-workload: a read-only security audit of one public GitHub repository at one
-exact commit.
+This directory is the cross-implementation boundary for the first CYPHES
+workload: a bounded audit of one public GitHub repository at one exact commit.
 
-The profile is intentionally narrower than the ATP specification:
+- `schemas/` contains JSON Schema 2020-12 contract and receipt definitions.
+- `fixtures/repository-audit-*.json` contains canonical structural examples.
+- `fixtures/atp-l1-repository-audit.valid/` is a real complete transaction
+  bundle produced by CYPHES Node and accepted by Artifact Two.
 
-- `cyphes.repository-security-audit/0.1` defines the negotiated contract.
-- `cyphes.repository-security-audit-receipt/0.1` defines the terminal Proof of
-  Cognition receipt.
-- `schemas/` contains JSON Schema 2020-12 definitions for other languages.
-- `fixtures/` contains canonical JSON examples consumed by the Rust tests.
+The implemented sequence is:
 
-The current Node creates and accepts the contract during `NEGOTIATE`. It does
-not yet create a `ROUTE`, execute an audit, settle value, or claim that the
-receipt fixture represents completed work.
+```text
+DISCOVER -> NEGOTIATE -> NEGOTIATE -> ROUTE -> SETTLE -> ATTEST
+```
 
-See [the profile guide](../docs/REPOSITORY_AUDIT_PROFILE.md) for invariants and
-the implementation sequence.
+Runtime worker activity occurs after `ROUTE` under signed leases and is
+evidenced by the signed result and terminal receipt.
+
+Verify the portable fixture:
+
+```bash
+python3 ../../Artifact-Two/tools/verify_atp_bundle.py \
+  fixtures/atp-l1-repository-audit.valid
+```
+
+See [the profile guide](../docs/REPOSITORY_AUDIT_PROFILE.md).

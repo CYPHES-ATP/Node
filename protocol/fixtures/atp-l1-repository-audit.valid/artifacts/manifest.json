@@ -1,0 +1,36 @@
+{
+  "artifacts": [
+    {
+      "mediaType": "text/markdown",
+      "path": "artifacts/audit-report.md",
+      "sha256": "sha256:de9fcf1171b408ef9d5ef98f75232572ae7b5baac2c298fa0d89a9f091d39d04",
+      "sizeBytes": 381
+    },
+    {
+      "mediaType": "application/json",
+      "path": "artifacts/findings.json",
+      "sha256": "sha256:c4a27243ea923f14950f0d3bd8d9db5d5ac5e2c0860456a6d124ee18daeeca6d",
+      "sizeBytes": 664
+    },
+    {
+      "mediaType": "application/sarif+json",
+      "path": "artifacts/results.sarif",
+      "sha256": "sha256:389c6c4cafa8652548f2d919d3ae42ccdbb8f269e78e69e7d14ec6fa99d38354",
+      "sizeBytes": 683
+    },
+    {
+      "mediaType": "application/json",
+      "path": "artifacts/checks.json",
+      "sha256": "sha256:aab07ef9f22f5f3995bad23d1ef03d2cb2f360a0e445a47936547ec4f7c322e3",
+      "sizeBytes": 478
+    }
+  ],
+  "contractHash": "sha256:94f4942d50edd5896210d330da760b1fb0df7fe8f1ed589f969d7f183f0fb90d",
+  "repository": {
+    "commitSha": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+    "fullName": "octocat/Hello-World",
+    "url": "https://github.com/octocat/Hello-World"
+  },
+  "schemaVersion": "0.1",
+  "transactionId": "audit-e2e-82be7153-b093-41ed-9d9d-21f5c46dd4dc"
+}

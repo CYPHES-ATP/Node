@@ -225,6 +225,83 @@ main {
   font-size: 13px;
 }
 
+.connect-strip {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.connect-strip svg {
+  color: var(--cyan);
+}
+
+.connect-strip label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.connect-strip input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.connect-strip input::placeholder {
+  color: rgba(245, 251, 250, 0.28);
+}
+
+.connect-strip button {
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(0, 246, 255, 0.08);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.share-address {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px 0;
+  color: var(--faint);
+  font-family: var(--mono);
+}
+
+.share-address span {
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.share-address code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cyan-soft);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  user-select: text;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.04fr) minmax(380px, 0.96fr);
@@ -517,6 +594,14 @@ form > label,
   font-size: 9px;
 }
 
+.repo-meta .receipt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: rgba(199, 255, 71, 0.25);
+  color: var(--green);
+}
+
 .job-footer {
   display: flex;
   align-items: flex-end;
@@ -611,5 +696,13 @@ footer {
 
   .truth-strip > div:last-child {
     border-bottom: 0;
+  }
+
+  .connect-strip {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .connect-strip label {
+    display: none;
   }
 }
