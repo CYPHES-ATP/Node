@@ -12,9 +12,9 @@ There is no central work-order database. Each participant verifies signed ATP
 messages and commits its own SQLite event chain.
 
 The default network manifest is fetched from `network/bootstrap.json`. It
-currently points to the externally verified CYPHES-operated IPv6 developer
-endpoint. Nodes on IPv4-only networks need an explicit reachable relay until
-the default endpoint receives a dedicated IPv4.
+currently points to the externally verified CYPHES-operated IPv4 developer
+endpoint. A node with ordinary internet access can use it without manually
+entering another node's address.
 
 ## Install
 

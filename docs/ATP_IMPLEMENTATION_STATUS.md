@@ -64,7 +64,7 @@ an ATP v0.3 wire verb.
 | Default network manifest and runtime overrides | Implemented |
 | Manual direct/relay multiaddress dialing | Implemented |
 | DCUtR behavior | Implemented |
-| CYPHES-hosted public endpoint | IPv6 developer endpoint live; dedicated IPv4 and branded DNS pending |
+| CYPHES-hosted public endpoint | Dedicated IPv4 developer endpoint live and externally smoke tested; branded DNS and redundancy pending |
 | Durable public work index | Not implemented |
 | AutoNAT and reachability scoring | Not implemented |
 | Offline mailbox and durable retry | Not implemented |
