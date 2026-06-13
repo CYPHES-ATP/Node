@@ -1,7 +1,14 @@
 # Install And Test
 
-The current distribution path is source-only. There are no signed release
-binaries yet.
+## Download The macOS Preview
+
+Apple Silicon users can download the current developer DMG from:
+
+https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.0-dev
+
+Drag `CYPHES` to Applications. This build is not Apple-notarized yet, so
+Control-click the app, select **Open**, then confirm **Open** the first time.
+Windows and Linux binary distributions are not available yet.
 
 ## Native Development
 

@@ -64,7 +64,7 @@ an ATP v0.3 wire verb.
 | Default network manifest and runtime overrides | Implemented |
 | Manual direct/relay multiaddress dialing | Implemented |
 | DCUtR behavior | Implemented |
-| CYPHES-hosted public endpoint | Dedicated IPv4 developer endpoint live and externally smoke tested; branded DNS and redundancy pending |
+| CYPHES-hosted public endpoint | `relay.cyphes.com` is live on a dedicated IPv4 and externally smoke tested; redundancy pending |
 | Durable public work index | Not implemented |
 | AutoNAT and reachability scoring | Not implemented |
 | Offline mailbox and durable retry | Not implemented |
@@ -99,4 +99,4 @@ networks remains the next operational acceptance test.
 - Add offline delivery, retries, peer abuse controls, and key recovery.
 - Complete reject, revoke, cancel, expire, and dispute paths.
 - Add a funded settlement adapter before representing compensation as payable.
-- Ship signed installers and an update policy.
+- Add Apple notarization, Windows/Linux packages, and an update policy.

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 4 ]]; then
-  echo "usage: $0 <fly-app-name> [region] [organization] [ip-family]" >&2
-  echo "example: $0 cyphes-atp-network sjc personal 4" >&2
+if [[ $# -lt 1 || $# -gt 5 ]]; then
+  echo "usage: $0 <fly-app-name> [region] [organization] [ip-family] [public-host]" >&2
+  echo "example: $0 cyphes-atp-network sjc personal 4 relay.cyphes.com" >&2
   exit 1
 fi
 
@@ -11,6 +11,7 @@ app="$1"
 region="${2:-sjc}"
 organization="${3:-personal}"
 ip_family="${4:-4}"
+public_host="${5:-${app}.fly.dev}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 config="$root/relay/fly.toml"
 
@@ -85,7 +86,6 @@ if ! jq -e \
   fi
 fi
 
-public_host="${app}.fly.dev"
 public_addr="/${dns_protocol}/${public_host}/tcp/4001"
 
 "$fly_bin" deploy \

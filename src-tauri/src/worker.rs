@@ -603,7 +603,7 @@ fn build_artifacts(
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "CYPHES deterministic repository auditor", "version": "0.1.0-dev"}},
+            "tool": {"driver": {"name": "CYPHES deterministic repository auditor", "version": "0.2.0-dev"}},
             "results": sarif_results
         }]
     }))
@@ -680,7 +680,7 @@ async fn download_checkout(
         repository.full_name, repository.commit_sha
     );
     let response = reqwest::Client::builder()
-        .user_agent("CYPHES/0.1.0-dev")
+        .user_agent("CYPHES/0.2.0-dev")
         .redirect(reqwest::redirect::Policy::limited(2))
         .build()
         .map_err(|error| error.to_string())?

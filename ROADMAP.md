@@ -21,14 +21,13 @@ marketplace breadth.
 - TCP, WebSocket, QUIC, mDNS, Identify, Ping, Relay v2, Rendezvous, and DCUtR.
 - Docker-ready relay/rendezvous service with reservation and automatic
   two-node discovery smoke tests.
+- Public dedicated IPv4 relay/rendezvous endpoint at `relay.cyphes.com`.
+- Downloadable ad hoc-signed Apple Silicon macOS developer DMG.
 
 ## 1. Staging Network
 
 Status: **Partial**
 
-- Add dedicated IPv4 reachability and point `relay.cyphes.com` at the verified
-  CYPHES-operated Fly endpoint. The IPv6 developer endpoint and automatic
-  discovery smoke test are live.
 - Deploy a second independent relay/rendezvous endpoint.
 - Add DNS endpoint rotation and health telemetry.
 - Add signed capability cards and namespace-aware capability matching.
@@ -80,7 +79,7 @@ Status: **Planned**
 
 ## 6. Distribution
 
-Status: **Planned**
+Status: **Partial**
 
 - Signed and notarized macOS build.
 - Linux packages and Windows installer.

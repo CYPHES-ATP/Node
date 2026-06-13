@@ -19,7 +19,7 @@ Use an explicit preview status for an IPv6-only endpoint:
 
 ```bash
 ./scripts/publish-network-config.sh \
-  /dns6/cyphes-atp-network.fly.dev/tcp/4001 \
+  /dns6/relay.cyphes.com/tcp/4001 \
   RELAY_PEER_ID \
   online-ipv6-preview
 ```
