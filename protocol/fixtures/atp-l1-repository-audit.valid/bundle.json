@@ -1,0 +1,8 @@
+{
+  "artifactCount": 5,
+  "eventRoot": "sha256:62a0af590d9d5240e2c271cf6b78b7e3b59999f1c257adac05ed580caeadc0a1",
+  "format": "artifact-two/0.1",
+  "generatedBy": "CYPHES/0.1.0-dev",
+  "receiptHash": "sha256:3bb23bf09d123a0d3e95f5467db3714a1d29a278d95d5e2757912c297aa02438",
+  "transactionId": "audit-e2e-82be7153-b093-41ed-9d9d-21f5c46dd4dc"
+}

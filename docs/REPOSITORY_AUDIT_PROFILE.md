@@ -1,54 +1,66 @@
 # Repository Audit ATP Profile
 
-Status: contract profile implemented; routing, execution, and receipt production
-remain planned.
+Status: implemented developer-preview vertical slice
 
 Profile version: `0.1`
 
 ## Purpose
 
-This profile turns the generic ATP objects in the May 21, 2026 specification
-into one interoperable work order: an independent worker audits one public
-GitHub repository at one exact commit.
+This profile defines one interoperable ATP work order: an independent worker
+audits a public GitHub repository at an exact commit and returns a verifiable
+Proof of Cognition.
 
-The implementation is split deliberately:
+## Transaction
 
-1. `DISCOVER` commits the repository, exact commit, requested scope, and a
-   visibly non-payable proposed commercial term.
-2. The worker's first `NEGOTIATE` event contains the complete audit contract.
-3. The requester's second `NEGOTIATE` event accepts the canonical
-   `contractHash`.
-4. Future `ROUTE`, `EXECUTE`, `SETTLE`, and `ATTEST` work must extend that
-   accepted contract without silently replacing it.
+1. `DISCOVER` commits repository, commit, scope, and non-payable proposed term.
+2. Worker `NEGOTIATE` commits the full audit contract.
+3. Requester `NEGOTIATE` selects its canonical `contractHash`.
+4. Requester `ROUTE` grants signed repository-read and artifact-write leases.
+5. Worker performs bounded deterministic activity under those leases.
+6. Worker sends a signed result containing access evidence and artifacts.
+7. Requester verifies the result and emits zero-value `SETTLE`.
+8. Worker emits `ATTEST` with a signed Proof of Cognition.
+
+There is no `EXECUTE` wire envelope in this profile. Execution is the bounded
+activity authorized by `ROUTE` and evidenced before `SETTLE`.
 
 ## Contract Invariants
 
-The contract profile is `cyphes.repository-security-audit/0.1`.
+- Canonical public GitHub URL.
+- Exact 40- or 64-character commit SHA.
+- Read-only repository access.
+- No repository code execution.
+- No network use after the pinned archive fetch.
+- Checkout deletion after result production.
+- Maximum 3,600-second contract duration.
+- Five required artifact paths.
+- Proposed USDC amount marked `non-payable-term`.
+- Actual settlement fixed to `zero-value`.
+- Worker signature, requester approval, artifact hashes, and event chain
+  required.
 
-- Repository URLs must be canonical public GitHub URLs.
-- The repository must be pinned to a 40- or 64-character Git commit SHA.
-- Repository access is read-only and limited to that commit.
-- The checkout is deleted after receipt production.
-- The five required artifacts are fixed by path.
-- The current settlement is explicitly `zero-value`.
-- The amount shown in the desktop form remains a `non-payable-term`.
-- Worker signature, requester approval, artifact hashes, and event-chain
-  verification are required by the proof policy.
-- The offer envelope expiry and contract expiry must match.
+`contractHash = sha256(JCS(contract))`.
 
-The contract hash is:
+## Context Leases
+
+`ROUTE` contains two requester-signed leases:
 
 ```text
-sha256(JCS(contract))
+github:<owner>/<repo>@<commit>
+  operations: [read]
+
+artifacts:<transaction-id>
+  operations: [write]
 ```
 
-The requester accepts that hash, not an uncommitted UI representation.
+Both leases bind issuer, resource, operation, purpose, boundary, retention,
+audit policy, nonce, and TTL. The worker rejects inactive, widened, unsigned,
+or contract-mismatched leases.
 
-Requests signed before this profile do not contain a commit SHA. They remain
-valid historical events, but the client marks them as unpinned and requires a
-new request instead of rewriting signed state.
+The worker additionally rejects archive path escape, symlink, hardlink, and
+artifact namespace escape.
 
-## Required Artifacts
+## Worker Output
 
 ```text
 artifacts/audit-report.md
@@ -58,65 +70,52 @@ artifacts/checks.json
 artifacts/manifest.json
 ```
 
-The future manifest must bind each artifact path, media type, byte size, and
-SHA-256 digest.
+The current deterministic checks inventory files and report security-policy,
+GitHub Actions, and tracked environment-file posture. This is proof of ATP
+coordination and bounded work, not a claim of comprehensive source-code
+vulnerability analysis.
 
-## Receipt Profile
+## Receipt
 
 The receipt profile is
 `cyphes.repository-security-audit-receipt/0.1`.
 
 It binds:
 
-- the accepted contract hash;
-- the exact repository commit and scope;
-- exercised leases and accessed resources;
-- artifact paths, hashes, media types, and sizes;
+- transaction and accepted contract hash;
+- exact repository and scope;
+- exercised leases and resources;
+- artifact path, media type, hash, and size;
 - requester approval;
 - zero-value settlement;
-- terminal ATP event root;
-- receipt signatures.
+- `SETTLE` event root;
+- worker Ed25519 signature.
 
-`receiptHash` is computed over the JCS-canonical receipt after removing
-`receiptHash` and `signatures`. Signatures bind that hash.
+`receiptHash` removes `receiptHash` and `signatures` before JCS hashing. Receipt
+signatures remove only `signatures` before signing.
 
-The Node currently validates the structural receipt profile and canonical hash
-in tests, including the presence of distinct worker and requester signature
-records. The fixture signature strings are non-cryptographic test values. The
-Node does not yet produce or accept a receipt in the live transaction flow.
-Artifact Two will remain the independent verifier for signatures, event
-continuity, lease evidence, and artifact bytes.
-
-## Deterministic Failures
-
-Profile validation returns ATP wire codes with a stable profile reason:
+## Portable Bundle
 
 ```text
-ATP_BAD_STATE: AUDIT_CONTRACT_REPOSITORY_UNPINNED: ...
-ATP_BAD_STATE: AUDIT_CONTRACT_HASH_MISMATCH: ...
-ATP_PROOF_UNSATISFIED: AUDIT_RECEIPT_HASH_MISMATCH: ...
-ATP_PROOF_UNSATISFIED: AUDIT_RECEIPT_ARTIFACT_MISSING: ...
+public-keys.json
+envelopes.jsonl
+transcript.jsonl
+contract.json
+leases.json
+lease-access-log.jsonl
+receipt.json
+artifacts/
 ```
 
-The wire code is suitable for ATP acknowledgements. The profile reason is
-suitable for developer diagnostics and Artifact Two result mapping.
+The committed real fixture is
+`protocol/fixtures/atp-l1-repository-audit.valid/`. Artifact Two verifies
+signature, hash, contract, lease, artifact, and event-chain integrity.
 
-## Fixtures
+## Known Limits
 
-Canonical examples live in:
-
-```text
-protocol/schemas/repository-audit-contract.v0.1.schema.json
-protocol/schemas/repository-audit-receipt.v0.1.schema.json
-protocol/fixtures/repository-audit-contract.v0.1.json
-protocol/fixtures/repository-audit-receipt.v0.1.json
-```
-
-They are protocol fixtures, not evidence that an audit occurred. The Rust test
-suite parses and validates both.
-
-## Next Implementation Step
-
-Add `ROUTE` using the accepted contract hash, an exact repository resource
-descriptor, and an expiring read-only context lease. The worker must not clone
-or inspect the repository until that lease is committed and verified.
+- No hardened process/container isolation.
+- No private repository capabilities.
+- No live cancellation or lease revocation.
+- No real payment proof.
+- No broad language-specific static analysis.
+- One fixed success sequence; rejection and dispute profiles remain.

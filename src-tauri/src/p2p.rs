@@ -2,42 +2,90 @@ use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
 
 use futures::StreamExt;
 use libp2p::{
-    identity, mdns, noise, request_response,
+    dcutr, identify, identity, mdns, noise, ping, relay, request_response,
     request_response::{OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, StreamProtocol, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::{select, sync::mpsc};
 
 use crate::{
-    atp::{agent_id, AtpAck, AtpEnvelope},
+    atp::{agent_id, create_signed_envelope, AtpAck, AtpEnvelope, AtpVerb},
+    bundle::export_receipt_bundle,
     state::{P2pState, PeerInfo},
-    store::{now_millis, rejection_ack, AtpStore},
+    store::{now_millis, rejection_ack, AtpStore, AuditEventBody},
+    worker::SignedExecutionResult,
 };
 
 pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.3";
+const MAX_WIRE_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub enum SwarmCommand {
     SendEnvelope(AtpEnvelope),
+    SendExecutionResult {
+        result: SignedExecutionResult,
+        audience: String,
+    },
+    Dial(Multiaddr),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
+enum WireRequest {
+    Envelope(AtpEnvelope),
+    ExecutionResult(SignedExecutionResult),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
+enum WireResponse {
+    Envelope(AtpAck),
+    ExecutionResult {
+        accepted: bool,
+        transaction_id: String,
+        result_hash: String,
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug)]
+enum PendingOutbound {
+    Envelope(String),
+    ExecutionResult {
+        transaction_id: String,
+        result_hash: String,
+    },
 }
 
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "AgentBehaviourEvent")]
 struct AgentBehaviour {
-    request_response: request_response::cbor::Behaviour<AtpEnvelope, AtpAck>,
+    request_response: request_response::Behaviour<
+        request_response::cbor::codec::Codec<WireRequest, WireResponse>,
+    >,
     mdns: mdns::tokio::Behaviour,
+    identify: identify::Behaviour,
+    ping: ping::Behaviour,
+    relay: relay::client::Behaviour,
+    dcutr: dcutr::Behaviour,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum AgentBehaviourEvent {
-    RequestResponse(request_response::Event<AtpEnvelope, AtpAck>),
+    RequestResponse(request_response::Event<WireRequest, WireResponse>),
     Mdns(mdns::Event),
+    Identify(identify::Event),
+    Ping(ping::Event),
+    Relay(relay::client::Event),
+    Dcutr(dcutr::Event),
 }
 
-impl From<request_response::Event<AtpEnvelope, AtpAck>> for AgentBehaviourEvent {
-    fn from(event: request_response::Event<AtpEnvelope, AtpAck>) -> Self {
+impl From<request_response::Event<WireRequest, WireResponse>> for AgentBehaviourEvent {
+    fn from(event: request_response::Event<WireRequest, WireResponse>) -> Self {
         Self::RequestResponse(event)
     }
 }
@@ -45,6 +93,30 @@ impl From<request_response::Event<AtpEnvelope, AtpAck>> for AgentBehaviourEvent 
 impl From<mdns::Event> for AgentBehaviourEvent {
     fn from(event: mdns::Event) -> Self {
         Self::Mdns(event)
+    }
+}
+
+impl From<identify::Event> for AgentBehaviourEvent {
+    fn from(event: identify::Event) -> Self {
+        Self::Identify(event)
+    }
+}
+
+impl From<ping::Event> for AgentBehaviourEvent {
+    fn from(event: ping::Event) -> Self {
+        Self::Ping(event)
+    }
+}
+
+impl From<relay::client::Event> for AgentBehaviourEvent {
+    fn from(event: relay::client::Event) -> Self {
+        Self::Relay(event)
+    }
+}
+
+impl From<dcutr::Event> for AgentBehaviourEvent {
+    fn from(event: dcutr::Event) -> Self {
+        Self::Dcutr(event)
     }
 }
 
@@ -96,6 +168,7 @@ pub async fn spawn_swarm(
 ) -> Result<(String, Vec<String>), String> {
     let local_peer_id = keypair.public().to_peer_id();
     let local_agent_id = agent_id(&keypair.public());
+    let runtime_keypair = keypair.clone();
 
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
@@ -105,46 +178,82 @@ pub async fn spawn_swarm(
             yamux::Config::default,
         )
         .map_err(|error| error.to_string())?
+        .with_quic()
+        .with_dns()
+        .map_err(|error| error.to_string())?
         .with_websocket(noise::Config::new, yamux::Config::default)
         .await
         .map_err(|error| error.to_string())?
-        .with_behaviour(move |key| {
+        .with_relay_client(noise::Config::new, yamux::Config::default)
+        .map_err(|error| error.to_string())?
+        .with_behaviour(move |key, relay| {
             let peer_id = key.public().to_peer_id();
-            let request_response = request_response::cbor::Behaviour::new(
+            let codec = request_response::cbor::codec::Codec::default()
+                .set_request_size_maximum(MAX_WIRE_REQUEST_BYTES)
+                .set_response_size_maximum(2 * 1024 * 1024);
+            let request_response = request_response::Behaviour::with_codec(
+                codec,
                 [(StreamProtocol::new(ATP_PROTOCOL), ProtocolSupport::Full)],
-                request_response::Config::default().with_request_timeout(Duration::from_secs(15)),
+                request_response::Config::default().with_request_timeout(Duration::from_secs(90)),
             );
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
+            let identify = identify::Behaviour::new(
+                identify::Config::new(ATP_PROTOCOL.to_string(), key.public())
+                    .with_agent_version("CYPHES/0.1.0-dev".to_string())
+                    .with_push_listen_addr_updates(true),
+            );
             Ok(AgentBehaviour {
                 request_response,
                 mdns,
+                identify,
+                ping: ping::Behaviour::default(),
+                relay,
+                dcutr: dcutr::Behaviour::new(peer_id),
             })
         })
         .map_err(|error| error.to_string())?
         .build();
 
-    swarm
-        .listen_on(
-            "/ip4/0.0.0.0/tcp/0"
-                .parse::<Multiaddr>()
-                .map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
-    swarm
-        .listen_on(
-            "/ip4/0.0.0.0/tcp/0/ws"
-                .parse::<Multiaddr>()
-                .map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
+    for address in [
+        "/ip4/0.0.0.0/tcp/0",
+        "/ip4/0.0.0.0/tcp/0/ws",
+        "/ip4/0.0.0.0/udp/0/quic-v1",
+    ] {
+        swarm
+            .listen_on(
+                address
+                    .parse::<Multiaddr>()
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    let relay_addr = configured_relay()?;
+    if let Some(relay_addr) = relay_addr.as_ref() {
+        swarm
+            .dial(relay_addr.clone())
+            .map_err(|error| format!("could not dial configured relay: {error}"))?;
+    }
+    for address in configured_bootstrap_peers()? {
+        swarm
+            .dial(address)
+            .map_err(|error| format!("could not dial bootstrap peer: {error}"))?;
+    }
 
     let listen_addrs = swarm
         .listeners()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.listen_addrs = listen_addrs.clone();
+        inner.relay_configured = relay_addr.is_some();
+    }
 
     tauri::async_runtime::spawn(async move {
-        let mut outbound = HashMap::<OutboundRequestId, String>::new();
+        let mut outbound = HashMap::<OutboundRequestId, PendingOutbound>::new();
+        let relay_target = relay_addr
+            .and_then(|address| relay_peer_id(&address).map(|peer_id| (peer_id, address)));
+        let mut relay_listener_started = false;
         loop {
             select! {
                 maybe_command = rx.recv() => {
@@ -153,7 +262,24 @@ pub async fn spawn_swarm(
                     };
                     match command {
                         SwarmCommand::SendEnvelope(envelope) => {
-                            send_to_known_peers(&mut swarm, &state, envelope, &mut outbound);
+                            send_envelope(&mut swarm, &state, envelope, &mut outbound);
+                        }
+                        SwarmCommand::SendExecutionResult { result, audience } => {
+                            send_execution_result(
+                                &mut swarm,
+                                &state,
+                                result,
+                                &audience,
+                                &mut outbound,
+                            );
+                        }
+                        SwarmCommand::Dial(address) => {
+                            if let Err(error) = swarm.dial(address.clone()) {
+                                let _ = app.emit(
+                                    "p2p:connection_failed",
+                                    serde_json::json!({"address": address.to_string(), "reason": error.to_string()}),
+                                );
+                            }
                         }
                     }
                 }
@@ -164,9 +290,12 @@ pub async fn spawn_swarm(
                         &app,
                         &state,
                         &store,
+                        &runtime_keypair,
                         local_peer_id,
                         &local_agent_id,
                         &mut outbound,
+                        relay_target.as_ref(),
+                        &mut relay_listener_started,
                     );
                 }
             }
@@ -176,15 +305,19 @@ pub async fn spawn_swarm(
     Ok((local_peer_id.to_string(), listen_addrs))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_swarm_event(
     event: SwarmEvent<AgentBehaviourEvent>,
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     app: &AppHandle,
     state: &P2pState,
     store: &AtpStore,
+    keypair: &identity::Keypair,
     local_peer_id: PeerId,
     local_agent_id: &str,
-    outbound: &mut HashMap<OutboundRequestId, String>,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+    relay_target: Option<&(PeerId, Multiaddr)>,
+    relay_listener_started: &mut bool,
 ) {
     match event {
         SwarmEvent::Behaviour(AgentBehaviourEvent::RequestResponse(
@@ -194,38 +327,115 @@ fn handle_swarm_event(
                 request, channel, ..
             } => {
                 touch_peer(state, peer);
-                let ack = match store.commit_envelope(
-                    &request,
-                    local_agent_id,
-                    Some(&peer.to_string()),
-                ) {
-                    Ok(ack) => {
-                        if !ack.duplicate {
-                            let _ = app.emit("atp:jobs_changed", ());
-                        }
-                        ack
+                let response = match request {
+                    WireRequest::Envelope(envelope) => {
+                        let ack = match store.commit_envelope(
+                            &envelope,
+                            local_agent_id,
+                            Some(&peer.to_string()),
+                        ) {
+                            Ok(ack) => {
+                                if !ack.duplicate {
+                                    let _ = app.emit("atp:jobs_changed", ());
+                                    maybe_attest(
+                                        swarm,
+                                        app,
+                                        store,
+                                        keypair,
+                                        local_agent_id,
+                                        peer,
+                                        &envelope,
+                                        &ack,
+                                        outbound,
+                                    );
+                                    if envelope.verb == AtpVerb::Attest {
+                                        emit_bundle_export(app, store, &envelope.transaction_id);
+                                    }
+                                }
+                                ack
+                            }
+                            Err(reason) => rejection_ack(&envelope, local_agent_id, reason),
+                        };
+                        WireResponse::Envelope(ack)
                     }
-                    Err(reason) => rejection_ack(&request, local_agent_id, reason),
+                    WireRequest::ExecutionResult(result) => {
+                        let transaction_id = result.transaction_id.clone();
+                        let result_hash = result.result_hash.clone();
+                        match store.save_execution_result(&result) {
+                            Ok(()) => {
+                                let _ = app.emit("atp:jobs_changed", ());
+                                let _ = app.emit(
+                                    "atp:result_received",
+                                    serde_json::json!({
+                                        "transactionId": transaction_id,
+                                        "resultHash": result_hash,
+                                    }),
+                                );
+                                WireResponse::ExecutionResult {
+                                    accepted: true,
+                                    transaction_id,
+                                    result_hash,
+                                    reason: None,
+                                }
+                            }
+                            Err(reason) => WireResponse::ExecutionResult {
+                                accepted: false,
+                                transaction_id,
+                                result_hash,
+                                reason: Some(reason),
+                            },
+                        }
+                    }
                 };
                 let _ = swarm
                     .behaviour_mut()
                     .request_response
-                    .send_response(channel, ack);
+                    .send_response(channel, response);
             }
             request_response::Message::Response {
                 request_id,
                 response,
             } => {
-                outbound.remove(&request_id);
+                let pending = outbound.remove(&request_id);
                 touch_peer(state, peer);
-                if let Err(error) = store.mark_delivery(&peer.to_string(), &response) {
+                match response {
+                    WireResponse::Envelope(ack) => {
+                        if let Err(error) = store.mark_delivery(&peer.to_string(), &ack) {
+                            let _ = app.emit(
+                                "atp:delivery_failed",
+                                serde_json::json!({ "peerId": peer.to_string(), "reason": error }),
+                            );
+                        } else {
+                            let _ = app.emit("atp:jobs_changed", ());
+                            let _ = app.emit("atp:delivery_acknowledged", ack);
+                        }
+                    }
+                    WireResponse::ExecutionResult {
+                        accepted,
+                        transaction_id,
+                        result_hash,
+                        reason,
+                    } => {
+                        let _ = app.emit(
+                            if accepted {
+                                "atp:result_acknowledged"
+                            } else {
+                                "atp:delivery_failed"
+                            },
+                            serde_json::json!({
+                                "peerId": peer.to_string(),
+                                "transactionId": transaction_id,
+                                "resultHash": result_hash,
+                                "reason": reason,
+                            }),
+                        );
+                    }
+                }
+                if pending.is_none() {
                     let _ = app.emit(
                         "atp:delivery_failed",
-                        serde_json::json!({ "peerId": peer.to_string(), "reason": error }),
+                        serde_json::json!({"reason": "received response for unknown request"}),
                     );
-                } else {
-                    let _ = app.emit("atp:jobs_changed", ());
-                    let _ = app.emit("atp:delivery_acknowledged", response);
                 }
             }
         },
@@ -237,12 +447,22 @@ fn handle_swarm_event(
                 ..
             },
         )) => {
-            let event_hash = outbound.remove(&request_id).unwrap_or_default();
+            let pending = outbound.remove(&request_id);
+            let (event_hash, transaction_id, result_hash) = match pending {
+                Some(PendingOutbound::Envelope(event_hash)) => (Some(event_hash), None, None),
+                Some(PendingOutbound::ExecutionResult {
+                    transaction_id,
+                    result_hash,
+                }) => (None, Some(transaction_id), Some(result_hash)),
+                None => (None, None, None),
+            };
             let _ = app.emit(
                 "atp:delivery_failed",
                 serde_json::json!({
                     "peerId": peer.to_string(),
                     "eventHash": event_hash,
+                    "transactionId": transaction_id,
+                    "resultHash": result_hash,
                     "reason": error.to_string(),
                 }),
             );
@@ -252,24 +472,8 @@ fn handle_swarm_event(
                 if peer_id == local_peer_id {
                     continue;
                 }
-
                 swarm.add_peer_address(peer_id, addr);
-                touch_peer(state, peer_id);
-                let peer_agent_id = format!("urn:libp2p:{peer_id}");
-                if let Ok(envelopes) = store.envelopes_for_peer(local_agent_id, &peer_agent_id) {
-                    for envelope in envelopes {
-                        let event_hash = crate::atp::event_hash(&envelope).unwrap_or_default();
-                        let request_id = swarm
-                            .behaviour_mut()
-                            .request_response
-                            .send_request(&peer_id, envelope);
-                        outbound.insert(request_id, event_hash);
-                    }
-                }
-                let _ = app.emit(
-                    "p2p:peer_connected",
-                    serde_json::json!({ "peerId": peer_id.to_string() }),
-                );
+                on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
             }
         }
         SwarmEvent::Behaviour(AgentBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
@@ -283,41 +487,265 @@ fn handle_swarm_event(
                 }
             }
         }
+        SwarmEvent::Behaviour(AgentBehaviourEvent::Identify(identify::Event::Received {
+            peer_id,
+            info,
+            ..
+        })) => {
+            for address in info.listen_addrs {
+                swarm.add_peer_address(peer_id, address);
+            }
+            on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+        }
+        SwarmEvent::Behaviour(AgentBehaviourEvent::Relay(
+            relay::client::Event::ReservationReqAccepted {
+                relay_peer_id,
+                renewal,
+                ..
+            },
+        )) => {
+            let _ = app.emit(
+                "p2p:relay_ready",
+                serde_json::json!({
+                    "relayPeerId": relay_peer_id.to_string(),
+                    "renewal": renewal,
+                }),
+            );
+        }
+        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+            if !*relay_listener_started {
+                if let Some((relay_peer_id, relay_addr)) = relay_target {
+                    if peer_id == *relay_peer_id {
+                        let mut circuit_addr = relay_addr.clone();
+                        circuit_addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
+                        match swarm.listen_on(circuit_addr) {
+                            Ok(_) => *relay_listener_started = true,
+                            Err(error) => {
+                                let _ = app.emit(
+                                    "p2p:connection_failed",
+                                    serde_json::json!({
+                                        "address": relay_addr.to_string(),
+                                        "reason": format!("could not reserve relay circuit: {error}"),
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+        }
+        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+            if let Ok(mut inner) = state.inner.lock() {
+                inner.peers.remove(&peer_id.to_string());
+            }
+            let _ = app.emit(
+                "p2p:peer_disconnected",
+                serde_json::json!({ "peerId": peer_id.to_string() }),
+            );
+        }
+        SwarmEvent::NewListenAddr { address, .. } => {
+            let address = address.to_string();
+            if let Ok(mut inner) = state.inner.lock() {
+                if !inner.listen_addrs.contains(&address) {
+                    inner.listen_addrs.push(address.clone());
+                }
+            }
+            let _ = app.emit(
+                "p2p:listen_address",
+                serde_json::json!({"address": address}),
+            );
+        }
+        SwarmEvent::ListenerClosed { addresses, .. } => {
+            if let Ok(mut inner) = state.inner.lock() {
+                let expired = addresses
+                    .into_iter()
+                    .map(|address| address.to_string())
+                    .collect::<Vec<_>>();
+                inner
+                    .listen_addrs
+                    .retain(|address| !expired.contains(address));
+            }
+        }
         _ => {}
     }
 }
 
-fn send_to_known_peers(
+#[allow(clippy::too_many_arguments)]
+fn maybe_attest(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    store: &AtpStore,
+    keypair: &identity::Keypair,
+    local_agent_id: &str,
+    peer: PeerId,
+    envelope: &AtpEnvelope,
+    ack: &AtpAck,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    if envelope.verb != AtpVerb::Settle {
+        return;
+    }
+    let Ok(AuditEventBody::SettlementApproved { approved, .. }) =
+        serde_json::from_value::<AuditEventBody>(envelope.body.clone())
+    else {
+        return;
+    };
+    let receipt = match store.build_worker_receipt(
+        &envelope.transaction_id,
+        &ack.event_hash,
+        approved,
+        keypair,
+    ) {
+        Ok(receipt) => receipt,
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({"transactionId": envelope.transaction_id, "reason": reason}),
+            );
+            return;
+        }
+    };
+    let attest = match create_signed_envelope(
+        keypair,
+        AtpVerb::Attest,
+        envelope.transaction_id.clone(),
+        Some(envelope.issuer.clone()),
+        Some(ack.event_hash.clone()),
+        serde_json::to_value(receipt).unwrap_or_default(),
+    ) {
+        Ok(attest) => attest,
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({"transactionId": envelope.transaction_id, "reason": reason}),
+            );
+            return;
+        }
+    };
+    match store.commit_envelope(&attest, local_agent_id, None) {
+        Ok(_) => {
+            emit_bundle_export(app, store, &attest.transaction_id);
+            let event_hash = crate::atp::event_hash(&attest).unwrap_or_default();
+            let request_id = swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer, WireRequest::Envelope(attest));
+            outbound.insert(request_id, PendingOutbound::Envelope(event_hash));
+            let _ = app.emit("atp:jobs_changed", ());
+        }
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({"transactionId": envelope.transaction_id, "reason": reason}),
+            );
+        }
+    }
+}
+
+fn emit_bundle_export(app: &AppHandle, store: &AtpStore, transaction_id: &str) {
+    match export_receipt_bundle(store, transaction_id) {
+        Ok(path) => {
+            let _ = app.emit(
+                "atp:receipt_committed",
+                serde_json::json!({
+                    "transactionId": transaction_id,
+                    "bundlePath": path.to_string_lossy(),
+                }),
+            );
+            let _ = app.emit("atp:jobs_changed", ());
+        }
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({"transactionId": transaction_id, "reason": reason}),
+            );
+        }
+    }
+}
+
+fn on_peer_connected(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    local_agent_id: &str,
+    peer_id: PeerId,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    touch_peer(state, peer_id);
+    let peer_agent_id = format!("urn:libp2p:{peer_id}");
+    if let Ok(envelopes) = store.envelopes_for_peer(local_agent_id, &peer_agent_id) {
+        for envelope in envelopes {
+            let event_hash = crate::atp::event_hash(&envelope).unwrap_or_default();
+            let request_id = swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer_id, WireRequest::Envelope(envelope));
+            outbound.insert(request_id, PendingOutbound::Envelope(event_hash));
+        }
+    }
+    let _ = app.emit(
+        "p2p:peer_connected",
+        serde_json::json!({ "peerId": peer_id.to_string() }),
+    );
+}
+
+fn send_envelope(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
     envelope: AtpEnvelope,
-    outbound: &mut HashMap<OutboundRequestId, String>,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let peers = state
-        .inner
-        .lock()
-        .map(|inner| inner.peers.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+    let peers = target_peers(state, envelope.audience.as_deref());
     let hash = crate::atp::event_hash(&envelope).unwrap_or_default();
-
-    for peer in peers {
-        let Ok(peer_id) = peer.parse::<PeerId>() else {
-            continue;
-        };
-        let peer_agent_id = format!("urn:libp2p:{peer_id}");
-        if envelope
-            .audience
-            .as_deref()
-            .is_some_and(|audience| audience != peer_agent_id)
-        {
-            continue;
-        }
+    for peer_id in peers {
         let request_id = swarm
             .behaviour_mut()
             .request_response
-            .send_request(&peer_id, envelope.clone());
-        outbound.insert(request_id, hash.clone());
+            .send_request(&peer_id, WireRequest::Envelope(envelope.clone()));
+        outbound.insert(request_id, PendingOutbound::Envelope(hash.clone()));
     }
+}
+
+fn send_execution_result(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    result: SignedExecutionResult,
+    audience: &str,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let peers = target_peers(state, Some(audience));
+    for peer_id in peers {
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, WireRequest::ExecutionResult(result.clone()));
+        outbound.insert(
+            request_id,
+            PendingOutbound::ExecutionResult {
+                transaction_id: result.transaction_id.clone(),
+                result_hash: result.result_hash.clone(),
+            },
+        );
+    }
+}
+
+fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
+    state
+        .inner
+        .lock()
+        .map(|inner| {
+            inner
+                .peers
+                .keys()
+                .filter_map(|peer| peer.parse::<PeerId>().ok())
+                .filter(|peer| {
+                    audience.is_none_or(|audience| audience == format!("urn:libp2p:{peer}"))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn touch_peer(state: &P2pState, peer_id: PeerId) {
@@ -330,6 +758,39 @@ fn touch_peer(state: &P2pState, peer_id: PeerId) {
             },
         );
     }
+}
+
+fn configured_relay() -> Result<Option<Multiaddr>, String> {
+    std::env::var("CYPHES_RELAY_ADDR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            value
+                .parse::<Multiaddr>()
+                .map_err(|error| format!("CYPHES_RELAY_ADDR is invalid: {error}"))
+        })
+        .transpose()
+}
+
+fn configured_bootstrap_peers() -> Result<Vec<Multiaddr>, String> {
+    std::env::var("CYPHES_BOOTSTRAP_PEERS")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            value
+                .trim()
+                .parse::<Multiaddr>()
+                .map_err(|error| format!("bootstrap peer address is invalid: {error}"))
+        })
+        .collect()
+}
+
+fn relay_peer_id(address: &Multiaddr) -> Option<PeerId> {
+    address.iter().find_map(|protocol| match protocol {
+        libp2p::multiaddr::Protocol::P2p(peer_id) => Some(peer_id),
+        _ => None,
+    })
 }
 
 fn secure_identity_file(path: &PathBuf) -> Result<(), String> {

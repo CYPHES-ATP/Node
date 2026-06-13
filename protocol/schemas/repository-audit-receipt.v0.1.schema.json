@@ -15,7 +15,6 @@
     "changed",
     "approved",
     "paid",
-    "artifacts",
     "eventRoot",
     "receiptHash",
     "signatures"
@@ -90,17 +89,15 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "artifactPaths",
+        "artifacts",
         "externalState"
       ],
       "properties": {
-        "artifactPaths": {
+        "artifacts": {
           "type": "array",
           "minItems": 5,
-          "uniqueItems": true,
           "items": {
-            "type": "string",
-            "pattern": "^artifacts/"
+            "$ref": "#/$defs/artifact"
           }
         },
         "externalState": {
@@ -134,37 +131,6 @@
     "paid": {
       "$ref": "#/$defs/zeroValueSettlement"
     },
-    "artifacts": {
-      "type": "array",
-      "minItems": 5,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "path",
-          "mediaType",
-          "sha256",
-          "size"
-        ],
-        "properties": {
-          "path": {
-            "type": "string",
-            "pattern": "^artifacts/"
-          },
-          "mediaType": {
-            "type": "string",
-            "minLength": 1
-          },
-          "sha256": {
-            "$ref": "#/$defs/sha256"
-          },
-          "size": {
-            "type": "integer",
-            "minimum": 1
-          }
-        }
-      }
-    },
     "eventRoot": {
       "$ref": "#/$defs/sha256"
     },
@@ -177,12 +143,15 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "type",
           "signer",
           "kid",
-          "algorithm",
           "signature"
         ],
         "properties": {
+          "type": {
+            "const": "Ed25519"
+          },
           "signer": {
             "type": "string",
             "minLength": 1
@@ -190,9 +159,6 @@
           "kid": {
             "type": "string",
             "minLength": 1
-          },
-          "algorithm": {
-            "const": "EdDSA"
           },
           "signature": {
             "type": "string",
@@ -203,6 +169,33 @@
     }
   },
   "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "mediaType",
+        "sha256",
+        "sizeBytes"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^artifacts/"
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "sha256": {
       "type": "string",
       "pattern": "^sha256:[0-9a-fA-F]{64}$"
