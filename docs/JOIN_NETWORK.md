@@ -5,15 +5,15 @@
 CYPHES nodes can connect in three real ways:
 
 1. automatic mDNS discovery on one LAN;
-2. direct dialing of a reachable libp2p multiaddress;
-3. Circuit Relay v2 dialing through an operator-provided public relay.
+2. automatic libp2p Rendezvous discovery through a configured internet relay;
+3. direct or relayed multiaddress dialing as a fallback.
 
 There is no central work-order database. Each participant verifies signed ATP
 messages and commits its own SQLite event chain.
 
-The repository ships relay software, not a permanent CYPHES-operated public
-endpoint. A community or protocol operator must deploy one before unrelated
-internet users can connect without direct reachability.
+The default network manifest is fetched from
+`network/bootstrap.json`. Its addresses are currently null until a permanent
+CYPHES-operated host passes the external acceptance test.
 
 ## Install
 
@@ -75,9 +75,19 @@ The node reserves and advertises a circuit address:
 /dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID/p2p-circuit/p2p/NODE_PEER_ID
 ```
 
-Send that address to the counterparty and paste it into **Connect to node**.
-The nodes authenticate each other end to end. The relay sees transport
-metadata and encrypted bytes but cannot create valid ATP events.
+Both nodes register signed circuit addresses in the same rendezvous namespace
+and discover each other automatically. Manual address entry remains available
+if rendezvous is unavailable. The nodes authenticate each other end to end.
+The relay sees transport metadata and encrypted bytes but cannot create valid
+ATP events.
+
+Verify the automatic path before publishing an endpoint:
+
+```bash
+cargo run --manifest-path relay/Cargo.toml \
+  --bin cyphes-network-smoke -- \
+  /dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID
+```
 
 ## Complete One Audit
 

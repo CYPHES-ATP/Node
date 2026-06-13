@@ -48,6 +48,18 @@ export function P2PProvider({ children }: P2PProviderProps) {
             void p2p.refreshNetworkInfo();
             setNotice("Public relay reservation is active.");
           }),
+          listen<{ discovered: number }>("p2p:rendezvous_discovered", (event) => {
+            void p2p.refreshNetworkInfo();
+            if (event.payload.discovered > 0) {
+              setNotice(
+                `Internet discovery found ${event.payload.discovered} CYPHES node(s).`,
+              );
+            }
+          }),
+          listen("p2p:rendezvous_registered", () => {
+            void p2p.refreshNetworkInfo();
+            setNotice("This node is discoverable on the CYPHES internet network.");
+          }),
           listen<{ bundlePath: string }>("atp:receipt_committed", (event) => {
             void p2p.loadAudits();
             setNotice(`Proof of Cognition exported to ${event.payload.bundlePath}.`);

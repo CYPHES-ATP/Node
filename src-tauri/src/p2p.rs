@@ -2,14 +2,14 @@ use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
 
 use futures::StreamExt;
 use libp2p::{
-    dcutr, identify, identity, mdns, noise, ping, relay, request_response,
+    dcutr, identify, identity, mdns, noise, ping, relay, rendezvous, request_response,
     request_response::{OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, StreamProtocol, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use tokio::{select, sync::mpsc};
+use tokio::{select, sync::mpsc, time::MissedTickBehavior};
 
 use crate::{
     atp::{agent_id, create_signed_envelope, AtpAck, AtpEnvelope, AtpVerb},
@@ -20,7 +20,35 @@ use crate::{
 };
 
 pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.3";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.1";
+const DEFAULT_NETWORK_CONFIG_URL: &str =
+    "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const MAX_WIRE_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
+const INFRASTRUCTURE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
+const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
+const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+#[derive(Debug, Clone)]
+struct InfrastructureTarget {
+    peer_id: PeerId,
+    address: Multiaddr,
+}
+
+#[derive(Debug, Clone)]
+struct NetworkBootstrap {
+    relay: Option<InfrastructureTarget>,
+    rendezvous: Option<InfrastructureTarget>,
+    namespace: rendezvous::Namespace,
+    source: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishedNetworkConfig {
+    relay_addr: Option<String>,
+    rendezvous_addr: Option<String>,
+    rendezvous_namespace: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub enum SwarmCommand {
@@ -70,6 +98,7 @@ struct AgentBehaviour {
     identify: identify::Behaviour,
     ping: ping::Behaviour,
     relay: relay::client::Behaviour,
+    rendezvous: rendezvous::client::Behaviour,
     dcutr: dcutr::Behaviour,
 }
 
@@ -81,6 +110,7 @@ enum AgentBehaviourEvent {
     Identify(identify::Event),
     Ping(ping::Event),
     Relay(relay::client::Event),
+    Rendezvous(rendezvous::client::Event),
     Dcutr(dcutr::Event),
 }
 
@@ -111,6 +141,12 @@ impl From<ping::Event> for AgentBehaviourEvent {
 impl From<relay::client::Event> for AgentBehaviourEvent {
     fn from(event: relay::client::Event) -> Self {
         Self::Relay(event)
+    }
+}
+
+impl From<rendezvous::client::Event> for AgentBehaviourEvent {
+    fn from(event: rendezvous::client::Event) -> Self {
+        Self::Rendezvous(event)
     }
 }
 
@@ -169,6 +205,7 @@ pub async fn spawn_swarm(
     let local_peer_id = keypair.public().to_peer_id();
     let local_agent_id = agent_id(&keypair.public());
     let runtime_keypair = keypair.clone();
+    let network = configured_network().await?;
 
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
@@ -208,6 +245,7 @@ pub async fn spawn_swarm(
                 identify,
                 ping: ping::Behaviour::default(),
                 relay,
+                rendezvous: rendezvous::client::Behaviour::new(key.clone()),
                 dcutr: dcutr::Behaviour::new(peer_id),
             })
         })
@@ -228,12 +266,7 @@ pub async fn spawn_swarm(
             .map_err(|error| error.to_string())?;
     }
 
-    let relay_addr = configured_relay()?;
-    if let Some(relay_addr) = relay_addr.as_ref() {
-        swarm
-            .dial(relay_addr.clone())
-            .map_err(|error| format!("could not dial configured relay: {error}"))?;
-    }
+    dial_infrastructure(&mut swarm, &network)?;
     for address in configured_bootstrap_peers()? {
         swarm
             .dial(address)
@@ -246,14 +279,24 @@ pub async fn spawn_swarm(
         .collect::<Vec<_>>();
     if let Ok(mut inner) = state.inner.lock() {
         inner.listen_addrs = listen_addrs.clone();
-        inner.relay_configured = relay_addr.is_some();
+        inner.relay_configured = network.relay.is_some();
+        inner.relay_connected = false;
+        inner.rendezvous_registered = false;
+        inner.bootstrap_source = network.source.clone();
     }
 
     tauri::async_runtime::spawn(async move {
         let mut outbound = HashMap::<OutboundRequestId, PendingOutbound>::new();
-        let relay_target = relay_addr
-            .and_then(|address| relay_peer_id(&address).map(|peer_id| (peer_id, address)));
         let mut relay_listener_started = false;
+        let mut rendezvous_registration_started = false;
+        let mut rendezvous_cookie = None;
+        let mut discovery_interval = tokio::time::interval(RENDEZVOUS_DISCOVERY_INTERVAL);
+        discovery_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut registration_interval = tokio::time::interval(RENDEZVOUS_REGISTRATION_INTERVAL);
+        registration_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        registration_interval.tick().await;
+        let mut infrastructure_interval = tokio::time::interval(INFRASTRUCTURE_RETRY_INTERVAL);
+        infrastructure_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             select! {
                 maybe_command = rx.recv() => {
@@ -283,6 +326,25 @@ pub async fn spawn_swarm(
                         }
                     }
                 }
+                _ = discovery_interval.tick() => {
+                    discover_rendezvous(
+                        &mut swarm,
+                        network.rendezvous.as_ref(),
+                        &network.namespace,
+                        rendezvous_cookie.clone(),
+                    );
+                }
+                _ = registration_interval.tick() => {
+                    register_rendezvous(
+                        &mut swarm,
+                        &app,
+                        network.rendezvous.as_ref(),
+                        &network.namespace,
+                    );
+                }
+                _ = infrastructure_interval.tick() => {
+                    ensure_infrastructure_connections(&mut swarm, &network);
+                }
                 event = swarm.select_next_some() => {
                     handle_swarm_event(
                         event,
@@ -294,8 +356,10 @@ pub async fn spawn_swarm(
                         local_peer_id,
                         &local_agent_id,
                         &mut outbound,
-                        relay_target.as_ref(),
+                        &network,
                         &mut relay_listener_started,
+                        &mut rendezvous_registration_started,
+                        &mut rendezvous_cookie,
                     );
                 }
             }
@@ -316,8 +380,10 @@ fn handle_swarm_event(
     local_peer_id: PeerId,
     local_agent_id: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-    relay_target: Option<&(PeerId, Multiaddr)>,
+    network: &NetworkBootstrap,
     relay_listener_started: &mut bool,
+    rendezvous_registration_started: &mut bool,
+    rendezvous_cookie: &mut Option<rendezvous::Cookie>,
 ) {
     match event {
         SwarmEvent::Behaviour(AgentBehaviourEvent::RequestResponse(
@@ -472,8 +538,10 @@ fn handle_swarm_event(
                 if peer_id == local_peer_id {
                     continue;
                 }
-                swarm.add_peer_address(peer_id, addr);
-                on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+                swarm.add_peer_address(peer_id, addr.clone());
+                if !swarm.is_connected(&peer_id) {
+                    let _ = swarm.dial(addr);
+                }
             }
         }
         SwarmEvent::Behaviour(AgentBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
@@ -495,7 +563,9 @@ fn handle_swarm_event(
             for address in info.listen_addrs {
                 swarm.add_peer_address(peer_id, address);
             }
-            on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+            if !is_infrastructure_peer(network, peer_id) {
+                on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+            }
         }
         SwarmEvent::Behaviour(AgentBehaviourEvent::Relay(
             relay::client::Event::ReservationReqAccepted {
@@ -504,6 +574,26 @@ fn handle_swarm_event(
                 ..
             },
         )) => {
+            if let Some(relay) = network
+                .relay
+                .as_ref()
+                .filter(|relay| relay.peer_id == relay_peer_id)
+            {
+                let address = relay_circuit_address(relay, local_peer_id);
+                swarm.add_external_address(address.clone());
+                let address = address.to_string();
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner.listen_addrs.retain(|existing| existing != &address);
+                    inner.listen_addrs.insert(0, address.clone());
+                }
+                let _ = app.emit(
+                    "p2p:listen_address",
+                    serde_json::json!({"address": address}),
+                );
+            }
+            if let Ok(mut inner) = state.inner.lock() {
+                inner.relay_connected = true;
+            }
             let _ = app.emit(
                 "p2p:relay_ready",
                 serde_json::json!({
@@ -512,11 +602,97 @@ fn handle_swarm_event(
                 }),
             );
         }
+        SwarmEvent::Behaviour(AgentBehaviourEvent::Rendezvous(event)) => match event {
+            rendezvous::client::Event::Registered {
+                rendezvous_node,
+                namespace,
+                ..
+            } => {
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner.rendezvous_registered = true;
+                }
+                let _ = app.emit(
+                    "p2p:rendezvous_registered",
+                    serde_json::json!({
+                        "rendezvousPeerId": rendezvous_node.to_string(),
+                        "namespace": namespace.to_string(),
+                    }),
+                );
+                discover_rendezvous(
+                    swarm,
+                    network.rendezvous.as_ref(),
+                    &network.namespace,
+                    rendezvous_cookie.clone(),
+                );
+            }
+            rendezvous::client::Event::Discovered {
+                registrations,
+                cookie,
+                ..
+            } => {
+                *rendezvous_cookie = Some(cookie);
+                let mut discovered = 0usize;
+                for registration in registrations {
+                    let peer_id = registration.record.peer_id();
+                    if peer_id == local_peer_id || is_infrastructure_peer(network, peer_id) {
+                        continue;
+                    }
+                    let addresses = registration.record.addresses();
+                    for address in addresses {
+                        swarm.add_peer_address(peer_id, address.clone());
+                    }
+                    if !swarm.is_connected(&peer_id) {
+                        if let Some(address) = addresses.first() {
+                            let _ = swarm.dial(address.clone());
+                        }
+                    }
+                    discovered += 1;
+                }
+                let _ = app.emit(
+                    "p2p:rendezvous_discovered",
+                    serde_json::json!({"discovered": discovered}),
+                );
+            }
+            rendezvous::client::Event::RegisterFailed { error, .. } => {
+                *rendezvous_registration_started = false;
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner.rendezvous_registered = false;
+                }
+                let _ = app.emit(
+                    "p2p:connection_failed",
+                    serde_json::json!({
+                        "reason": format!("rendezvous registration failed: {error:?}"),
+                    }),
+                );
+            }
+            rendezvous::client::Event::DiscoverFailed { error, .. } => {
+                if error == rendezvous::ErrorCode::InvalidCookie {
+                    *rendezvous_cookie = None;
+                    discover_rendezvous(
+                        swarm,
+                        network.rendezvous.as_ref(),
+                        &network.namespace,
+                        None,
+                    );
+                }
+                let _ = app.emit(
+                    "p2p:connection_failed",
+                    serde_json::json!({
+                        "reason": format!("rendezvous discovery failed: {error:?}"),
+                    }),
+                );
+            }
+            rendezvous::client::Event::Expired { peer } => {
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner.peers.remove(&peer.to_string());
+                }
+            }
+        },
         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
             if !*relay_listener_started {
-                if let Some((relay_peer_id, relay_addr)) = relay_target {
-                    if peer_id == *relay_peer_id {
-                        let mut circuit_addr = relay_addr.clone();
+                if let Some(relay) = network.relay.as_ref() {
+                    if peer_id == relay.peer_id {
+                        let mut circuit_addr = relay.address.clone();
                         circuit_addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
                         match swarm.listen_on(circuit_addr) {
                             Ok(_) => *relay_listener_started = true,
@@ -524,7 +700,7 @@ fn handle_swarm_event(
                                 let _ = app.emit(
                                     "p2p:connection_failed",
                                     serde_json::json!({
-                                        "address": relay_addr.to_string(),
+                                        "address": relay.address.to_string(),
                                         "reason": format!("could not reserve relay circuit: {error}"),
                                     }),
                                 );
@@ -533,16 +709,48 @@ fn handle_swarm_event(
                     }
                 }
             }
-            on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+            if !is_infrastructure_peer(network, peer_id) {
+                on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+            }
         }
-        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+        SwarmEvent::ConnectionClosed {
+            peer_id,
+            num_established,
+            ..
+        } => {
+            if num_established > 0 {
+                return;
+            }
+            if network
+                .relay
+                .as_ref()
+                .is_some_and(|relay| relay.peer_id == peer_id)
+            {
+                *rendezvous_registration_started = false;
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner.relay_connected = false;
+                    inner.rendezvous_registered = false;
+                }
+            }
+            if network
+                .rendezvous
+                .as_ref()
+                .is_some_and(|rendezvous| rendezvous.peer_id == peer_id)
+            {
+                *rendezvous_registration_started = false;
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner.rendezvous_registered = false;
+                }
+            }
             if let Ok(mut inner) = state.inner.lock() {
                 inner.peers.remove(&peer_id.to_string());
             }
-            let _ = app.emit(
-                "p2p:peer_disconnected",
-                serde_json::json!({ "peerId": peer_id.to_string() }),
-            );
+            if !is_infrastructure_peer(network, peer_id) {
+                let _ = app.emit(
+                    "p2p:peer_disconnected",
+                    serde_json::json!({ "peerId": peer_id.to_string() }),
+                );
+            }
         }
         SwarmEvent::NewListenAddr { address, .. } => {
             let address = address.to_string();
@@ -556,7 +764,29 @@ fn handle_swarm_event(
                 serde_json::json!({"address": address}),
             );
         }
+        SwarmEvent::ExternalAddrConfirmed { address } => {
+            if address
+                .iter()
+                .any(|protocol| protocol == libp2p::multiaddr::Protocol::P2pCircuit)
+                && !*rendezvous_registration_started
+                && register_rendezvous(swarm, app, network.rendezvous.as_ref(), &network.namespace)
+            {
+                *rendezvous_registration_started = true;
+            }
+        }
         SwarmEvent::ListenerClosed { addresses, .. } => {
+            if addresses.iter().any(|address| {
+                address
+                    .iter()
+                    .any(|protocol| protocol == libp2p::multiaddr::Protocol::P2pCircuit)
+            }) {
+                *relay_listener_started = false;
+                *rendezvous_registration_started = false;
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner.relay_connected = false;
+                    inner.rendezvous_registered = false;
+                }
+            }
             if let Ok(mut inner) = state.inner.lock() {
                 let expired = addresses
                     .into_iter()
@@ -760,16 +990,213 @@ fn touch_peer(state: &P2pState, peer_id: PeerId) {
     }
 }
 
-fn configured_relay() -> Result<Option<Multiaddr>, String> {
-    std::env::var("CYPHES_RELAY_ADDR")
+async fn configured_network() -> Result<NetworkBootstrap, String> {
+    let namespace_override = std::env::var("CYPHES_RENDEZVOUS_NAMESPACE")
         .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| {
-            value
-                .parse::<Multiaddr>()
-                .map_err(|error| format!("CYPHES_RELAY_ADDR is invalid: {error}"))
-        })
-        .transpose()
+        .filter(|value| !value.trim().is_empty());
+    let runtime_relay = std::env::var("CYPHES_RELAY_ADDR")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let runtime_rendezvous = std::env::var("CYPHES_RENDEZVOUS_ADDR")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+
+    if runtime_relay.is_some() || runtime_rendezvous.is_some() {
+        return build_network_bootstrap(
+            runtime_relay,
+            runtime_rendezvous,
+            namespace_override,
+            Some("environment".to_string()),
+        );
+    }
+
+    let embedded_relay = option_env!("CYPHES_DEFAULT_RELAY_ADDR").map(ToString::to_string);
+    let embedded_rendezvous =
+        option_env!("CYPHES_DEFAULT_RENDEZVOUS_ADDR").map(ToString::to_string);
+    if embedded_relay.is_some() || embedded_rendezvous.is_some() {
+        return build_network_bootstrap(
+            embedded_relay,
+            embedded_rendezvous,
+            namespace_override,
+            Some("embedded release default".to_string()),
+        );
+    }
+
+    if std::env::var("CYPHES_DISABLE_DEFAULT_NETWORK").as_deref() == Ok("1") {
+        return build_network_bootstrap(None, None, namespace_override, None);
+    }
+
+    let config_url = std::env::var("CYPHES_NETWORK_CONFIG_URL")
+        .unwrap_or_else(|_| DEFAULT_NETWORK_CONFIG_URL.to_string());
+    let published = fetch_published_network_config(&config_url).await;
+    match published {
+        Ok(config) => build_network_bootstrap(
+            config.relay_addr,
+            config.rendezvous_addr,
+            namespace_override.clone().or(config.rendezvous_namespace),
+            Some(config_url),
+        )
+        .or_else(|_| build_network_bootstrap(None, None, namespace_override, None)),
+        Err(_) => build_network_bootstrap(None, None, namespace_override, None),
+    }
+}
+
+async fn fetch_published_network_config(url: &str) -> Result<PublishedNetworkConfig, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    let body = response.text().await.map_err(|error| error.to_string())?;
+    serde_json::from_str(&body).map_err(|error| error.to_string())
+}
+
+fn build_network_bootstrap(
+    relay_addr: Option<String>,
+    rendezvous_addr: Option<String>,
+    namespace: Option<String>,
+    source: Option<String>,
+) -> Result<NetworkBootstrap, String> {
+    let relay = relay_addr
+        .as_deref()
+        .map(|value| parse_infrastructure_target("relay", value))
+        .transpose()?;
+    let rendezvous = rendezvous_addr
+        .as_deref()
+        .or(relay_addr.as_deref())
+        .map(|value| parse_infrastructure_target("rendezvous", value))
+        .transpose()?;
+    let namespace = rendezvous::Namespace::new(
+        namespace.unwrap_or_else(|| DEFAULT_RENDEZVOUS_NAMESPACE.to_string()),
+    )
+    .map_err(|error| error.to_string())?;
+
+    Ok(NetworkBootstrap {
+        relay,
+        rendezvous,
+        namespace,
+        source,
+    })
+}
+
+fn parse_infrastructure_target(kind: &str, value: &str) -> Result<InfrastructureTarget, String> {
+    let address = value
+        .parse::<Multiaddr>()
+        .map_err(|error| format!("{kind} address is invalid: {error}"))?;
+    let peer_id = relay_peer_id(&address)
+        .ok_or_else(|| format!("{kind} address must end with /p2p/PEER_ID"))?;
+    Ok(InfrastructureTarget { peer_id, address })
+}
+
+fn dial_infrastructure(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    network: &NetworkBootstrap,
+) -> Result<(), String> {
+    let mut addresses = Vec::<Multiaddr>::new();
+    for target in [network.relay.as_ref(), network.rendezvous.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        if addresses.contains(&target.address) {
+            continue;
+        }
+        swarm
+            .dial(target.address.clone())
+            .map_err(|error| format!("could not dial CYPHES infrastructure: {error}"))?;
+        addresses.push(target.address.clone());
+    }
+    Ok(())
+}
+
+fn ensure_infrastructure_connections(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    network: &NetworkBootstrap,
+) {
+    let mut peers = Vec::<PeerId>::new();
+    for target in [network.relay.as_ref(), network.rendezvous.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        if peers.contains(&target.peer_id) || swarm.is_connected(&target.peer_id) {
+            continue;
+        }
+        let _ = swarm.dial(target.address.clone());
+        peers.push(target.peer_id);
+    }
+}
+
+fn relay_circuit_address(target: &InfrastructureTarget, local_peer_id: PeerId) -> Multiaddr {
+    let mut address = target.address.clone();
+    address.push(libp2p::multiaddr::Protocol::P2pCircuit);
+    address.push(libp2p::multiaddr::Protocol::P2p(local_peer_id));
+    address
+}
+
+fn register_rendezvous(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    target: Option<&InfrastructureTarget>,
+    namespace: &rendezvous::Namespace,
+) -> bool {
+    let Some(target) = target else {
+        return false;
+    };
+    if swarm.external_addresses().next().is_none() {
+        return false;
+    }
+    match swarm
+        .behaviour_mut()
+        .rendezvous
+        .register(namespace.clone(), target.peer_id, None)
+    {
+        Ok(()) => true,
+        Err(error) => {
+            let _ = app.emit(
+                "p2p:connection_failed",
+                serde_json::json!({
+                    "reason": format!("could not register with rendezvous: {error}"),
+                }),
+            );
+            false
+        }
+    }
+}
+
+fn discover_rendezvous(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    target: Option<&InfrastructureTarget>,
+    namespace: &rendezvous::Namespace,
+    cookie: Option<rendezvous::Cookie>,
+) {
+    let Some(target) = target else {
+        return;
+    };
+    if !swarm.is_connected(&target.peer_id) {
+        return;
+    }
+    swarm.behaviour_mut().rendezvous.discover(
+        Some(namespace.clone()),
+        cookie,
+        Some(100),
+        target.peer_id,
+    );
+}
+
+fn is_infrastructure_peer(network: &NetworkBootstrap, peer_id: PeerId) -> bool {
+    network
+        .relay
+        .as_ref()
+        .is_some_and(|target| target.peer_id == peer_id)
+        || network
+            .rendezvous
+            .as_ref()
+            .is_some_and(|target| target.peer_id == peer_id)
 }
 
 fn configured_bootstrap_peers() -> Result<Vec<Multiaddr>, String> {
@@ -809,4 +1236,75 @@ fn identity_path() -> Result<PathBuf, String> {
     }
     let home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
     Ok(home.join(".cyphes").join("identity.key"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn infrastructure_address() -> String {
+        let peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+        format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer_id}")
+    }
+
+    #[test]
+    fn relay_is_also_the_default_rendezvous_node() {
+        let address = infrastructure_address();
+        let network =
+            build_network_bootstrap(Some(address.clone()), None, None, Some("test".to_string()))
+                .expect("valid network");
+
+        assert_eq!(
+            network.relay.as_ref().map(|target| &target.address),
+            network.rendezvous.as_ref().map(|target| &target.address)
+        );
+        assert_eq!(network.namespace.to_string(), DEFAULT_RENDEZVOUS_NAMESPACE);
+    }
+
+    #[test]
+    fn infrastructure_addresses_require_a_peer_id() {
+        let error = build_network_bootstrap(
+            Some("/ip4/127.0.0.1/tcp/4001".to_string()),
+            None,
+            None,
+            None,
+        )
+        .expect_err("address without peer id must fail");
+
+        assert!(error.contains("/p2p/PEER_ID"));
+    }
+
+    #[test]
+    fn canonical_relay_address_targets_the_local_node() {
+        let network = build_network_bootstrap(
+            Some(infrastructure_address()),
+            None,
+            None,
+            Some("test".to_string()),
+        )
+        .expect("valid network");
+        let local_peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+
+        let address =
+            relay_circuit_address(network.relay.as_ref().expect("relay target"), local_peer_id);
+
+        assert!(address
+            .to_string()
+            .ends_with(&format!("/p2p-circuit/p2p/{local_peer_id}")));
+    }
+
+    #[test]
+    fn published_network_config_accepts_an_offline_manifest() {
+        let config: PublishedNetworkConfig = serde_json::from_str(
+            r#"{
+                "relayAddr": null,
+                "rendezvousAddr": null,
+                "rendezvousNamespace": "cyphes.repository-audit.v0.1"
+            }"#,
+        )
+        .expect("valid manifest");
+
+        assert!(config.relay_addr.is_none());
+        assert!(config.rendezvous_addr.is_none());
+    }
 }

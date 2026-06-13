@@ -37,6 +37,9 @@ pub struct NetworkInfo {
     pub protocol: String,
     pub listen_addrs: Vec<String>,
     pub relay_configured: bool,
+    pub relay_connected: bool,
+    pub rendezvous_registered: bool,
+    pub bootstrap_source: Option<String>,
     pub connected_peers: usize,
 }
 
@@ -102,6 +105,9 @@ pub async fn get_network_info(state: State<'_, P2pState>) -> Result<NetworkInfo,
         protocol: ATP_PROTOCOL.to_string(),
         listen_addrs: inner.listen_addrs.clone(),
         relay_configured: inner.relay_configured,
+        relay_connected: inner.relay_connected,
+        rendezvous_registered: inner.rendezvous_registered,
+        bootstrap_source: inner.bootstrap_source.clone(),
         connected_peers: inner.peers.len(),
     })
 }

@@ -18,16 +18,19 @@ marketplace breadth.
 - Signed worker result and five hashed artifacts.
 - Portable Proof of Cognition bundle.
 - Independent Artifact Two verification of the committed real fixture.
-- TCP, WebSocket, QUIC, mDNS, Identify, Ping, Relay v2, and DCUtR.
-- Standalone Docker-ready relay and circuit-reservation smoke test.
+- TCP, WebSocket, QUIC, mDNS, Identify, Ping, Relay v2, Rendezvous, and DCUtR.
+- Docker-ready relay/rendezvous service with reservation and automatic
+  two-node discovery smoke tests.
 
 ## 1. Staging Network
 
 Status: **Partial**
 
-- Deploy at least two stable public relay endpoints.
+- Provision `relay.cyphes.com`, pass the external automatic-discovery smoke
+  test, and publish it in `network/bootstrap.json`.
+- Deploy a second independent relay/rendezvous endpoint.
 - Add DNS endpoint rotation and health telemetry.
-- Add rendezvous namespaces and signed capability cards.
+- Add signed capability cards and namespace-aware capability matching.
 - Persist known peer addresses and retry queued audience-specific delivery.
 - Run the full transaction across two machines on different consumer networks.
 - Add AutoNAT and verify direct DCUtR upgrades.

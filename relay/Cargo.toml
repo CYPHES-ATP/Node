@@ -3,10 +3,10 @@ name = "cyphes-relay"
 version = "0.1.0-dev"
 edition = "2021"
 license = "MIT"
-description = "Public circuit relay for CYPHES ATP nodes"
+description = "Public relay and rendezvous service for CYPHES ATP nodes"
 
 [dependencies]
 dirs = "5"
 futures = "0.3"
-libp2p = { version = "0.56", features = ["identify", "macros", "noise", "ping", "quic", "relay", "tcp", "tokio", "yamux"] }
+libp2p = { version = "0.56", features = ["identify", "macros", "noise", "ping", "quic", "relay", "rendezvous", "tcp", "tokio", "yamux"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }

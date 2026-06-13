@@ -57,8 +57,10 @@ Artifact Two independently returns:
 - SQLite nonce, idempotency, transaction, contract, lease, result, and receipt
   persistence.
 - TCP, WebSocket, QUIC, Noise, Yamux, Identify, Ping, mDNS, Circuit Relay v2,
-  and DCUtR.
-- Manual direct or relayed peer dialing with shareable libp2p multiaddresses.
+  libp2p Rendezvous, and DCUtR.
+- Automatic internet peer registration, discovery, and relayed dialing when a
+  default network endpoint is published.
+- Manual direct or relayed peer dialing as a fallback.
 - Commit-before-ACK envelope delivery.
 - Signed discovery, worker offer, and requester contract selection.
 - Repository requests pinned to an exact Git commit.
@@ -69,14 +71,16 @@ Artifact Two independently returns:
 - Worker-signed `ATTEST` Proof of Cognition.
 - Portable Artifact Two-compatible receipt bundles under
   `~/.cyphes/receipts/<transaction-id>/`.
-- A deployable standalone circuit relay and reservation smoke client.
+- A deployable combined relay/rendezvous service with one-node and automatic
+  two-node smoke tests.
 
 ## What Is Not Production Ready
 
-- No CYPHES-operated public relay is deployed by this repository. Operators can
-  deploy [`relay/`](relay/) now.
-- No rendezvous or public work-order index; peers exchange multiaddresses
-  manually or discover each other through mDNS.
+- The automatic discovery path is implemented, but the committed
+  [`network/bootstrap.json`](network/bootstrap.json) remains offline until a
+  CYPHES-operated public host is provisioned and externally verified.
+- Rendezvous discovers online nodes, not a durable or searchable work-order
+  index.
 - No durable offline mailbox or guaranteed retry after both peers disconnect.
 - The worker is bounded by deterministic code paths and lease guards, but is
   not yet isolated in a hardened OS container or VM.
@@ -113,10 +117,25 @@ The node creates:
 
 Do not copy `identity.key` between people or machines.
 
-## Make It Internet Reachable
+## Default Internet Network
 
-Deploy the standalone relay on a public host with TCP and UDP port `4001`
-open:
+At startup, CYPHES fetches
+[`network/bootstrap.json`](network/bootstrap.json). Once its relay and
+rendezvous addresses are published, a desktop node automatically:
+
+1. connects to the CYPHES infrastructure identity;
+2. reserves a Circuit Relay v2 address;
+3. registers a signed peer record in the repository-audit namespace;
+4. discovers and dials other online CYPHES nodes.
+
+No manual address exchange is required for that path. The current manifest is
+deliberately offline because no permanent CYPHES-operated host has been
+provisioned yet.
+
+## Operate The Network
+
+Deploy the combined relay/rendezvous service on a public host with TCP and UDP
+port `4001` open:
 
 ```bash
 cd relay
@@ -132,7 +151,7 @@ export CYPHES_RELAY_ADDR=/dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID
 npm run tauri dev
 ```
 
-Share the circuit address shown by the node:
+For the manual fallback, share the circuit address shown by the node:
 
 ```text
 /dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID/p2p-circuit/p2p/NODE_PEER_ID
@@ -140,6 +159,22 @@ Share the circuit address shown by the node:
 
 Paste that address into **Connect to node** on the other client. The relay
 routes encrypted libp2p streams; it cannot forge ATP signatures or receipts.
+
+Verify automatic discovery between two fresh identities:
+
+```bash
+cargo run --manifest-path relay/Cargo.toml \
+  --bin cyphes-network-smoke -- \
+  /dns4/relay.example.com/tcp/4001/p2p/RELAY_PEER_ID
+```
+
+After the external smoke test passes, publish the endpoint:
+
+```bash
+./scripts/publish-network-config.sh \
+  /dns4/relay.cyphes.com/tcp/4001 \
+  RELAY_PEER_ID
+```
 
 See [Join the CYPHES Network](docs/JOIN_NETWORK.md) and
 [`relay/README.md`](relay/README.md).
@@ -176,7 +211,8 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 | `src-tauri/src/p2p.rs` | Direct, LAN, and relay-backed libp2p delivery |
 | `src-tauri/src/commands.rs` | Tauri operations for the complete work order |
 | `protocol/` | Schemas, canonical fixtures, and verified ATP-L1 bundle |
-| `relay/` | Standalone public Circuit Relay v2 service and smoke client |
+| `relay/` | Combined public relay/rendezvous service and smoke clients |
+| `network/` | Remotely updateable default-network manifest |
 
 ## Documentation
 
