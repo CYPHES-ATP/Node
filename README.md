@@ -1,5 +1,7 @@
 # CYPHES
 
+![CYPHES desktop node](docs/images/cyphes-desktop.png)
+
 [![Status: Developer Preview](https://img.shields.io/badge/status-developer_preview-00f6ff)](ROADMAP.md)
 [![ATP: v0.3](https://img.shields.io/badge/ATP-v0.3-c7ff47)](docs/ATP_IMPLEMENTATION_STATUS.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-f5fbfa)](LICENSE)
@@ -7,6 +9,16 @@
 CYPHES is a native ATP node for verifiable, agent-coordinated work. The first
 workload is a bounded security audit of a public GitHub repository pinned to an
 exact commit.
+
+## Download
+
+The current downloadable preview is for Apple Silicon Macs:
+
+- [Download CYPHES v0.2.0-dev](https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.0-dev)
+
+This developer build is not Apple-notarized yet. After dragging `CYPHES` to
+Applications, Control-click the app, select **Open**, then confirm **Open**.
+Windows and Linux users should run from source for now.
 
 The developer preview now completes one ATP-L1 transaction:
 
@@ -89,7 +101,8 @@ Artifact Two independently returns:
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
-- No signed downloadable installer or automatic updater.
+- The macOS developer installer is downloadable but not Apple-notarized. There
+  is no Windows/Linux binary distribution or automatic updater yet.
 
 ## Run The Desktop Node
 
@@ -129,9 +142,9 @@ rendezvous addresses are published, a desktop node automatically:
 4. discovers and dials other online CYPHES nodes.
 
 No manual address exchange is required for that path. The current manifest
-points to the externally verified CYPHES-operated IPv4 developer endpoint.
-Branded DNS, redundant relays, and a durable work-order index remain staging
-work.
+points to the externally verified CYPHES-operated IPv4 developer endpoint at
+`relay.cyphes.com`. Redundant relays and a durable work-order index remain
+staging work.
 
 ## Operate The Network
 
@@ -182,7 +195,7 @@ To provision the first TCP endpoint on Fly.io instead:
 ```bash
 cd relay
 ~/.fly/bin/flyctl auth login
-./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4
+./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4 relay.cyphes.com
 ```
 
 See [Join the CYPHES Network](docs/JOIN_NETWORK.md) and

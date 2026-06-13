@@ -16,6 +16,12 @@ currently points to the externally verified CYPHES-operated IPv4 developer
 endpoint. A node with ordinary internet access can use it without manually
 entering another node's address.
 
+The public bootstrap address is:
+
+```text
+/dns4/relay.cyphes.com/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ
+```
+
 ## Install
 
 ```bash
@@ -95,7 +101,7 @@ For a managed first endpoint, use the Fly.io deployment:
 ```bash
 cd relay
 ~/.fly/bin/flyctl auth login
-./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4
+./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4 relay.cyphes.com
 ```
 
 This provisions an always-on TCP relay/rendezvous node with a persistent

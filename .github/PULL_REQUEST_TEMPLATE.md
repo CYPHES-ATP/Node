@@ -1,6 +1,6 @@
 ## Summary
 
-Describe the focused change and why it belongs in CYPHES Audit Node.
+Describe the focused change and why it belongs in CYPHES.
 
 ## ATP or Product Impact
 

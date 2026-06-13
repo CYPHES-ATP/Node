@@ -914,8 +914,8 @@ and combined relay/rendezvous service are implemented.
 
 The next implementation slice is:
 
-1. attach `relay.cyphes.com` to the externally verified IPv4 endpoint and run
-   the full flow across two independently controlled networks;
+1. run the full flow through `relay.cyphes.com` across two independently
+   controlled networks;
 2. deploy a second infrastructure node and add signed `ADVERTISE` capability
    cards;
 3. harden the worker inside an OS-enforced sandbox;

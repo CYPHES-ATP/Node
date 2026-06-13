@@ -83,12 +83,13 @@ libp2p TCP on a dedicated IPv4 address:
 ```bash
 curl -L https://fly.io/install.sh | sh
 ~/.fly/bin/flyctl auth login
-./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4
+./deploy/deploy-fly.sh cyphes-atp-network sjc personal 4 relay.cyphes.com
 ```
 
 The script creates the app, one-gigabyte identity volume, and dedicated IPv4;
 deploys the container; reads the stable relay peer ID; runs the automatic
-two-node smoke test; and prepares `../network/bootstrap.json`.
+two-node smoke test; and prepares `../network/bootstrap.json`. The optional
+fifth argument is the public DNS hostname advertised by the relay.
 
 Fly requires a dedicated IPv4 for raw TCP without Fly TLS termination. The
 initial public endpoint uses `<app>.fly.dev`, so CYPHES DNS can be attached

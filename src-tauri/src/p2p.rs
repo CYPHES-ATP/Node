@@ -27,6 +27,7 @@ const MAX_WIRE_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
 const INFRASTRUCTURE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Debug, Clone)]
 struct InfrastructureTarget {
@@ -236,7 +237,7 @@ pub async fn spawn_swarm(
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
             let identify = identify::Behaviour::new(
                 identify::Config::new(ATP_PROTOCOL.to_string(), key.public())
-                    .with_agent_version("CYPHES/0.1.0-dev".to_string())
+                    .with_agent_version("CYPHES/0.2.0-dev".to_string())
                     .with_push_listen_addr_updates(true),
             );
             Ok(AgentBehaviour {
@@ -250,6 +251,9 @@ pub async fn spawn_swarm(
             })
         })
         .map_err(|error| error.to_string())?
+        .with_swarm_config(|config| {
+            config.with_idle_connection_timeout(PEER_IDLE_CONNECTION_TIMEOUT)
+        })
         .build();
 
     for address in [
@@ -746,6 +750,8 @@ fn handle_swarm_event(
                 inner.peers.remove(&peer_id.to_string());
             }
             if !is_infrastructure_peer(network, peer_id) {
+                *rendezvous_cookie = None;
+                discover_rendezvous(swarm, network.rendezvous.as_ref(), &network.namespace, None);
                 let _ = app.emit(
                     "p2p:peer_disconnected",
                     serde_json::json!({ "peerId": peer_id.to_string() }),
@@ -1309,16 +1315,16 @@ mod tests {
     }
 
     #[test]
-    fn network_bootstrap_accepts_the_public_ipv4_hostname() {
+    fn network_bootstrap_accepts_the_branded_public_hostname() {
         let peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
-        let address = format!("/dns4/cyphes-atp-network.fly.dev/tcp/4001/p2p/{peer_id}");
+        let address = format!("/dns4/relay.cyphes.com/tcp/4001/p2p/{peer_id}");
         let network = build_network_bootstrap(
             Some(address.clone()),
             None,
             None,
             Some("published manifest".to_string()),
         )
-        .expect("valid public IPv4 address");
+        .expect("valid branded public address");
 
         assert_eq!(
             network.relay.expect("relay target").address.to_string(),

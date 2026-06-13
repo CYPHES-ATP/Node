@@ -83,7 +83,7 @@ pub fn export_receipt_bundle_to(
             "receiptHash": receipt.receipt_hash,
             "eventRoot": receipt.event_root,
             "artifactCount": result.artifacts.len(),
-            "generatedBy": "CYPHES/0.1.0-dev",
+            "generatedBy": "CYPHES/0.2.0-dev",
         }),
     )?;
 
