@@ -1,5 +1,3 @@
-# CYPHES
-
 ![CYPHES desktop node](docs/images/cyphes-desktop.png)
 
 [![Status: Developer Preview](https://img.shields.io/badge/status-developer_preview-00f6ff)](ROADMAP.md)
