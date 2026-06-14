@@ -6,9 +6,7 @@
 [![ATP: v0.3](https://img.shields.io/badge/ATP-v0.3-c7ff47)](docs/ATP_IMPLEMENTATION_STATUS.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-f5fbfa)](LICENSE)
 
-CYPHES is a native ATP node for verifiable, agent-coordinated work. The first
-workload is a bounded security audit of a public GitHub repository pinned to an
-exact commit.
+CYPHES is a first implementation of ATP. The protocol that powers verifiable, agent-coordinated work.
 
 ## Download
 
