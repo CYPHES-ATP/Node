@@ -325,6 +325,31 @@ mod tests {
     }
 
     #[test]
+    fn signed_envelope_verifies_after_json_wire_round_trip() {
+        let keypair = identity::Keypair::generate_ed25519();
+        let envelope = create_signed_envelope(
+            &keypair,
+            AtpVerb::Discover,
+            "audit-1".to_string(),
+            None,
+            None,
+            serde_json::json!({
+                "action": "announce",
+                "job": {
+                    "compensation": "100",
+                    "createdAt": 1_781_401_745_733_u64,
+                    "stars": 3_633_u64
+                }
+            }),
+        )
+        .unwrap();
+
+        let encoded = serde_json::to_vec(&envelope).unwrap();
+        let decoded: AtpEnvelope = serde_json::from_slice(&encoded).unwrap();
+        verify_envelope(&decoded).unwrap();
+    }
+
+    #[test]
     fn state_machine_rejects_skipped_steps() {
         assert_eq!(transition(None, AtpVerb::Discover).unwrap(), "discovered");
         assert_eq!(

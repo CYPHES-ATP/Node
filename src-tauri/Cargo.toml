@@ -24,7 +24,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 flate2 = "1"
 futures = "0.3"
-libp2p = { version = "0.56", features = ["cbor", "dcutr", "dns", "identify", "macros", "mdns", "noise", "ping", "quic", "relay", "rendezvous", "request-response", "tcp", "tokio", "websocket", "yamux"] }
+libp2p = { version = "0.56", features = ["dcutr", "dns", "identify", "json", "macros", "mdns", "noise", "ping", "quic", "relay", "rendezvous", "request-response", "tcp", "tokio", "websocket", "yamux"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
