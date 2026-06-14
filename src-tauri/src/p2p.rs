@@ -93,7 +93,7 @@ enum PendingOutbound {
 #[behaviour(to_swarm = "AgentBehaviourEvent")]
 struct AgentBehaviour {
     request_response: request_response::Behaviour<
-        request_response::cbor::codec::Codec<WireRequest, WireResponse>,
+        request_response::json::codec::Codec<WireRequest, WireResponse>,
     >,
     mdns: mdns::tokio::Behaviour,
     identify: identify::Behaviour,
@@ -226,7 +226,7 @@ pub async fn spawn_swarm(
         .map_err(|error| error.to_string())?
         .with_behaviour(move |key, relay| {
             let peer_id = key.public().to_peer_id();
-            let codec = request_response::cbor::codec::Codec::default()
+            let codec = request_response::json::codec::Codec::default()
                 .set_request_size_maximum(MAX_WIRE_REQUEST_BYTES)
                 .set_response_size_maximum(2 * 1024 * 1024);
             let request_response = request_response::Behaviour::with_codec(
@@ -424,7 +424,16 @@ fn handle_swarm_event(
                                 }
                                 ack
                             }
-                            Err(reason) => rejection_ack(&envelope, local_agent_id, reason),
+                            Err(reason) => {
+                                let _ = app.emit(
+                                    "atp:delivery_failed",
+                                    serde_json::json!({
+                                        "peerId": peer.to_string(),
+                                        "reason": reason.clone(),
+                                    }),
+                                );
+                                rejection_ack(&envelope, local_agent_id, reason)
+                            }
                         };
                         WireResponse::Envelope(ack)
                     }
@@ -475,9 +484,20 @@ fn handle_swarm_event(
                                 "atp:delivery_failed",
                                 serde_json::json!({ "peerId": peer.to_string(), "reason": error }),
                             );
-                        } else {
+                        } else if ack.accepted {
                             let _ = app.emit("atp:jobs_changed", ());
                             let _ = app.emit("atp:delivery_acknowledged", ack);
+                        } else {
+                            let _ = app.emit(
+                                "atp:delivery_failed",
+                                serde_json::json!({
+                                    "peerId": peer.to_string(),
+                                    "reason": ack.reason.unwrap_or_else(|| {
+                                        ack.reason_code
+                                            .unwrap_or_else(|| "ATP_VALIDATION_FAILED".to_string())
+                                    }),
+                                }),
+                            );
                         }
                     }
                     WireResponse::ExecutionResult {

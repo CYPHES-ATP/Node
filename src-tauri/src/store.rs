@@ -527,12 +527,14 @@ impl AtpStore {
         connection
             .execute(
                 "INSERT INTO deliveries
-                    (event_hash, transaction_id, peer_id, accepted, duplicate, reason_code, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                    (event_hash, transaction_id, peer_id, accepted, duplicate, reason_code, reason,
+                     updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(event_hash, peer_id) DO UPDATE SET
                     accepted = excluded.accepted,
                     duplicate = excluded.duplicate,
                     reason_code = excluded.reason_code,
+                    reason = excluded.reason,
                     updated_at = excluded.updated_at",
                 params![
                     ack.event_hash,
@@ -541,6 +543,7 @@ impl AtpStore {
                     ack.accepted,
                     ack.duplicate,
                     ack.reason_code,
+                    ack.reason,
                     now_millis() as i64,
                 ],
             )
@@ -676,11 +679,32 @@ impl AtpStore {
                     accepted INTEGER NOT NULL,
                     duplicate INTEGER NOT NULL,
                     reason_code TEXT,
+                    reason TEXT,
                     updated_at INTEGER NOT NULL,
                     PRIMARY KEY(event_hash, peer_id)
                  );",
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+
+        let has_delivery_reason = {
+            let mut statement = connection
+                .prepare("PRAGMA table_info(deliveries)")
+                .map_err(|error| error.to_string())?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|error| error.to_string())?;
+            columns
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?
+                .iter()
+                .any(|column| column == "reason")
+        };
+        if !has_delivery_reason {
+            connection
+                .execute("ALTER TABLE deliveries ADD COLUMN reason TEXT", [])
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 }
 
