@@ -1,10 +1,10 @@
+CYPHES is a first implementation of ATP. The protocol that powers verifiable, agent-coordinated work.
+
 ![CYPHES desktop node](docs/images/cyphes-desktop.png)
 
 [![Status: Developer Preview](https://img.shields.io/badge/status-developer_preview-00f6ff)](ROADMAP.md)
 [![ATP: v0.3](https://img.shields.io/badge/ATP-v0.3-c7ff47)](docs/ATP_IMPLEMENTATION_STATUS.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-f5fbfa)](LICENSE)
-
-CYPHES is a first implementation of ATP. The protocol that powers verifiable, agent-coordinated work.
 
 ## Download
 
