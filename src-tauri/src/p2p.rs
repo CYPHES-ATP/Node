@@ -23,6 +23,7 @@ pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.3";
 pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.1";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
+const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
 const MAX_WIRE_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
 const INFRASTRUCTURE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
@@ -237,7 +238,7 @@ pub async fn spawn_swarm(
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
             let identify = identify::Behaviour::new(
                 identify::Config::new(ATP_PROTOCOL.to_string(), key.public())
-                    .with_agent_version("CYPHES/0.2.0-dev".to_string())
+                    .with_agent_version("CYPHES/0.2.1-dev".to_string())
                     .with_push_listen_addr_updates(true),
             );
             Ok(AgentBehaviour {
@@ -1054,17 +1055,19 @@ async fn configured_network() -> Result<NetworkBootstrap, String> {
 
     let config_url = std::env::var("CYPHES_NETWORK_CONFIG_URL")
         .unwrap_or_else(|_| DEFAULT_NETWORK_CONFIG_URL.to_string());
-    let published = fetch_published_network_config(&config_url).await;
-    match published {
+    let published = match fetch_published_network_config(&config_url).await {
         Ok(config) => build_network_bootstrap(
             config.relay_addr,
             config.rendezvous_addr,
             namespace_override.clone().or(config.rendezvous_namespace),
             Some(config_url),
-        )
-        .or_else(|_| build_network_bootstrap(None, None, namespace_override, None)),
-        Err(_) => build_network_bootstrap(None, None, namespace_override, None),
-    }
+        ),
+        Err(error) => Err(error),
+    };
+
+    published
+        .or_else(|_| embedded_network_bootstrap(namespace_override.clone()))
+        .or_else(|_| build_network_bootstrap(None, None, namespace_override, None))
 }
 
 async fn fetch_published_network_config(url: &str) -> Result<PublishedNetworkConfig, String> {
@@ -1081,6 +1084,19 @@ async fn fetch_published_network_config(url: &str) -> Result<PublishedNetworkCon
         .map_err(|error| error.to_string())?;
     let body = response.text().await.map_err(|error| error.to_string())?;
     serde_json::from_str(&body).map_err(|error| error.to_string())
+}
+
+fn embedded_network_bootstrap(
+    namespace_override: Option<String>,
+) -> Result<NetworkBootstrap, String> {
+    let config: PublishedNetworkConfig =
+        serde_json::from_str(EMBEDDED_NETWORK_CONFIG_JSON).map_err(|error| error.to_string())?;
+    build_network_bootstrap(
+        config.relay_addr,
+        config.rendezvous_addr,
+        namespace_override.or(config.rendezvous_namespace),
+        Some("embedded bootstrap manifest".to_string()),
+    )
 }
 
 fn build_network_bootstrap(
@@ -1332,6 +1348,19 @@ mod tests {
 
         assert!(config.relay_addr.is_none());
         assert!(config.rendezvous_addr.is_none());
+    }
+
+    #[test]
+    fn embedded_bootstrap_manifest_configures_the_public_network() {
+        let network = embedded_network_bootstrap(None).expect("valid embedded network");
+
+        assert!(network.relay.is_some());
+        assert!(network.rendezvous.is_some());
+        assert_eq!(
+            network.source.as_deref(),
+            Some("embedded bootstrap manifest")
+        );
+        assert_eq!(network.namespace.to_string(), DEFAULT_RENDEZVOUS_NAMESPACE);
     }
 
     #[test]
