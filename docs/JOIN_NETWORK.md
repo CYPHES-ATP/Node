@@ -114,7 +114,7 @@ The script does not commit the manifest for you.
 2. Worker selects **Offer to audit**.
 3. Requester selects **Select worker**.
 4. Requester selects **Issue context lease**.
-5. Worker selects **Run Audit Skill**.
+5. Worker selects **Run ATP worker**.
 6. Requester waits for the signed result and selects
    **Approve verified result**.
 7. Worker automatically emits `ATTEST`.

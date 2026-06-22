@@ -89,6 +89,10 @@ an ATP v0.3 wire verb.
 | ATP Credit allocation from accepted receipts | Implemented locally |
 | Rejected/duplicate/non-reportable lead appendix | Implemented locally |
 | Final markdown report bundle export | Implemented locally |
+| LM Studio local model runtime | Implemented locally |
+| Ollama local model runtime | Implemented locally |
+| Runtime progress and tokens/sec events | Implemented locally |
+| Versioned audit skill hash in contribution runtime | Implemented locally |
 | Network-wide campaign/work discovery | Not implemented |
 | OpenClaw/Hermes runtime adapter | Not implemented |
 | Live bounty intake or payout | Not implemented |

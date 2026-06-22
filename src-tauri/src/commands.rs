@@ -12,6 +12,9 @@ use crate::{
         RuntimeDescriptor, VerificationEvidence,
     },
     audit_profile::{is_git_commit_sha, AuditContract, ReceiptApproval, RepositoryTarget},
+    audit_runtime::{
+        list_local_models, local_model_providers, run_local_audit_skill, LocalModelList,
+    },
     bundle::export_campaign_report_bundle,
     p2p::{load_or_create_identity, spawn_swarm, SwarmCommand, ATP_PROTOCOL},
     state::{P2pState, PeerInfo},
@@ -66,6 +69,16 @@ pub struct ProtocolCampaignRequest {
 pub struct ExportedReportBundle {
     pub campaign_id: String,
     pub bundle_path: String,
+}
+
+#[tauri::command]
+pub async fn list_local_model_providers() -> Result<Vec<LocalModelList>, String> {
+    Ok(local_model_providers())
+}
+
+#[tauri::command]
+pub async fn list_local_model_models(provider: String) -> Result<LocalModelList, String> {
+    Ok(list_local_models(&provider).await)
 }
 
 #[tauri::command]
@@ -212,7 +225,7 @@ pub async fn record_campaign_contribution(
 ) -> Result<NodeContribution, String> {
     let (keypair, _) = node_runtime(&state)?;
     let note = if notes_markdown.trim().is_empty() {
-        "Run Audit Skill local fixture contribution. Runtime adapter is connected, but OpenClaw/Hermes execution is not yet enabled in this build.".to_string()
+        "Manual coverage contribution. Use Run Audit Skill with LM Studio or Ollama for local model execution.".to_string()
     } else {
         notes_markdown
     };
@@ -231,12 +244,12 @@ pub async fn record_campaign_contribution(
         note,
         vec![AuditFinding {
             id: "CYPHES-COVERAGE-001".to_string(),
-            title: "Coverage-only audit skill output".to_string(),
+            title: "Manual coverage-only output".to_string(),
             severity: "informational".to_string(),
             status: "non_reportable".to_string(),
             impact: None,
             evidence: vec![
-                "This deterministic local fixture records coverage; it does not claim an exploit."
+                "This manual coverage path records notes; it does not claim an exploit."
                     .to_string(),
             ],
             reportable: false,
@@ -250,6 +263,41 @@ pub async fn record_campaign_contribution(
             ],
         }],
         vec!["CYPHES deterministic fixture: no repository code execution".to_string()],
+    )?;
+    let contribution = store.record_contribution(&contribution)?;
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(contribution)
+}
+
+#[tauri::command]
+pub async fn run_campaign_audit_skill(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+    work_unit_id: String,
+    provider: String,
+    model: String,
+) -> Result<NodeContribution, String> {
+    let (keypair, _) = node_runtime(&state)?;
+    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    let campaign = snapshot.campaign;
+    let work_unit = snapshot
+        .work_units
+        .into_iter()
+        .find(|unit| unit.work_unit_id == work_unit_id)
+        .ok_or_else(|| "Campaign work unit not found".to_string())?;
+    let output = run_local_audit_skill(&app, &campaign, &work_unit, &provider, &model).await?;
+    let contribution = signed_contribution(
+        &keypair,
+        campaign.campaign_id.clone(),
+        work_unit.work_unit_id,
+        output.runtime,
+        output.notes_markdown,
+        output.findings,
+        output.artifacts,
+        output.coverage,
+        output.commands,
     )?;
     let contribution = store.record_contribution(&contribution)?;
     let _ = app.emit("audit:labor_changed", ());

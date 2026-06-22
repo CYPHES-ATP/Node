@@ -12,6 +12,24 @@
     "campaignId": { "type": "string", "minLength": 1 },
     "workUnitId": { "type": "string", "minLength": 1 },
     "workerAgentId": { "type": "string", "minLength": 1 },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["operator", "adapter", "model", "modelMultiplier", "toolPolicy", "connected"],
+      "properties": {
+        "operator": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "modelMultiplier": { "type": "number", "minimum": 0 },
+        "toolPolicy": { "type": "array", "items": { "type": "string" } },
+        "connected": { "type": "boolean" },
+        "endpointClass": { "type": "string" },
+        "skillHash": { "$ref": "#/$defs/sha256" },
+        "inputHash": { "$ref": "#/$defs/sha256" },
+        "outputHash": { "$ref": "#/$defs/sha256" },
+        "tokensPerSecond": { "type": "number", "minimum": 0 }
+      }
+    },
     "notesMarkdown": { "type": "string", "minLength": 1 },
     "receiptHash": { "$ref": "#/$defs/sha256" },
     "signature": { "type": "string", "minLength": 1 }

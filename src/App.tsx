@@ -1,9 +1,12 @@
+import { listen } from "@tauri-apps/api/event";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Check,
+  Cpu,
   Database,
   FileArchive,
+  Gauge,
   Github,
   Link,
   LoaderCircle,
@@ -20,7 +23,9 @@ import { isTauriRuntime, truncatePeerId } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
 import type {
   AuditJob,
+  AuditRuntimeProgress,
   CampaignReportSnapshot,
+  LocalModelList,
   ProtocolAuditCampaign,
   RepositorySummary,
 } from "@/types";
@@ -88,6 +93,12 @@ function AppContent() {
   const [peerAddress, setPeerAddress] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [runtimeProvider, setRuntimeProvider] = useState("lmstudio");
+  const [runtimeModels, setRuntimeModels] = useState<string[]>([]);
+  const [runtimeModel, setRuntimeModel] = useState("");
+  const [runtimeStatus, setRuntimeStatus] = useState<LocalModelList | null>(null);
+  const [runtimeProgress, setRuntimeProgress] = useState<Record<string, AuditRuntimeProgress>>({});
+  const [latestRuntimeProgress, setLatestRuntimeProgress] = useState<AuditRuntimeProgress | null>(null);
 
   const nodeStatus = useCyphesStore((state) => state.nodeStatus);
   const nodeError = useCyphesStore((state) => state.nodeError);
@@ -108,6 +119,47 @@ function AppContent() {
   const relayAddress = networkInfo?.listen_addrs.find((address) =>
     address.includes("/p2p-circuit/"),
   );
+  const runtimeProviderLabel = runtimeProvider === "ollama" ? "Ollama" : "LM Studio";
+
+  async function refreshRuntimeModels(provider = runtimeProvider) {
+    const listing = await p2p.listLocalModelModels(provider);
+    setRuntimeStatus(listing);
+    setRuntimeModels(listing.models);
+    setRuntimeModel((current) => {
+      if (current && listing.models.includes(current)) return current;
+      return listing.models[0] || "";
+    });
+    return listing;
+  }
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<AuditRuntimeProgress>("audit:runtime_progress", (event) => {
+      if (disposed) return;
+      setLatestRuntimeProgress(event.payload);
+      setRuntimeProgress((current) => ({
+        ...current,
+        [event.payload.campaignId]: event.payload,
+      }));
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void refreshRuntimeModels(runtimeProvider);
+    const timer = window.setInterval(() => {
+      void refreshRuntimeModels(runtimeProvider);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [runtimeProvider]);
 
   useEffect(() => {
     if (!isTauriRuntime() || campaigns.length === 0) return;
@@ -277,7 +329,7 @@ function AppContent() {
     setActionJobId(job.id);
     try {
       await p2p.runAudit(job.id);
-      setNotice("Audit skill fixture completed; signed result sent to the requester.");
+      setNotice("ATP repository worker completed; signed result sent to the requester.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -294,18 +346,24 @@ function AppContent() {
   async function handleRunAuditSkill(campaign: ProtocolAuditCampaign) {
     setActionJobId(campaign.campaignId);
     try {
+      if (!runtimeModel) {
+        throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
+      }
       const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
       const unit =
         snapshot.workUnits.find((item) => item.status === "open") ||
         snapshot.workUnits[0];
       if (!unit) throw new Error("Campaign has no work units.");
-      const contribution = await p2p.recordCampaignContribution(
+      const contribution = await p2p.runCampaignAuditSkill(
         campaign.campaignId,
         unit.workUnitId,
-        `Run Audit Skill recorded bounded coverage for ${campaign.protocolName} at ${campaign.repository.commitSha}. This is a signed local contribution, not a bounty exploit claim.`,
+        runtimeProvider,
+        runtimeModel,
       );
       await refreshCampaignSnapshot(campaign.campaignId);
-      setNotice(`Signed contribution recorded: ${contribution.receiptHash.slice(0, 19)}...`);
+      setNotice(
+        `${contribution.runtime?.model || runtimeModel} produced signed contribution ${contribution.receiptHash.slice(0, 19)}...`,
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -404,7 +462,7 @@ function AppContent() {
           onClick={() => void handleRun(job)}
           type="button"
         >
-          {actionJobId === job.id ? "Running skill" : "Run Audit Skill"}
+          {actionJobId === job.id ? "Running worker" : "Run ATP worker"}
           <ArrowRight size={14} />
         </button>
       );
@@ -480,13 +538,70 @@ function AppContent() {
           </div>
           <div>
             <ShieldCheck size={15} />
-            <span>Runtime operator</span>
-            <strong>CYPHES fixture</strong>
+            <span>Audit runtime</span>
+            <strong className={runtimeModel ? "" : "warning"}>
+              {runtimeModel || "No local model"}
+            </strong>
           </div>
           <div>
             <Trophy size={15} />
             <span>ATP earned</span>
             <strong>{creditSummary.total} credits</strong>
+          </div>
+        </section>
+
+        <section className="runtime-panel" aria-label="Audit runtime">
+          <div className="runtime-copy">
+            <Cpu size={16} />
+            <div>
+              <span>Audit Runtime</span>
+              <strong>Local models only</strong>
+              <p>No API key. CYPHES uses the local model server already running on this Mac.</p>
+            </div>
+          </div>
+          <label>
+            Provider
+            <select
+              onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
+              value={runtimeProvider}
+            >
+              <option value="lmstudio">LM Studio</option>
+              <option value="ollama">Ollama</option>
+            </select>
+          </label>
+          <label>
+            Model
+            <select
+              disabled={runtimeModels.length === 0}
+              onChange={(event) => setRuntimeModel(event.currentTarget.value)}
+              value={runtimeModel}
+            >
+              {runtimeModels.length === 0 ? (
+                <option value="">No models detected</option>
+              ) : (
+                runtimeModels.map((model) => (
+                  <option key={model} value={model}>{model}</option>
+                ))
+              )}
+            </select>
+          </label>
+          <div className="runtime-meter">
+            <div>
+              <Gauge size={14} />
+              <span>{latestRuntimeProgress?.phase || runtimeStatus?.message || "Waiting for local model"}</span>
+              <strong>{latestRuntimeProgress ? `${latestRuntimeProgress.progress}%` : runtimeModel ? "Ready" : "Offline"}</strong>
+            </div>
+            <div className="progress-track">
+              <span style={{ width: `${latestRuntimeProgress?.progress || 0}%` }} />
+            </div>
+          </div>
+          <div className="token-gauge">
+            <span>Tokens/sec</span>
+            <strong>
+              {latestRuntimeProgress?.tokensPerSecond
+                ? latestRuntimeProgress.tokensPerSecond.toFixed(1)
+                : "0.0"}
+            </strong>
           </div>
         </section>
 
@@ -668,6 +783,7 @@ function AppContent() {
             ) : (
               campaigns.map((campaign) => {
                 const snapshot = campaignSnapshots[campaign.campaignId];
+                const progress = runtimeProgress[campaign.campaignId];
                 const accepted = snapshot?.verifications.filter((item) => item.decision === "accepted").length || 0;
                 const unverified = (snapshot?.contributions.length || 0) - (snapshot?.verifications.length || 0);
                 return (
@@ -685,10 +801,22 @@ function AppContent() {
                         <span>{accepted} accepted</span>
                         <span>{unverified > 0 ? `${unverified} unverified` : "verified queue clear"}</span>
                       </div>
+                      {progress ? (
+                        <div className="campaign-progress">
+                          <div>
+                            <span>{progress.phase}</span>
+                            <strong>{progress.progress}%</strong>
+                          </div>
+                          <div className="progress-track">
+                            <span style={{ width: `${progress.progress}%` }} />
+                          </div>
+                          <small>{progress.tokensPerSecond ? `${progress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="campaign-actions">
                       <button
-                        disabled={actionJobId === campaign.campaignId}
+                        disabled={actionJobId === campaign.campaignId || !runtimeModel}
                         onClick={() => void handleRunAuditSkill(campaign)}
                         type="button"
                       >

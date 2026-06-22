@@ -9,6 +9,7 @@ import type {
   CreditSummary,
   ExportedReportBundle,
   LegacyAuditJob,
+  LocalModelList,
   NetworkInfo,
   NodeContribution,
   ProtocolAuditCampaign,
@@ -103,6 +104,24 @@ export function useP2P() {
     return invoke<CampaignReportSnapshot>("get_campaign_snapshot", { campaignId });
   }
 
+  async function listLocalModelProviders() {
+    if (!isTauriRuntime()) return [];
+    return invoke<LocalModelList[]>("list_local_model_providers");
+  }
+
+  async function listLocalModelModels(provider: string) {
+    if (!isTauriRuntime()) {
+      return {
+        provider,
+        providerLabel: provider,
+        connected: false,
+        models: [],
+        message: "Local model discovery requires the native CYPHES app.",
+      };
+    }
+    return invoke<LocalModelList>("list_local_model_models", { provider });
+  }
+
   async function refreshCreditSummary() {
     if (!isTauriRuntime()) {
       const empty = { total: 0, allocations: [] };
@@ -183,6 +202,22 @@ export function useP2P() {
     return contribution;
   }
 
+  async function runCampaignAuditSkill(
+    campaignId: string,
+    workUnitId: string,
+    provider: string,
+    model: string,
+  ) {
+    const contribution = await invoke<NodeContribution>("run_campaign_audit_skill", {
+      campaignId,
+      workUnitId,
+      provider,
+      model,
+    });
+    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    return contribution;
+  }
+
   async function verifyCampaignContribution(
     contributionId: string,
     decision = "accepted",
@@ -247,11 +282,14 @@ export function useP2P() {
     loadAudits,
     loadProtocolCampaigns,
     getCampaignSnapshot,
+    listLocalModelProviders,
+    listLocalModelModels,
     refreshCreditSummary,
     migrateLegacyJobs,
     createAudit,
     createProtocolCampaign,
     recordCampaignContribution,
+    runCampaignAuditSkill,
     verifyCampaignContribution,
     exportCampaignReport,
     offerAudit,

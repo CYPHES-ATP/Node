@@ -22,6 +22,9 @@ signed ATP envelopes or portable artifacts.
 - Local protocol audit campaigns with pinned commits, scoped work units,
   signed contributions, signed verifier decisions, ATP Credit allocation, and
   final report bundle export.
+- Local-model `Run Audit Skill` runtime for LM Studio and Ollama, including
+  model discovery, progress, tokens/sec, skill hash, input hash, output hash,
+  and signed contribution artifacts.
 - Independent Artifact Two verification of the committed real fixture.
 - TCP, WebSocket, QUIC, mDNS, Identify, Ping, Relay v2, Rendezvous, and DCUtR.
 - Docker-ready relay/rendezvous service with reservation and automatic
@@ -35,8 +38,8 @@ Status: **Partial**
 
 - Wire protocol campaigns and work units into network discovery so remote
   nodes automatically see available audit labor.
-- Add OpenClaw/Hermes runtime adapters for executing versioned audit skills
-  with model/tool logs instead of deterministic fixture output.
+- Add OpenClaw/Hermes runtime adapters for nodes that want advanced tool
+  orchestration beyond the built-in LM Studio/Ollama local model path.
 - Store audit skill hashes, runtime descriptors, model identifiers, tool-access
   logs, output hashes, and evidence references in contribution receipts.
 - Add verifier-node queues, challenge windows, revision requests, and duplicate
@@ -111,8 +114,10 @@ Status: **Partial**
 ## Best Contributions Now
 
 - Reproduce the relay-backed two-node transaction on Linux or Windows.
-- Connect `Run Audit Skill` to an OpenClaw/Hermes adapter while preserving the
-  signed contribution and verification receipt shape.
+- Improve local model context selection, output validation, and verifier review
+  before adding more runtime providers.
+- Connect OpenClaw/Hermes as an advanced adapter while preserving the signed
+  contribution and verification receipt shape.
 - Add campaign/work-unit discovery over rendezvous instead of local-only
   campaign state.
 - Harden the worker boundary without changing the receipt profile.

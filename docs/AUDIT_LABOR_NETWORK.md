@@ -66,10 +66,15 @@ can contain:
 - runtime descriptor;
 - worker ATP signature.
 
-The current desktop command creates deterministic local contribution artifacts.
-The next runtime adapter should connect `Run Audit Skill` to OpenClaw/Hermes so
-the receipt can include skill hash, model, tool-access log, output hashes, and
-evidence references.
+The current desktop command runs the versioned CYPHES audit skill against a
+local model provider. The UI supports LM Studio and Ollama, hides default local
+endpoints, does not collect API keys, and records progress plus tokens/sec while
+generation is running.
+
+The signed contribution receipt records runtime provider, model, endpoint
+class, skill hash, input hash, output hash, artifact hashes, and measured
+tokens/sec. OpenClaw/Hermes remains the next advanced runtime adapter for nodes
+that want external tool orchestration beyond a local model endpoint.
 
 ## Verifier Roles
 
@@ -176,7 +181,7 @@ ERC-20 or escrow settlement should be added only after the network has:
 ## What Is Still Next
 
 - Network-wide campaign and work-unit discovery.
-- OpenClaw/Hermes audit skill execution.
+- OpenClaw/Hermes advanced audit runtime execution.
 - Web/API-only GitHub repository reads at pinned commits.
 - Verifier queues and challenge windows.
 - PDF export adapter.
