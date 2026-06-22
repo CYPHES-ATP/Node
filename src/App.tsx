@@ -53,11 +53,82 @@ interface GitHubCommit {
   message?: string;
 }
 
-function repositoryApiUrl(value: string) {
-  const normalized = value.trim().replace(/\.git$/, "").replace(/\/+$/, "");
-  const match = normalized.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/i);
-  if (!match) return null;
-  return `https://api.github.com/repos/${encodeURIComponent(match[1])}/${encodeURIComponent(match[2])}`;
+interface GitHubInputTarget {
+  apiUrl: string;
+  repoUrl: string;
+  kind: "repository" | "blob" | "tree";
+  pathSegments: string[];
+}
+
+interface InspectedRepository {
+  repository: RepositorySummary;
+  scope: string[];
+  scopeText: string;
+  focusPath?: string;
+  focusRef?: string;
+}
+
+const GITHUB_REPOSITORY_URL_ERROR =
+  "Use a public GitHub repository URL, file URL, or folder URL, for example https://github.com/owner/repo.";
+
+function parseGitHubInput(value: string): GitHubInputTarget | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (!/^https:$/.test(parsed.protocol) || !/^(www\.)?github\.com$/i.test(parsed.hostname)) {
+    return null;
+  }
+  const segments = parsed.pathname
+    .replace(/\/+$/, "")
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    });
+  if (segments.length < 2) return null;
+  const owner = segments[0];
+  const repo = segments[1].replace(/\.git$/i, "");
+  if (!owner || !repo || owner === "." || repo === ".") return null;
+  const route = segments[2]?.toLowerCase();
+  const kind = route === "blob" || route === "tree" ? route : "repository";
+  const pathSegments = kind === "repository" ? [] : segments.slice(3);
+  return {
+    apiUrl: `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    repoUrl: `https://github.com/${owner}/${repo}`,
+    kind,
+    pathSegments,
+  };
+}
+
+function repositoryFocusScope(
+  baseScope: string[],
+  repository: RepositorySummary,
+  focusPath?: string,
+  focusRef?: string,
+) {
+  if (!focusPath || !focusRef) {
+    return {
+      scope: baseScope,
+      scopeText: baseScope.join("\n"),
+    };
+  }
+  const focusedScope = [
+    `Focused path: ${focusPath}`,
+    `GitHub ref from pasted URL: ${focusRef}`,
+    `Pinned commit: ${repository.commitSha}`,
+    ...baseScope,
+  ];
+  return {
+    scope: focusedScope,
+    scopeText: focusedScope.join("\n"),
+  };
 }
 
 function toRepositorySummary(
@@ -192,13 +263,92 @@ function AppContent() {
     return () => window.clearTimeout(timer);
   }, [notice, setNotice]);
 
-  async function inspectRepository(url: string) {
-    const apiUrl = repositoryApiUrl(url);
-    if (!apiUrl) {
-      throw new Error("Use a public GitHub repository URL, for example https://github.com/owner/repo.");
+  async function resolveCommit(apiUrl: string, ref: string, optional = false) {
+    const commitResponse = await fetch(
+      `${apiUrl}/commits/${encodeURIComponent(ref)}`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+        },
+      },
+    );
+    const commit = (await commitResponse.json()) as GitHubCommit;
+    if (!commitResponse.ok) {
+      if (optional && commitResponse.status === 404) return null;
+      throw new Error(commit.message || `GitHub could not resolve ${ref} to a commit.`);
+    }
+    if (!/^[0-9a-f]{40,64}$/i.test(commit.sha || "")) {
+      throw new Error(commit.message || `GitHub returned an invalid commit for ${ref}.`);
+    }
+    return commit.sha;
+  }
+
+  async function resolveGitHubPath(
+    apiUrl: string,
+    repository: GitHubRepository,
+    target: GitHubInputTarget,
+  ) {
+    if (target.kind === "repository") {
+      return {
+        commitSha: (await resolveCommit(apiUrl, repository.default_branch))!,
+        focusPath: undefined,
+        focusRef: undefined,
+      };
     }
 
-    const response = await fetch(apiUrl, {
+    if (target.kind === "blob" && target.pathSegments.length < 2) {
+      throw new Error("That GitHub file URL is missing a branch or path.");
+    }
+    if (target.pathSegments.length === 0) {
+      return {
+        commitSha: (await resolveCommit(apiUrl, repository.default_branch))!,
+        focusPath: undefined,
+        focusRef: undefined,
+      };
+    }
+
+    const defaultBranchSegments = repository.default_branch.split("/");
+    const startsWithDefaultBranch = defaultBranchSegments.every(
+      (segment, index) => target.pathSegments[index] === segment,
+    );
+    if (startsWithDefaultBranch) {
+      const focusPath = target.pathSegments.slice(defaultBranchSegments.length).join("/");
+      return {
+        commitSha: (await resolveCommit(apiUrl, repository.default_branch))!,
+        focusPath: focusPath || undefined,
+        focusRef: repository.default_branch,
+      };
+    }
+
+    const maxRefSegments =
+      target.kind === "blob"
+        ? Math.max(1, target.pathSegments.length - 1)
+        : target.pathSegments.length;
+    for (let index = maxRefSegments; index >= 1; index -= 1) {
+      const focusRef = target.pathSegments.slice(0, index).join("/");
+      const commitSha = await resolveCommit(apiUrl, focusRef, true);
+      if (commitSha) {
+        const focusPath = target.pathSegments.slice(index).join("/");
+        return {
+          commitSha,
+          focusPath: focusPath || undefined,
+          focusRef,
+        };
+      }
+    }
+
+    throw new Error(
+      "GitHub resolved the repository, but CYPHES could not resolve the branch or file path from that URL.",
+    );
+  }
+
+  async function inspectRepository(url: string): Promise<InspectedRepository> {
+    const target = parseGitHubInput(url);
+    if (!target) {
+      throw new Error(GITHUB_REPOSITORY_URL_ERROR);
+    }
+
+    const response = await fetch(target.apiUrl, {
       headers: {
         Accept: "application/vnd.github+json",
       },
@@ -212,20 +362,22 @@ function AppContent() {
       throw new Error("Private repositories are not supported in this build.");
     }
 
-    const commitResponse = await fetch(
-      `${apiUrl}/commits/${encodeURIComponent(repository.default_branch)}`,
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-        },
-      },
+    const resolved = await resolveGitHubPath(target.apiUrl, repository, target);
+    const summary = toRepositorySummary(
+      { ...repository, html_url: target.repoUrl },
+      resolved.commitSha,
     );
-    const commit = (await commitResponse.json()) as GitHubCommit;
-    if (!commitResponse.ok || !/^[0-9a-f]{40,64}$/i.test(commit.sha || "")) {
-      throw new Error(commit.message || "GitHub could not resolve the default branch to a commit.");
-    }
-
-    return toRepositorySummary(repository, commit.sha);
+    return {
+      repository: summary,
+      ...repositoryFocusScope(
+        AUDIT_SCOPE,
+        summary,
+        resolved.focusPath,
+        resolved.focusRef,
+      ),
+      focusPath: resolved.focusPath,
+      focusRef: resolved.focusRef,
+    };
   }
 
   async function createAudit(event: FormEvent) {
@@ -248,16 +400,17 @@ function AppContent() {
 
     setSubmitting(true);
     try {
-      const repository = await inspectRepository(repositoryUrl);
+      const inspected = await inspectRepository(repositoryUrl);
+      const { repository } = inspected;
       const job = await p2p.createAudit(
         repository,
         credits.toString(),
-        AUDIT_SCOPE,
+        inspected.scope,
       );
       await p2p.createProtocolCampaign(
         repository,
         repository.fullName.split("/")[0],
-        AUDIT_SCOPE.join("\n"),
+        inspected.scopeText,
         credits.toString(),
       );
       setRepositoryUrl("");
