@@ -96,6 +96,10 @@ Artifact Two independently returns:
 - Deterministic audit work units for scope mapping, repository inventory,
   dependency/config review, DeFi exploit-class review, finding validation, and
   final report sections.
+- Local-model `Run Audit Skill` execution through LM Studio or Ollama with
+  hidden local endpoints, model discovery, progress events, tokens/sec
+  measurement, skill hash, input hash, output hash, and signed contribution
+  artifacts.
 - Signed node contributions and signed verifier decisions.
 - Receipt-backed ATP Credits issued only after accepted verification results.
 - Final audit report bundle export with report markdown, findings,
@@ -117,11 +121,11 @@ Artifact Two independently returns:
   not yet isolated in a hardened OS container or VM.
 - No escrow, token transfer, release, refund, or dispute adapter. ATP Credits
   are off-chain receipt-backed accounting only.
-- No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Skill` path
-  records signed local work artifacts; external agent execution remains the
-  next adapter.
-- No claim that the deterministic worker finds real vulnerabilities. Findings
-  must be backed by signed artifacts before they appear in final reports.
+- No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Skill` path is
+  local-model-only through LM Studio or Ollama.
+- No claim that local model output is automatically a valid vulnerability.
+  Findings must be backed by signed artifacts and accepted verifier receipts
+  before they appear in final reports.
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
@@ -252,12 +256,13 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 | `src-tauri/src/atp.rs` | ATP envelopes, signing, verification, hashes, transitions |
 | `src-tauri/src/audit_profile.rs` | Repository-audit contract and receipt profile |
 | `src-tauri/src/audit_labor.rs` | Protocol campaigns, work units, contributions, verification, credits, reports |
+| `src-tauri/src/audit_runtime.rs` | LM Studio/Ollama local model runtime, GitHub read-only context, skill output parsing |
 | `src-tauri/src/store.rs` | SQLite event chain, replay defense, transaction projections |
 | `src-tauri/src/worker.rs` | Context leases and deterministic repository worker |
 | `src-tauri/src/bundle.rs` | Portable receipt and audit-report bundle export |
 | `src-tauri/src/p2p.rs` | Direct, LAN, and relay-backed libp2p delivery |
 | `src-tauri/src/commands.rs` | Tauri operations for the complete work order |
-| `protocol/` | Schemas, canonical fixtures, and verified ATP-L1 bundle |
+| `protocol/` | Schemas, skills, canonical fixtures, and verified ATP-L1 bundle |
 | `relay/` | Combined public relay/rendezvous service and smoke clients |
 | `network/` | Remotely updateable default-network manifest |
 

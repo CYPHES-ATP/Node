@@ -79,11 +79,11 @@ GitHub Actions, and tracked environment-file posture. This is proof of ATP
 coordination and bounded work, not a claim of comprehensive source-code
 vulnerability analysis.
 
-The desktop label for the worker action is now **Run Audit Skill**. In this
-developer preview, that command records deterministic local artifacts and
-receipt-backed audit labor objects. OpenClaw/Hermes execution, model/tool logs,
-and web/API-only repository reads are the next runtime adapter, not a hidden
-capability in this profile.
+The ATP transaction worker remains a deterministic repository worker. The
+separate audit-labor action, **Run Audit Skill**, uses a local model provider
+through LM Studio or Ollama, reads pinned GitHub context without cloning or
+executing repository code, records skill/model/input/output hashes, and signs
+the resulting contribution artifacts.
 
 ## Receipt
 

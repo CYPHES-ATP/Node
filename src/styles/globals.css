@@ -49,7 +49,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -60,6 +61,10 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.42;
+}
+
+select {
+  color: var(--ink);
 }
 
 ::selection {
@@ -320,6 +325,134 @@ main {
   white-space: nowrap;
 }
 
+.runtime-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 190px 240px minmax(220px, 1fr) 110px;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(0, 246, 255, 0.055), transparent 45%),
+    rgba(255, 255, 255, 0.024);
+}
+
+.runtime-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.runtime-copy svg {
+  color: var(--cyan);
+}
+
+.runtime-copy span,
+.runtime-panel label,
+.token-gauge span {
+  display: block;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.runtime-copy strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.runtime-copy p {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-panel select {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: 0;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--ink);
+}
+
+.runtime-panel select:focus {
+  border-color: var(--line-strong);
+}
+
+.runtime-meter {
+  min-width: 0;
+}
+
+.runtime-meter > div:first-child {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.runtime-meter svg {
+  color: var(--green);
+}
+
+.runtime-meter span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-meter strong,
+.token-gauge strong {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.progress-track {
+  height: 5px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(245, 251, 250, 0.08);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--green));
+  transition: width 220ms ease;
+}
+
+.token-gauge {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.18);
+  text-align: right;
+}
+
+.token-gauge strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--green);
+  font-size: 15px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.04fr) minmax(380px, 0.96fr);
@@ -575,6 +708,42 @@ form > label,
   text-transform: uppercase;
 }
 
+.campaign-progress {
+  margin-top: 14px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.campaign-progress > div:first-child {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.campaign-progress span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campaign-progress strong {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.campaign-progress small {
+  display: block;
+  margin-top: 7px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
 .empty-state.compact {
   min-height: 190px;
 }
@@ -766,6 +935,10 @@ footer {
   }
 
   .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-panel {
     grid-template-columns: 1fr;
   }
 

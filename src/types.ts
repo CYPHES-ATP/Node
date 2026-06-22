@@ -84,6 +84,19 @@ export interface NodeContribution {
   campaignId: string;
   workUnitId: string;
   workerAgentId: string;
+  runtime?: {
+    operator: string;
+    adapter: string;
+    model: string;
+    modelMultiplier: number;
+    toolPolicy: string[];
+    connected: boolean;
+    endpointClass?: string;
+    skillHash?: string;
+    inputHash?: string;
+    outputHash?: string;
+    tokensPerSecond?: number;
+  };
   notesMarkdown: string;
   receiptHash: string;
   contributionHash: string;
@@ -132,6 +145,22 @@ export interface CampaignReportSnapshot {
 export interface ExportedReportBundle {
   campaignId: string;
   bundlePath: string;
+}
+
+export interface LocalModelList {
+  provider: string;
+  providerLabel: string;
+  connected: boolean;
+  models: string[];
+  message: string;
+}
+
+export interface AuditRuntimeProgress {
+  campaignId: string;
+  workUnitId: string;
+  phase: string;
+  progress: number;
+  tokensPerSecond?: number;
 }
 
 export interface LegacyAuditJob {

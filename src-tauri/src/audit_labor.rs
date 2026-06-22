@@ -110,6 +110,16 @@ pub struct RuntimeDescriptor {
     pub model_multiplier: f64,
     pub tool_policy: Vec<String>,
     pub connected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_per_second: Option<f64>,
 }
 
 impl RuntimeDescriptor {
@@ -125,6 +135,11 @@ impl RuntimeDescriptor {
                 "no untrusted code execution".to_string(),
             ],
             connected: true,
+            endpoint_class: None,
+            skill_hash: None,
+            input_hash: None,
+            output_hash: None,
+            tokens_per_second: None,
         }
     }
 }
