@@ -653,8 +653,9 @@ The first faithful release uses:
 }
 ```
 
-The UI can still collect a proposed commercial amount, but it must label the
-request non-payable until both nodes negotiate a supported real rail.
+The UI can collect an ATP Credits estimate, but it must label credits as
+off-chain, receipt-backed accounting until both nodes negotiate a supported real
+settlement rail.
 
 ATP-L3 should add USDC only through a settlement adapter that:
 
@@ -666,6 +667,18 @@ ATP-L3 should add USDC only through a settlement adapter that:
 
 The ATP receipt references the payment proof. Payment does not replace work
 verification.
+
+## Audit Labor Network Layer
+
+The v0.1 audit labor network sits above the repository-audit ATP transaction.
+It adds protocol audit campaigns, work units, signed node contributions, signed
+verifier decisions, ATP Credit allocation, and markdown report bundle export.
+
+This layer intentionally does not add fake reputation, token balances, bounty
+payouts, or exploit claims. A contribution becomes credit-eligible only after a
+signed verifier result accepts a signed contribution receipt. Network-wide
+campaign discovery, OpenClaw/Hermes execution, verifier challenge windows, and
+real settlement adapters remain separate roadmap items.
 
 ### ATTEST
 

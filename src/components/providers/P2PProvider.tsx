@@ -28,6 +28,10 @@ export function P2PProvider({ children }: P2PProviderProps) {
           listen("atp:jobs_changed", () => {
             void p2p.loadAudits();
           }),
+          listen("audit:labor_changed", () => {
+            void p2p.loadProtocolCampaigns();
+            void p2p.refreshCreditSummary();
+          }),
           listen<AtpAck>("atp:delivery_acknowledged", (event) => {
             const state = event.payload.state || "committed";
             setNotice(`Peer verified and committed ATP state: ${state}.`);
@@ -90,6 +94,8 @@ export function P2PProvider({ children }: P2PProviderProps) {
         p2p.refreshPeers(),
         p2p.refreshNetworkInfo(),
         p2p.loadAudits(),
+        p2p.loadProtocolCampaigns(),
+        p2p.refreshCreditSummary(),
       ]);
     }
 

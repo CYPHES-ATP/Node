@@ -14,6 +14,11 @@ use crate::{
         event_hash, now_rfc3339, transition, verify_envelope, AtpAck, AtpEnvelope, AtpVerb,
         ATP_GENESIS_HASH,
     },
+    audit_labor::{
+        allocate_credits, default_work_units, validate_campaign, verify_signed_contribution,
+        verify_signed_verification, AuditWorkUnit, CampaignReportSnapshot, CreditAllocation,
+        CreditSummary, NodeContribution, ProtocolAuditCampaign, VerificationResult,
+    },
     audit_profile::{
         contract_hash, receipt_signature_value, validate_contract, validate_receipt,
         validate_receipt_parties, AuditContract, AuditReceipt, ReceiptApproval, RepositoryTarget,
@@ -290,6 +295,236 @@ impl AtpStore {
             )
             .map_err(|error| error.to_string())?;
         serde_json::from_str(&value).map_err(|error| error.to_string())
+    }
+
+    pub fn create_protocol_campaign(
+        &self,
+        campaign: &ProtocolAuditCampaign,
+    ) -> Result<ProtocolAuditCampaign, String> {
+        validate_campaign(campaign)?;
+        let work_units = default_work_units(campaign);
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO protocol_audit_campaigns
+                    (campaign_id, campaign_json, status, requester_agent_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    campaign.campaign_id,
+                    serde_json::to_string(campaign).map_err(|error| error.to_string())?,
+                    campaign.status,
+                    campaign.requester_agent_id,
+                    millis_from_rfc3339(&campaign.created_at)?,
+                    millis_from_rfc3339(&campaign.updated_at)?,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        for work_unit in &work_units {
+            insert_work_unit(&transaction, work_unit)?;
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(campaign.clone())
+    }
+
+    pub fn list_protocol_campaigns(&self) -> Result<Vec<ProtocolAuditCampaign>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT campaign_json FROM protocol_audit_campaigns
+                 ORDER BY created_at DESC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
+    #[cfg(test)]
+    pub fn list_work_units(&self, campaign_id: &str) -> Result<Vec<AuditWorkUnit>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        work_units_in_connection(&connection, campaign_id)
+    }
+
+    pub fn record_contribution(
+        &self,
+        contribution: &NodeContribution,
+    ) -> Result<NodeContribution, String> {
+        verify_signed_contribution(contribution)?;
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let campaign: Option<String> = connection
+            .query_row(
+                "SELECT campaign_id FROM protocol_audit_campaigns WHERE campaign_id = ?1",
+                params![contribution.campaign_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if campaign.is_none() {
+            return Err("contribution campaign is not known locally".to_string());
+        }
+        let work_unit: Option<String> = connection
+            .query_row(
+                "SELECT work_unit_id FROM audit_work_units
+                 WHERE campaign_id = ?1 AND work_unit_id = ?2",
+                params![contribution.campaign_id, contribution.work_unit_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if work_unit.is_none() {
+            return Err("contribution work unit is not known locally".to_string());
+        }
+        connection
+            .execute(
+                "INSERT INTO audit_contributions
+                    (contribution_id, campaign_id, work_unit_id, worker_agent_id,
+                     receipt_hash, contribution_json, status, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'submitted', ?7)",
+                params![
+                    contribution.contribution_id,
+                    contribution.campaign_id,
+                    contribution.work_unit_id,
+                    contribution.worker_agent_id,
+                    contribution.receipt_hash,
+                    serde_json::to_string(contribution).map_err(|error| error.to_string())?,
+                    millis_from_rfc3339(&contribution.created_at)?,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "UPDATE audit_work_units
+                 SET status = 'submitted', updated_at = ?3
+                 WHERE campaign_id = ?1 AND work_unit_id = ?2",
+                params![
+                    contribution.campaign_id,
+                    contribution.work_unit_id,
+                    now_millis() as i64,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(contribution.clone())
+    }
+
+    pub fn record_verification(
+        &self,
+        verification: &VerificationResult,
+    ) -> Result<Vec<CreditAllocation>, String> {
+        verify_signed_verification(verification)?;
+        let contribution = self.get_contribution(&verification.target_contribution_id)?;
+        let allocations = if verification.decision == "accepted" {
+            allocate_credits(&contribution, verification)?
+        } else {
+            Vec::new()
+        };
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO audit_verifications
+                    (verification_id, campaign_id, target_contribution_id, verifier_agent_id,
+                     decision, verification_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    verification.verification_id,
+                    verification.campaign_id,
+                    verification.target_contribution_id,
+                    verification.verifier_agent_id,
+                    verification.decision,
+                    serde_json::to_string(verification).map_err(|error| error.to_string())?,
+                    millis_from_rfc3339(&verification.created_at)?,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        let contribution_status = match verification.decision.as_str() {
+            "accepted" | "reproduced" => "accepted",
+            "rejected" => "rejected",
+            "challenged" => "challenged",
+            "revision_requested" => "revision_requested",
+            _ => "reviewed",
+        };
+        transaction
+            .execute(
+                "UPDATE audit_contributions
+                 SET status = ?2
+                 WHERE contribution_id = ?1",
+                params![verification.target_contribution_id, contribution_status],
+            )
+            .map_err(|error| error.to_string())?;
+        for allocation in &allocations {
+            transaction
+                .execute(
+                    "INSERT INTO credit_allocations
+                        (allocation_id, campaign_id, contribution_id, verification_id,
+                         receiver_agent_id, total, allocation_json, issued_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        allocation.allocation_id,
+                        allocation.campaign_id,
+                        allocation.contribution_id,
+                        allocation.verification_id,
+                        allocation.receiver_agent_id,
+                        allocation.total as i64,
+                        serde_json::to_string(allocation).map_err(|error| error.to_string())?,
+                        millis_from_rfc3339(&allocation.issued_at)?,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(allocations)
+    }
+
+    pub fn get_contribution(&self, contribution_id: &str) -> Result<NodeContribution, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        contribution_in_connection(&connection, contribution_id)
+    }
+
+    pub fn credit_summary(&self, receiver_agent_id: &str) -> Result<CreditSummary, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT allocation_json FROM credit_allocations
+                 WHERE receiver_agent_id = ?1
+                 ORDER BY issued_at DESC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![receiver_agent_id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        let allocations = rows
+            .map(|row| {
+                let json = row.map_err(|error| error.to_string())?;
+                serde_json::from_str(&json).map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<CreditAllocation>, String>>()?;
+        let total = allocations.iter().map(|allocation| allocation.total).sum();
+        Ok(CreditSummary { total, allocations })
+    }
+
+    pub fn campaign_report_snapshot(
+        &self,
+        campaign_id: &str,
+    ) -> Result<CampaignReportSnapshot, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let campaign = campaign_in_connection(&connection, campaign_id)?;
+        Ok(CampaignReportSnapshot {
+            campaign,
+            work_units: work_units_in_connection(&connection, campaign_id)?,
+            contributions: contributions_in_connection(&connection, campaign_id)?,
+            verifications: verifications_in_connection(&connection, campaign_id)?,
+            credits: credits_in_connection(&connection, campaign_id)?,
+        })
     }
 
     pub fn build_worker_receipt(
@@ -682,6 +917,63 @@ impl AtpStore {
                     reason TEXT,
                     updated_at INTEGER NOT NULL,
                     PRIMARY KEY(event_hash, peer_id)
+                 );
+
+                 CREATE TABLE IF NOT EXISTS protocol_audit_campaigns (
+                    campaign_id TEXT PRIMARY KEY,
+                    campaign_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    requester_agent_id TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                 );
+
+                 CREATE TABLE IF NOT EXISTS audit_work_units (
+                    work_unit_id TEXT PRIMARY KEY,
+                    campaign_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    work_unit_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS audit_work_units_campaign
+                    ON audit_work_units(campaign_id, created_at);
+
+                 CREATE TABLE IF NOT EXISTS audit_contributions (
+                    contribution_id TEXT PRIMARY KEY,
+                    campaign_id TEXT NOT NULL,
+                    work_unit_id TEXT NOT NULL,
+                    worker_agent_id TEXT NOT NULL,
+                    receipt_hash TEXT NOT NULL UNIQUE,
+                    contribution_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS audit_contributions_campaign
+                    ON audit_contributions(campaign_id, created_at);
+
+                 CREATE TABLE IF NOT EXISTS audit_verifications (
+                    verification_id TEXT PRIMARY KEY,
+                    campaign_id TEXT NOT NULL,
+                    target_contribution_id TEXT NOT NULL,
+                    verifier_agent_id TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    verification_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS audit_verifications_campaign
+                    ON audit_verifications(campaign_id, created_at);
+
+                 CREATE TABLE IF NOT EXISTS credit_allocations (
+                    allocation_id TEXT PRIMARY KEY,
+                    campaign_id TEXT NOT NULL,
+                    contribution_id TEXT NOT NULL,
+                    verification_id TEXT NOT NULL,
+                    receiver_agent_id TEXT NOT NULL,
+                    total INTEGER NOT NULL,
+                    allocation_json TEXT NOT NULL,
+                    issued_at INTEGER NOT NULL
                  );",
             )
             .map_err(|error| error.to_string())?;
@@ -1363,6 +1655,143 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditJob> {
     })
 }
 
+fn insert_work_unit(
+    transaction: &Transaction<'_>,
+    work_unit: &AuditWorkUnit,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "INSERT INTO audit_work_units
+                (work_unit_id, campaign_id, kind, status, work_unit_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                work_unit.work_unit_id,
+                work_unit.campaign_id,
+                work_unit.kind,
+                work_unit.status,
+                serde_json::to_string(work_unit).map_err(|error| error.to_string())?,
+                millis_from_rfc3339(&work_unit.created_at)?,
+                millis_from_rfc3339(&work_unit.created_at)?,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn campaign_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+) -> Result<ProtocolAuditCampaign, String> {
+    let json = connection
+        .query_row(
+            "SELECT campaign_json FROM protocol_audit_campaigns WHERE campaign_id = ?1",
+            params![campaign_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn work_units_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+) -> Result<Vec<AuditWorkUnit>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT work_unit_json FROM audit_work_units
+             WHERE campaign_id = ?1 ORDER BY created_at, work_unit_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![campaign_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
+fn contribution_in_connection(
+    connection: &Connection,
+    contribution_id: &str,
+) -> Result<NodeContribution, String> {
+    let json = connection
+        .query_row(
+            "SELECT contribution_json FROM audit_contributions WHERE contribution_id = ?1",
+            params![contribution_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn contributions_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+) -> Result<Vec<NodeContribution>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT contribution_json FROM audit_contributions
+             WHERE campaign_id = ?1 ORDER BY created_at, contribution_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![campaign_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
+fn verifications_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+) -> Result<Vec<VerificationResult>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT verification_json FROM audit_verifications
+             WHERE campaign_id = ?1 ORDER BY created_at, verification_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![campaign_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
+fn credits_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+) -> Result<Vec<CreditAllocation>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT allocation_json FROM credit_allocations
+             WHERE campaign_id = ?1 ORDER BY issued_at, allocation_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![campaign_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
+fn millis_from_rfc3339(value: &str) -> Result<i64, String> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|time| time.timestamp_millis())
+        .map_err(|_| "timestamp must be RFC3339".to_string())
+}
+
 pub fn now_millis() -> u64 {
     chrono::Utc::now().timestamp_millis() as u64
 }
@@ -1384,8 +1813,12 @@ mod tests {
     use super::*;
     use crate::{
         atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
+        audit_labor::{
+            signed_contribution, signed_verification, AuditFinding, ContributionArtifact,
+            CoverageItem, RuntimeDescriptor, VerificationEvidence,
+        },
         audit_profile::{contract_hash, AuditContract, ReceiptApproval, RepositoryTarget},
-        bundle::export_receipt_bundle_to,
+        bundle::{export_campaign_report_bundle_to, export_receipt_bundle_to},
         worker::{create_repository_leases, execute_repository_audit},
     };
     use chrono::{Duration, SecondsFormat, Utc};
@@ -1397,6 +1830,40 @@ mod tests {
         };
         store.initialize().unwrap();
         store
+    }
+
+    fn labor_artifact(path: &str) -> ContributionArtifact {
+        ContributionArtifact {
+            path: path.to_string(),
+            media_type: "text/markdown".to_string(),
+            sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
+            size_bytes: 128,
+        }
+    }
+
+    fn labor_campaign(requester_agent: String) -> ProtocolAuditCampaign {
+        ProtocolAuditCampaign::new(
+            "Aave".to_string(),
+            RepositoryTarget {
+                full_name: "aave-dao/aave-v3-origin".to_string(),
+                url: "https://github.com/aave-dao/aave-v3-origin".to_string(),
+                commit_sha: "fd1fbd9150426ca8ace9cee45b4acf912ae84f5b".to_string(),
+            },
+            "Audit pool accounting and liquidation invariants.".to_string(),
+            Some("https://immunefi.com/bug-bounty/aave/scope/".to_string()),
+            vec![
+                "Principal theft".to_string(),
+                "Protocol insolvency".to_string(),
+            ],
+            vec![
+                "Best practice notes".to_string(),
+                "Privileged key compromise".to_string(),
+            ],
+            Some("AAVE Immunefi scope handoff".to_string()),
+            requester_agent,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1417,7 +1884,7 @@ mod tests {
                 commit_sha: "0000000000000000000000000000000000000001".to_string(),
             },
             compensation: "100".to_string(),
-            currency: "USDC".to_string(),
+            currency: "ATP Credits".to_string(),
             scope: vec!["Dependency risk".to_string()],
             requester_agent_id: local_agent.clone(),
             created_at: now_millis(),
@@ -1464,7 +1931,7 @@ mod tests {
                 commit_sha: "0000000000000000000000000000000000000002".to_string(),
             },
             compensation: "100".to_string(),
-            currency: "USDC".to_string(),
+            currency: "ATP Credits".to_string(),
             scope: vec!["Repository audit".to_string()],
             requester_agent_id: requester_agent.clone(),
             created_at: now_millis(),
@@ -1577,6 +2044,127 @@ mod tests {
         );
     }
 
+    #[test]
+    fn campaign_contributions_verifications_and_credits_are_local_and_receipt_backed() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let verifier = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        assert!(work_units
+            .iter()
+            .any(|unit| unit.kind == "defi-exploit-class-pass"));
+
+        let accepted_contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_units[3].work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped DeFi exploit-class applicability with no code execution.".to_string(),
+            vec![AuditFinding {
+                id: "AAVE-COVERAGE-001".to_string(),
+                title: "No reportable bug in fixture pass".to_string(),
+                severity: "informational".to_string(),
+                status: "non_reportable".to_string(),
+                impact: None,
+                evidence: vec!["coverage-notes.md".to_string()],
+                reportable: false,
+            }],
+            vec![labor_artifact("coverage-notes.md")],
+            vec![CoverageItem {
+                area: "oracle mocks".to_string(),
+                status: "considered".to_string(),
+                evidence: vec!["Oracle mock assumptions recorded.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&accepted_contribution).unwrap();
+        let accepted_verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            accepted_contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Coverage is useful and bounded.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: accepted_contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+        let allocations = store.record_verification(&accepted_verification).unwrap();
+        assert_eq!(allocations.len(), 2);
+        assert!(allocations
+            .iter()
+            .all(|allocation| allocation.contribution_receipt_hash
+                == accepted_contribution.receipt_hash));
+
+        let rejected_contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_units[4].work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Lead matched prior public report.".to_string(),
+            vec![AuditFinding {
+                id: "AAVE-DUP-001".to_string(),
+                title: "Duplicate lead".to_string(),
+                severity: "high".to_string(),
+                status: "duplicate".to_string(),
+                impact: Some("Principal theft".to_string()),
+                evidence: vec!["prior-audit.md".to_string()],
+                reportable: true,
+            }],
+            vec![labor_artifact("duplicate.md")],
+            vec![CoverageItem {
+                area: "known issue search".to_string(),
+                status: "failed".to_string(),
+                evidence: vec!["Duplicate discovered.".to_string()],
+            }],
+            vec![],
+        )
+        .unwrap();
+        store.record_contribution(&rejected_contribution).unwrap();
+        let rejected_verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            rejected_contribution.contribution_id.clone(),
+            "rejected".to_string(),
+            "DUPLICATE_KNOWN_ISSUE".to_string(),
+            "Lead is duplicate and appendix-only.".to_string(),
+            vec![],
+            vec![labor_artifact("rejection.md")],
+        )
+        .unwrap();
+        assert!(store
+            .record_verification(&rejected_verification)
+            .unwrap()
+            .is_empty());
+
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(snapshot.contributions.len(), 2);
+        assert_eq!(snapshot.credits.len(), 2);
+        let report_root =
+            std::env::temp_dir().join(format!("cyphes-report-{}", campaign.campaign_id));
+        let bundle =
+            export_campaign_report_bundle_to(&store, &campaign.campaign_id, &report_root).unwrap();
+        assert!(bundle.join("report.md").is_file());
+        assert!(bundle.join("findings.json").is_file());
+        assert!(bundle.join("receipts/README.md").is_file());
+        let report = fs::read_to_string(bundle.join("report.md")).unwrap();
+        let findings_section = report
+            .split("## Rejected / Duplicate / Non-reportable Leads")
+            .next()
+            .unwrap();
+        assert!(!findings_section.contains("Duplicate lead"));
+        assert!(report.contains("Duplicate lead"));
+    }
+
     #[tokio::test]
     #[ignore = "downloads a pinned GitHub archive and exports a real receipt bundle"]
     async fn completes_a_real_atp_l1_repository_transaction() {
@@ -1608,7 +2196,7 @@ mod tests {
                     id: transaction_id.clone(),
                     repository: repository.clone(),
                     compensation: "100".to_string(),
-                    currency: "USDC".to_string(),
+                    currency: "ATP Credits".to_string(),
                     scope: scope.clone(),
                     requester_agent_id: requester_agent.clone(),
                     created_at: now_millis(),

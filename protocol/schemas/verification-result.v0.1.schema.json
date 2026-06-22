@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/verification-result.v0.1.schema.json",
+  "title": "CYPHES Verification Result",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["profile", "profileVersion", "verificationId", "campaignId", "targetContributionId", "verifierAgentId", "decision", "reasonCode", "reason", "verificationHash", "signature"],
+  "properties": {
+    "profile": { "const": "cyphes.verification-result/0.1" },
+    "profileVersion": { "const": "0.1" },
+    "decision": { "enum": ["accepted", "rejected", "reproduced", "challenged", "revision_requested"] },
+    "reasonCode": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "signature": { "type": "string", "minLength": 1 }
+  }
+}

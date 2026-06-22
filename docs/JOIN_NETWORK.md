@@ -114,15 +114,16 @@ The script does not commit the manifest for you.
 2. Worker selects **Offer to audit**.
 3. Requester selects **Select worker**.
 4. Requester selects **Issue context lease**.
-5. Worker selects **Run bounded audit**.
+5. Worker selects **Run Audit Skill**.
 6. Requester waits for the signed result and selects
    **Approve verified result**.
 7. Worker automatically emits `ATTEST`.
 8. Both nodes show `ATTESTED` and export a receipt under
    `~/.cyphes/receipts/<transaction-id>/`.
 
-The proposed USDC amount is not transferred. The current contract settles at
-zero value.
+ATP Credits are not a token transfer or payout. The current repository-audit
+contract settles at zero value; ATP Credits are issued only by the local audit
+labor layer when signed contributions receive accepted verifier receipts.
 
 ## State Meaning
 

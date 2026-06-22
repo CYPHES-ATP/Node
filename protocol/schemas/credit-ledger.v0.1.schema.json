@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/credit-ledger.v0.1.schema.json",
+  "title": "CYPHES ATP Credit Ledger Entry",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["profile", "profileVersion", "allocationId", "campaignId", "contributionId", "verificationId", "receiverAgentId", "contributionReceiptHash", "buckets", "total"],
+  "properties": {
+    "profile": { "const": "cyphes.credit-ledger/0.1" },
+    "profileVersion": { "const": "0.1" },
+    "contributionReceiptHash": { "type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$" },
+    "total": { "type": "integer", "minimum": 1 }
+  }
+}

@@ -44,6 +44,96 @@ export interface AuditJob {
   origin: "local" | "remote";
 }
 
+export interface ProtocolAuditCampaign {
+  profile: string;
+  profileVersion: string;
+  campaignId: string;
+  protocolName: string;
+  repository: {
+    fullName: string;
+    url: string;
+    commitSha: string;
+  };
+  scopeText: string;
+  bountyUrl?: string;
+  impactsInScope: string[];
+  outOfScope: string[];
+  auditBriefHash?: string;
+  auditBriefText?: string;
+  requesterAgentId: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuditWorkUnit {
+  profile: string;
+  profileVersion: string;
+  workUnitId: string;
+  campaignId: string;
+  kind: string;
+  title: string;
+  instructions: string;
+  expectedArtifacts: string[];
+  status: string;
+  createdAt: string;
+}
+
+export interface NodeContribution {
+  contributionId: string;
+  campaignId: string;
+  workUnitId: string;
+  workerAgentId: string;
+  notesMarkdown: string;
+  receiptHash: string;
+  contributionHash: string;
+  findings: Array<{
+    id: string;
+    title: string;
+    severity: string;
+    status: string;
+    reportable: boolean;
+  }>;
+}
+
+export interface VerificationResult {
+  verificationId: string;
+  campaignId: string;
+  targetContributionId: string;
+  verifierAgentId: string;
+  decision: string;
+  reasonCode: string;
+  reason: string;
+}
+
+export interface CreditAllocation {
+  allocationId: string;
+  campaignId: string;
+  contributionId: string;
+  verificationId: string;
+  receiverAgentId: string;
+  contributionReceiptHash: string;
+  total: number;
+}
+
+export interface CreditSummary {
+  total: number;
+  allocations: CreditAllocation[];
+}
+
+export interface CampaignReportSnapshot {
+  campaign: ProtocolAuditCampaign;
+  workUnits: AuditWorkUnit[];
+  contributions: NodeContribution[];
+  verifications: VerificationResult[];
+  credits: CreditAllocation[];
+}
+
+export interface ExportedReportBundle {
+  campaignId: string;
+  bundlePath: string;
+}
+
 export interface LegacyAuditJob {
   id: string;
   repository: RepositorySummary;

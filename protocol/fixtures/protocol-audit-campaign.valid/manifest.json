@@ -1,0 +1,18 @@
+{
+  "profile": "cyphes.final-audit-report/0.1",
+  "campaignId": "campaign_aave_fixture_001",
+  "protocolName": "AAVE",
+  "repository": {
+    "fullName": "aave-dao/aave-v3-origin",
+    "url": "https://github.com/aave-dao/aave-v3-origin",
+    "commitSha": "fd1fbd9150426ca8ace9cee45b4acf912ae84f5b"
+  },
+  "files": [
+    "campaign.json",
+    "work-units.json",
+    "contributions.json",
+    "verifications.json",
+    "credits.json",
+    "report.md"
+  ]
+}

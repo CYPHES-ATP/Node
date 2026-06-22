@@ -1,0 +1,22 @@
+[
+  {
+    "profile": "cyphes.credit-ledger/0.1",
+    "profileVersion": "0.1",
+    "allocationId": "credit_worker_scope_map_001",
+    "campaignId": "campaign_aave_fixture_001",
+    "contributionId": "contribution_scope_map_001",
+    "verificationId": "verification_scope_map_accept_001",
+    "receiverAgentId": "urn:libp2p:12D3KooWWorkerAcceptedFixture",
+    "contributionReceiptHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "buckets": {
+      "participation": 20,
+      "verification": 0,
+      "coverage": 15,
+      "finding": 0,
+      "bonusAllocationPlaceholder": 0
+    },
+    "total": 35,
+    "formula": "base * difficulty * verification * model * requesterApproval - penalties",
+    "issuedAt": "2026-06-21T00:06:00.000Z"
+  }
+]

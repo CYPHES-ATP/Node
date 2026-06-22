@@ -172,7 +172,7 @@ main {
 
 .truth-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   border: 1px solid var(--line);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.025);
@@ -513,6 +513,72 @@ form > label,
   overflow: auto;
 }
 
+.labor-panel {
+  min-height: 0;
+  margin-top: 16px;
+}
+
+.campaign-list {
+  display: grid;
+  gap: 12px;
+  padding-top: 18px;
+}
+
+.campaign-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid rgba(245, 251, 250, 0.11);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.campaign-card h3 {
+  margin: 17px 0 0;
+  font-size: 17px;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+
+.campaign-card p {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.campaign-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.campaign-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid rgba(0, 246, 255, 0.34);
+  border-radius: 999px;
+  background: rgba(0, 246, 255, 0.08);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.empty-state.compact {
+  min-height: 190px;
+}
+
 .empty-state {
   display: flex;
   min-height: 350px;
@@ -718,6 +784,14 @@ footer {
 
   .connect-strip {
     grid-template-columns: auto 1fr auto;
+  }
+
+  .campaign-card {
+    grid-template-columns: 1fr;
+  }
+
+  .campaign-actions {
+    justify-content: flex-start;
   }
 
   .connect-strip label {

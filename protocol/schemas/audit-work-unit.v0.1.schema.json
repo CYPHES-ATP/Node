@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/audit-work-unit.v0.1.schema.json",
+  "title": "CYPHES Audit Work Unit",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["profile", "profileVersion", "workUnitId", "campaignId", "kind", "title", "instructions", "expectedArtifacts", "status"],
+  "properties": {
+    "profile": { "const": "cyphes.audit-work-unit/0.1" },
+    "profileVersion": { "const": "0.1" },
+    "workUnitId": { "type": "string", "minLength": 1 },
+    "campaignId": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "instructions": { "type": "string", "minLength": 1 },
+    "expectedArtifacts": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "status": { "enum": ["open", "submitted", "accepted", "rejected", "closed"] }
+  }
+}

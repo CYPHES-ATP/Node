@@ -1,8 +1,8 @@
 <a id="cyphes"></a>
 <div align="center">
   <h1>CYPHES</h1>
-  <p><strong>A reference implementation of ATP for verifiable, agent-coordinated work</strong></p>
-  <p>Peer-to-peer work orders, scoped authority, and signed receipts for autonomous systems.</p>
+  <p><strong>A protocol-facing autonomous audit labor network on ATP</strong></p>
+  <p>Protocols submit scoped work. Nodes produce signed audit artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP: v0.3" src="https://img.shields.io/badge/ATP-v0.3-c7ff47"></a>
@@ -24,7 +24,7 @@ This developer build is not Apple-notarized yet. After dragging `CYPHES` to
 Applications, Control-click the app, select **Open**, then confirm **Open**.
 Windows and Linux users should run from source for now.
 
-The developer preview now completes one ATP-L1 transaction:
+The developer preview completes one ATP-L1 repository-audit transaction:
 
 ```text
 DISCOVER -> NEGOTIATE -> NEGOTIATE -> ROUTE -> SETTLE -> ATTEST
@@ -35,6 +35,12 @@ context leases, downloads the pinned source archive, executes no repository
 code, writes five audit artifacts inside the granted namespace, and returns a
 signed result. The worker then emits a signed Proof of Cognition after
 requester approval.
+
+The desktop app also includes the first local version of the audit labor
+network: protocols can create a pinned audit campaign, CYPHES decomposes it
+into work units, nodes can record signed contributions, verifiers can accept or
+reject them, and the app can export a final report bundle generated only from
+accepted receipts.
 
 ## Verified Transaction
 
@@ -85,6 +91,15 @@ Artifact Two independently returns:
 - Signed worker execution results with embedded artifact bytes and hashes.
 - Requester verification and zero-value `SETTLE`.
 - Worker-signed `ATTEST` Proof of Cognition.
+- Local protocol audit campaigns with pinned commits, scope, optional bounty
+  URL, in-scope impacts, out-of-scope rules, and audit brief text.
+- Deterministic audit work units for scope mapping, repository inventory,
+  dependency/config review, DeFi exploit-class review, finding validation, and
+  final report sections.
+- Signed node contributions and signed verifier decisions.
+- Receipt-backed ATP Credits issued only after accepted verification results.
+- Final audit report bundle export with report markdown, findings,
+  contributions, verifications, credits, receipt notes, and manifest.
 - Portable Artifact Two-compatible receipt bundles under
   `~/.cyphes/receipts/<transaction-id>/`.
 - A deployable combined relay/rendezvous service with one-node and automatic
@@ -100,8 +115,13 @@ Artifact Two independently returns:
 - No durable offline mailbox or guaranteed retry after both peers disconnect.
 - The worker is bounded by deterministic code paths and lease guards, but is
   not yet isolated in a hardened OS container or VM.
-- No real USDC escrow, transfer, release, refund, or dispute adapter. The
-  displayed amount is a non-payable commercial term; settlement is zero-value.
+- No escrow, token transfer, release, refund, or dispute adapter. ATP Credits
+  are off-chain receipt-backed accounting only.
+- No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Skill` path
+  records signed local work artifacts; external agent execution remains the
+  next adapter.
+- No claim that the deterministic worker finds real vulnerabilities. Findings
+  must be backed by signed artifacts before they appear in final reports.
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
@@ -231,9 +251,10 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 | `src/App.tsx` | Native transaction workflow and truthful state labels |
 | `src-tauri/src/atp.rs` | ATP envelopes, signing, verification, hashes, transitions |
 | `src-tauri/src/audit_profile.rs` | Repository-audit contract and receipt profile |
+| `src-tauri/src/audit_labor.rs` | Protocol campaigns, work units, contributions, verification, credits, reports |
 | `src-tauri/src/store.rs` | SQLite event chain, replay defense, transaction projections |
-| `src-tauri/src/worker.rs` | Context leases and deterministic bounded audit worker |
-| `src-tauri/src/bundle.rs` | Portable receipt-bundle export |
+| `src-tauri/src/worker.rs` | Context leases and deterministic repository worker |
+| `src-tauri/src/bundle.rs` | Portable receipt and audit-report bundle export |
 | `src-tauri/src/p2p.rs` | Direct, LAN, and relay-backed libp2p delivery |
 | `src-tauri/src/commands.rs` | Tauri operations for the complete work order |
 | `protocol/` | Schemas, canonical fixtures, and verified ATP-L1 bundle |
@@ -244,6 +265,7 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 
 - [ATP implementation status](docs/ATP_IMPLEMENTATION_STATUS.md)
 - [Join the network](docs/JOIN_NETWORK.md)
+- [Audit labor network](docs/AUDIT_LABOR_NETWORK.md)
 - [Repository audit profile](docs/REPOSITORY_AUDIT_PROFILE.md)
 - [Developer guide](docs/DEVELOPER_GUIDE.md)
 - [Network architecture](docs/ATP_NETWORK_ARCHITECTURE.md)
@@ -261,8 +283,8 @@ npm run build
 ```
 
 Please do not add simulated peers, work orders, responses, reputation, payment,
-or verification claims. Product state must come from signed and committed ATP
-data.
+credits, bounty payouts, exploit claims, or verification claims. Product state
+must come from signed and committed ATP data or portable artifacts.
 
 ## License
 
