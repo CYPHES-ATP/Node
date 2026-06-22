@@ -1,7 +1,7 @@
 {
   "name": "cyphes-desktop",
   "private": true,
-  "version": "0.2.2-dev",
+  "version": "0.2.3-dev",
   "description": "Native ATP node for verifiable repository audit work orders",
   "license": "MIT",
   "repository": {

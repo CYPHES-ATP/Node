@@ -212,7 +212,7 @@ pub async fn run_local_audit_skill(
         18,
         None,
     );
-    let context = repository_context(&client, &campaign.repository).await?;
+    let context = repository_context(&client, campaign).await?;
 
     emit_progress(app, campaign, work_unit, "Building model prompt", 32, None);
     let prompt = build_prompt(campaign, work_unit, &context);
@@ -487,15 +487,16 @@ struct ModelOutput {
 
 async fn repository_context(
     client: &reqwest::Client,
-    repository: &RepositoryTarget,
+    campaign: &ProtocolAuditCampaign,
 ) -> Result<RepositoryContext, String> {
+    let repository = &campaign.repository;
     let tree_url = format!(
         "https://api.github.com/repos/{}/git/trees/{}?recursive=1",
         repository.full_name, repository.commit_sha
     );
     let response = client
         .get(tree_url)
-        .header(USER_AGENT, "CYPHES/0.2.1-dev")
+        .header(USER_AGENT, "CYPHES/0.2.3-dev")
         .header(ACCEPT, "application/vnd.github+json")
         .send()
         .await
@@ -517,7 +518,8 @@ async fn repository_context(
         .iter()
         .map(|entry| entry.path.clone())
         .collect::<Vec<_>>();
-    let selected_paths = select_context_files(&blobs);
+    let scoped_paths = scoped_paths_from_campaign(campaign);
+    let selected_paths = select_context_files(&blobs, &scoped_paths);
     let mut selected_files = Vec::new();
     let mut total_bytes = 0usize;
     for path in selected_paths {
@@ -538,8 +540,24 @@ async fn repository_context(
     })
 }
 
-fn select_context_files(blobs: &[GitTreeEntry]) -> Vec<String> {
+fn select_context_files(blobs: &[GitTreeEntry], scoped_paths: &[String]) -> Vec<String> {
     let mut selected = Vec::new();
+    for scoped_path in scoped_paths {
+        for entry in blobs {
+            if selected.len() >= MAX_SELECTED_FILES {
+                break;
+            }
+            if selected.iter().any(|path| path == &entry.path) {
+                continue;
+            }
+            let size_ok = entry.size.unwrap_or(0) <= MAX_FILE_BYTES as u64;
+            let in_scope =
+                entry.path == *scoped_path || entry.path.starts_with(&format!("{scoped_path}/"));
+            if size_ok && in_scope && looks_textual(&entry.path) {
+                selected.push(entry.path.clone());
+            }
+        }
+    }
     for entry in blobs {
         if selected.len() >= MAX_SELECTED_FILES {
             break;
@@ -565,6 +583,60 @@ fn select_context_files(blobs: &[GitTreeEntry]) -> Vec<String> {
         }
     }
     selected
+}
+
+fn scoped_paths_from_campaign(campaign: &ProtocolAuditCampaign) -> Vec<String> {
+    let mut paths = Vec::new();
+    for source in [
+        Some(campaign.scope_text.as_str()),
+        campaign.audit_brief_text.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        for line in source.lines() {
+            let trimmed = line
+                .trim()
+                .trim_start_matches("- ")
+                .trim_start_matches("* ")
+                .trim();
+            let lower = trimmed.to_ascii_lowercase();
+            for prefix in [
+                "focused path:",
+                "focused file:",
+                "focused directory:",
+                "in-scope path:",
+                "in scope path:",
+            ] {
+                if lower.starts_with(prefix) {
+                    if let Some(path) = normalize_scoped_path(&trimmed[prefix.len()..]) {
+                        if !paths.iter().any(|existing| existing == &path) {
+                            paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn normalize_scoped_path(value: &str) -> Option<String> {
+    let path = value
+        .trim()
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_start_matches('/')
+        .trim();
+    if path.is_empty()
+        || path.contains("://")
+        || path == "."
+        || path.split('/').any(|segment| segment == "..")
+    {
+        return None;
+    }
+    Some(path.to_string())
 }
 
 fn is_priority_context_file(path: &str) -> bool {
@@ -624,7 +696,7 @@ async fn fetch_raw_file(
     );
     let response = client
         .get(url)
-        .header(USER_AGENT, "CYPHES/0.2.1-dev")
+        .header(USER_AGENT, "CYPHES/0.2.3-dev")
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -947,5 +1019,41 @@ mod tests {
     fn model_multiplier_rewards_larger_local_models_without_maxing_unknowns() {
         assert!(model_multiplier("oss-20b") > model_multiplier("qwen2.5-7b"));
         assert!(model_multiplier("unknown-local") < 1.0);
+    }
+
+    #[test]
+    fn scoped_file_is_selected_before_generic_context() {
+        let blobs = vec![
+            GitTreeEntry {
+                path: "README.md".to_string(),
+                kind: "blob".to_string(),
+                size: Some(512),
+            },
+            GitTreeEntry {
+                path: "contracts/UniswapV2ERC20.sol".to_string(),
+                kind: "blob".to_string(),
+                size: Some(2_048),
+            },
+            GitTreeEntry {
+                path: "package.json".to_string(),
+                kind: "blob".to_string(),
+                size: Some(512),
+            },
+        ];
+
+        let selected = select_context_files(&blobs, &["contracts/UniswapV2ERC20.sol".to_string()]);
+
+        assert_eq!(selected[0], "contracts/UniswapV2ERC20.sol");
+        assert!(selected.contains(&"README.md".to_string()));
+    }
+
+    #[test]
+    fn scoped_path_parser_rejects_urls_and_parent_traversal() {
+        assert_eq!(
+            normalize_scoped_path("`contracts/UniswapV2ERC20.sol`"),
+            Some("contracts/UniswapV2ERC20.sol".to_string())
+        );
+        assert_eq!(normalize_scoped_path("https://github.com/x/y"), None);
+        assert_eq!(normalize_scoped_path("../secret"), None);
     }
 }

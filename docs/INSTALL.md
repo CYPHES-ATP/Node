@@ -4,7 +4,7 @@
 
 Apple Silicon users can download the current developer DMG from:
 
-https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.1-dev
+https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.3-dev
 
 Drag `CYPHES` to Applications. This build is not Apple-notarized yet, so
 Control-click the app, select **Open**, then confirm **Open** the first time.
