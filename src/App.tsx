@@ -3,12 +3,14 @@ import {
   ArrowRight,
   Check,
   Database,
+  FileArchive,
   Github,
   Link,
   LoaderCircle,
   RadioTower,
   ReceiptText,
   ShieldCheck,
+  Trophy,
   Users,
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
@@ -16,7 +18,12 @@ import { P2PProvider } from "@/components/providers/P2PProvider";
 import { useP2P } from "@/hooks/useP2P";
 import { isTauriRuntime, truncatePeerId } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
-import type { AuditJob, RepositorySummary } from "@/types";
+import type {
+  AuditJob,
+  CampaignReportSnapshot,
+  ProtocolAuditCampaign,
+  RepositorySummary,
+} from "@/types";
 
 const AUDIT_SCOPE = [
   "Dependency and supply-chain risk",
@@ -88,8 +95,11 @@ function AppContent() {
   const peerCount = useCyphesStore((state) => state.peerCount);
   const networkInfo = useCyphesStore((state) => state.networkInfo);
   const jobs = useCyphesStore((state) => state.jobs);
+  const campaigns = useCyphesStore((state) => state.campaigns);
+  const creditSummary = useCyphesStore((state) => state.creditSummary);
   const notice = useCyphesStore((state) => state.notice);
   const setNotice = useCyphesStore((state) => state.setNotice);
+  const [campaignSnapshots, setCampaignSnapshots] = useState<Record<string, CampaignReportSnapshot>>({});
 
   const sortedJobs = useMemo(
     () => [...jobs].sort((a, b) => b.createdAt - a.createdAt),
@@ -98,6 +108,31 @@ function AppContent() {
   const relayAddress = networkInfo?.listen_addrs.find((address) =>
     address.includes("/p2p-circuit/"),
   );
+
+  useEffect(() => {
+    if (!isTauriRuntime() || campaigns.length === 0) return;
+    let disposed = false;
+    async function refreshSnapshots() {
+      const entries = await Promise.all(
+        campaigns.map(async (campaign) => {
+          try {
+            return [campaign.campaignId, await p2p.getCampaignSnapshot(campaign.campaignId)] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (!disposed) {
+        setCampaignSnapshots(
+          Object.fromEntries(entries.filter((entry): entry is [string, CampaignReportSnapshot] => Boolean(entry))),
+        );
+      }
+    }
+    void refreshSnapshots();
+    return () => {
+      disposed = true;
+    };
+  }, [campaigns]);
 
   useEffect(() => {
     if (!notice) return;
@@ -145,9 +180,9 @@ function AppContent() {
     event.preventDefault();
     setFormError(null);
 
-    const amount = Number(compensation);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setFormError("Enter a proposed compensation greater than zero.");
+    const credits = Number(compensation);
+    if (!Number.isFinite(credits) || credits <= 0) {
+      setFormError("Enter an ATP Credits budget greater than zero.");
       return;
     }
     if (!isTauriRuntime()) {
@@ -164,14 +199,20 @@ function AppContent() {
       const repository = await inspectRepository(repositoryUrl);
       const job = await p2p.createAudit(
         repository,
-        amount.toString(),
+        credits.toString(),
         AUDIT_SCOPE,
+      );
+      await p2p.createProtocolCampaign(
+        repository,
+        repository.fullName.split("/")[0],
+        AUDIT_SCOPE.join("\n"),
+        credits.toString(),
       );
       setRepositoryUrl("");
       setNotice(
         peerCount > 0
-          ? `ATP request signed, committed, and sent to ${peerCount} local ${peerCount === 1 ? "peer" : "peers"} for verification.`
-          : `ATP request signed and committed to SQLite. It is queued with no peer receipt yet.`,
+          ? `Campaign and ATP request signed, committed, and sent to ${peerCount} ${peerCount === 1 ? "peer" : "peers"}.`
+          : `Campaign and ATP request signed locally. Peer delivery is queued until discovery finds another node.`,
       );
       return job;
     } catch (error) {
@@ -236,7 +277,67 @@ function AppContent() {
     setActionJobId(job.id);
     try {
       await p2p.runAudit(job.id);
-      setNotice("Bounded audit completed; signed result sent to the requester.");
+      setNotice("Audit skill fixture completed; signed result sent to the requester.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
+  async function refreshCampaignSnapshot(campaignId: string) {
+    const snapshot = await p2p.getCampaignSnapshot(campaignId);
+    setCampaignSnapshots((current) => ({ ...current, [campaignId]: snapshot }));
+    return snapshot;
+  }
+
+  async function handleRunAuditSkill(campaign: ProtocolAuditCampaign) {
+    setActionJobId(campaign.campaignId);
+    try {
+      const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
+      const unit =
+        snapshot.workUnits.find((item) => item.status === "open") ||
+        snapshot.workUnits[0];
+      if (!unit) throw new Error("Campaign has no work units.");
+      const contribution = await p2p.recordCampaignContribution(
+        campaign.campaignId,
+        unit.workUnitId,
+        `Run Audit Skill recorded bounded coverage for ${campaign.protocolName} at ${campaign.repository.commitSha}. This is a signed local contribution, not a bounty exploit claim.`,
+      );
+      await refreshCampaignSnapshot(campaign.campaignId);
+      setNotice(`Signed contribution recorded: ${contribution.receiptHash.slice(0, 19)}...`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
+  async function handleVerifyLatest(campaign: ProtocolAuditCampaign) {
+    setActionJobId(campaign.campaignId);
+    try {
+      const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
+      const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
+      const contribution = snapshot.contributions.find(
+        (item) => !verifiedIds.has(item.contributionId),
+      );
+      if (!contribution) throw new Error("No unverified contribution is available.");
+      const credits = await p2p.verifyCampaignContribution(contribution.contributionId);
+      await refreshCampaignSnapshot(campaign.campaignId);
+      const total = credits.reduce((sum, item) => sum + item.total, 0);
+      setNotice(`Contribution accepted; ${total} ATP Credits issued from signed receipts.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
+  async function handleExportCampaign(campaign: ProtocolAuditCampaign) {
+    setActionJobId(campaign.campaignId);
+    try {
+      const bundle = await p2p.exportCampaignReport(campaign.campaignId);
+      setNotice(`Final audit report bundle exported to ${bundle.bundlePath}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -303,7 +404,7 @@ function AppContent() {
           onClick={() => void handleRun(job)}
           type="button"
         >
-          {actionJobId === job.id ? "Running audit" : "Run bounded audit"}
+          {actionJobId === job.id ? "Running skill" : "Run Audit Skill"}
           <ArrowRight size={14} />
         </button>
       );
@@ -377,6 +478,16 @@ function AppContent() {
                     : "Not configured"}
             </strong>
           </div>
+          <div>
+            <ShieldCheck size={15} />
+            <span>Runtime operator</span>
+            <strong>CYPHES fixture</strong>
+          </div>
+          <div>
+            <Trophy size={15} />
+            <span>ATP earned</span>
+            <strong>{creditSummary.total} credits</strong>
+          </div>
         </section>
 
         <details className="manual-connect" open={!networkInfo?.relay_configured}>
@@ -416,8 +527,8 @@ function AppContent() {
             <div className="section-heading">
               <span>01</span>
               <div>
-                <h2>Create an audit request</h2>
-                <p>Public GitHub repositories only.</p>
+                <h2>Create protocol audit campaign</h2>
+                <p>Public GitHub repository, pinned commit, signed ATP request.</p>
               </div>
             </div>
 
@@ -435,7 +546,7 @@ function AppContent() {
                 />
               </div>
 
-              <label htmlFor="compensation">Proposed compensation</label>
+              <label htmlFor="compensation">PAY with ATP</label>
               <div className="compensation-row">
                 <div className="input-shell">
                   <input
@@ -446,9 +557,9 @@ function AppContent() {
                     type="number"
                     value={compensation}
                   />
-                  <span>USDC</span>
+                  <span>ATP Credits</span>
                 </div>
-                <p>Terms only. No funds are escrowed or transferred in this build.</p>
+                <p>Receipt-backed accounting only. No ERC-20, escrow, or bounty payout is represented in this build.</p>
               </div>
 
               <div className="scope">
@@ -474,7 +585,7 @@ function AppContent() {
                 type="submit"
               >
                 {submitting ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}
-                {submitting ? "Checking repository" : "Sign and post request"}
+                {submitting ? "Checking repository" : "Sign campaign"}
                 {!submitting ? <ArrowRight size={16} /> : null}
               </button>
             </form>
@@ -485,7 +596,7 @@ function AppContent() {
               <span>02</span>
               <div>
                 <h2>ATP transactions</h2>
-                <p>Only signed events committed by this node.</p>
+                <p>Existing repository-audit flow stays intact.</p>
               </div>
             </div>
 
@@ -538,12 +649,82 @@ function AppContent() {
           </section>
         </div>
 
+        <section className="panel labor-panel">
+          <div className="section-heading">
+            <span>03</span>
+            <div>
+              <h2>Audit labor network</h2>
+              <p>Campaigns, work units, signed contributions, verifier decisions, and ATP Credits.</p>
+            </div>
+          </div>
+
+          <div className="campaign-list">
+            {campaigns.length === 0 ? (
+              <div className="empty-state compact">
+                <ShieldCheck size={24} />
+                <strong>No protocol campaigns yet</strong>
+                <span>Create a campaign above to decompose it into verifiable work units.</span>
+              </div>
+            ) : (
+              campaigns.map((campaign) => {
+                const snapshot = campaignSnapshots[campaign.campaignId];
+                const accepted = snapshot?.verifications.filter((item) => item.decision === "accepted").length || 0;
+                const unverified = (snapshot?.contributions.length || 0) - (snapshot?.verifications.length || 0);
+                return (
+                  <article className="campaign-card" key={campaign.campaignId}>
+                    <div>
+                      <div className="job-topline">
+                        <span className="job-status routed">{campaign.status}</span>
+                        <span>{campaign.repository.fullName}@{campaign.repository.commitSha.slice(0, 7)}</span>
+                      </div>
+                      <h3>{campaign.protocolName}</h3>
+                      <p>{campaign.scopeText}</p>
+                      <div className="repo-meta">
+                        <span>{snapshot?.workUnits.length || 0} work units</span>
+                        <span>{snapshot?.contributions.length || 0} contributions</span>
+                        <span>{accepted} accepted</span>
+                        <span>{unverified > 0 ? `${unverified} unverified` : "verified queue clear"}</span>
+                      </div>
+                    </div>
+                    <div className="campaign-actions">
+                      <button
+                        disabled={actionJobId === campaign.campaignId}
+                        onClick={() => void handleRunAuditSkill(campaign)}
+                        type="button"
+                      >
+                        Run Audit Skill
+                        <ArrowRight size={14} />
+                      </button>
+                      <button
+                        disabled={actionJobId === campaign.campaignId}
+                        onClick={() => void handleVerifyLatest(campaign)}
+                        type="button"
+                      >
+                        Verify latest
+                        <ShieldCheck size={14} />
+                      </button>
+                      <button
+                        disabled={actionJobId === campaign.campaignId}
+                        onClick={() => void handleExportCampaign(campaign)}
+                        type="button"
+                      >
+                        Export report
+                        <FileArchive size={14} />
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </section>
+
         <footer>
           <span>ATP v0.3 envelopes</span>
           <span>Ed25519 identity proof</span>
           <span>SQLite event chain</span>
           <span>Relay + direct libp2p</span>
-          <span>Zero-value settlement</span>
+          <span>ATP Credits are receipt-backed</span>
         </footer>
       </main>
 

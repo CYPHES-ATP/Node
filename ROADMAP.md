@@ -1,7 +1,9 @@
 # CYPHES Roadmap
 
-The roadmap is organized around one verifiable ATP work order rather than
-marketplace breadth.
+CYPHES is moving from one verifiable repository-audit transaction toward a
+protocol-facing autonomous audit labor network. The rule stays the same:
+coordination, authority, work, verification, reports, and credits must trace to
+signed ATP envelopes or portable artifacts.
 
 ## Completed Developer-Preview Slice
 
@@ -17,6 +19,9 @@ marketplace breadth.
 - Deterministic worker that executes no repository code.
 - Signed worker result and five hashed artifacts.
 - Portable Proof of Cognition bundle.
+- Local protocol audit campaigns with pinned commits, scoped work units,
+  signed contributions, signed verifier decisions, ATP Credit allocation, and
+  final report bundle export.
 - Independent Artifact Two verification of the committed real fixture.
 - TCP, WebSocket, QUIC, mDNS, Identify, Ping, Relay v2, Rendezvous, and DCUtR.
 - Docker-ready relay/rendezvous service with reservation and automatic
@@ -24,7 +29,23 @@ marketplace breadth.
 - Public dedicated IPv4 relay/rendezvous endpoint at `relay.cyphes.com`.
 - Downloadable ad hoc-signed Apple Silicon macOS developer DMG.
 
-## 1. Staging Network
+## 1. Audit Labor Network
+
+Status: **Partial**
+
+- Wire protocol campaigns and work units into network discovery so remote
+  nodes automatically see available audit labor.
+- Add OpenClaw/Hermes runtime adapters for executing versioned audit skills
+  with model/tool logs instead of deterministic fixture output.
+- Store audit skill hashes, runtime descriptors, model identifiers, tool-access
+  logs, output hashes, and evidence references in contribution receipts.
+- Add verifier-node queues, challenge windows, revision requests, and duplicate
+  finding resolution.
+- Improve protocol/requester UX for campaign creation, scope templates, and
+  final report review.
+- Keep bounty allocation as a signed placeholder until settlement is designed.
+
+## 2. Staging Network
 
 Status: **Partial**
 
@@ -35,7 +56,7 @@ Status: **Partial**
 - Run the full transaction across two machines on different consumer networks.
 - Add AutoNAT and verify direct DCUtR upgrades.
 
-## 2. Worker Hardening
+## 3. Worker Hardening
 
 Status: **Partial**
 
@@ -46,7 +67,7 @@ Status: **Partial**
   scripts.
 - Add cancellation, timeout, live revocation, and partial-failure receipts.
 
-## 3. ATP Conformance
+## 4. ATP Conformance
 
 Status: **Partial**
 
@@ -57,7 +78,7 @@ Status: **Partial**
 - Lease attenuation, subleases, and revocation propagation.
 - More than one valid terminal sequence in Artifact Two.
 
-## 4. Reliable Market
+## 5. Reliable Market
 
 Status: **Planned**
 
@@ -66,7 +87,7 @@ Status: **Planned**
 - Rate limits, block lists, abuse reporting, and resource admission policy.
 - Selective receipt disclosure and reputation derived from verified evidence.
 
-## 5. Settlement
+## 6. Settlement
 
 Status: **Planned**
 
@@ -77,7 +98,7 @@ Status: **Planned**
   `receiptHash`.
 - Keep ATP envelopes, leases, artifacts, and private context off-chain.
 
-## 6. Distribution
+## 7. Distribution
 
 Status: **Partial**
 
@@ -90,6 +111,10 @@ Status: **Partial**
 ## Best Contributions Now
 
 - Reproduce the relay-backed two-node transaction on Linux or Windows.
+- Connect `Run Audit Skill` to an OpenClaw/Hermes adapter while preserving the
+  signed contribution and verification receipt shape.
+- Add campaign/work-unit discovery over rendezvous instead of local-only
+  campaign state.
 - Harden the worker boundary without changing the receipt profile.
 - Add deterministic negative fixtures for invalid leases and worker results.
 - Add peer persistence and reliable resend.

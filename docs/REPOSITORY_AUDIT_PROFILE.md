@@ -34,10 +34,14 @@ activity authorized by `ROUTE` and evidenced before `SETTLE`.
 - Checkout deletion after result production.
 - Maximum 3,600-second contract duration.
 - Five required artifact paths.
-- Proposed USDC amount marked `non-payable-term`.
+- Proposed ATP Credits amount marked `receipt-backed-credit-estimate`.
 - Actual settlement fixed to `zero-value`.
 - Worker signature, requester approval, artifact hashes, and event chain
   required.
+
+Legacy fixtures may still contain non-payable USDC terms so older ATP-L1
+receipt bundles remain verifiable. New desktop-created requests use ATP
+Credits only.
 
 `contractHash = sha256(JCS(contract))`.
 
@@ -74,6 +78,12 @@ The current deterministic checks inventory files and report security-policy,
 GitHub Actions, and tracked environment-file posture. This is proof of ATP
 coordination and bounded work, not a claim of comprehensive source-code
 vulnerability analysis.
+
+The desktop label for the worker action is now **Run Audit Skill**. In this
+developer preview, that command records deterministic local artifacts and
+receipt-backed audit labor objects. OpenClaw/Hermes execution, model/tool logs,
+and web/API-only repository reads are the next runtime adapter, not a hidden
+capability in this profile.
 
 ## Receipt
 

@@ -147,8 +147,8 @@ impl AuditContract {
             },
             proposed_compensation: ProposedCompensation {
                 amount: proposed_amount,
-                asset: "USDC".to_string(),
-                status: "non-payable-term".to_string(),
+                asset: "ATP Credits".to_string(),
+                status: "receipt-backed-credit-estimate".to_string(),
             },
             settlement: AuditSettlement {
                 rail: "zero-value".to_string(),
@@ -351,22 +351,25 @@ pub fn validate_contract(contract: &AuditContract) -> Result<(), AuditProfileErr
             "execution must be time-bounded, read-only, and delete its checkout",
         ));
     }
-    if contract.proposed_compensation.status != "non-payable-term" {
+    let is_credit_estimate = contract.proposed_compensation.asset == "ATP Credits"
+        && contract.proposed_compensation.status == "receipt-backed-credit-estimate";
+    let is_legacy_non_payable_usdc = contract.proposed_compensation.asset == "USDC"
+        && contract.proposed_compensation.status == "non-payable-term";
+    if !is_credit_estimate && !is_legacy_non_payable_usdc {
         return Err(AuditProfileError::bad_state(
             "AUDIT_CONTRACT_PAYMENT_MISREPRESENTED",
-            "proposed compensation must remain explicitly non-payable",
+            "proposed compensation must be ATP Credits or a legacy non-payable USDC term",
         ));
     }
-    if contract.proposed_compensation.asset != "USDC"
-        || contract
-            .proposed_compensation
-            .amount
-            .parse::<f64>()
-            .map_or(true, |amount| amount <= 0.0)
+    if contract
+        .proposed_compensation
+        .amount
+        .parse::<f64>()
+        .map_or(true, |amount| amount <= 0.0)
     {
         return Err(AuditProfileError::bad_state(
             "AUDIT_CONTRACT_PROPOSED_COMPENSATION_INVALID",
-            "proposed compensation must be a positive USDC term",
+            "proposed compensation must be a positive ATP Credits estimate",
         ));
     }
     validate_zero_value_settlement(&contract.settlement)?;

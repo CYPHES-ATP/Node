@@ -105,11 +105,10 @@
           "pattern": "^[0-9]+(?:\\.[0-9]+)?$"
         },
         "asset": {
-          "type": "string",
-          "minLength": 1
+          "enum": ["ATP Credits", "USDC"]
         },
         "status": {
-          "const": "non-payable-term"
+          "enum": ["receipt-backed-credit-estimate", "non-payable-term"]
         }
       }
     },

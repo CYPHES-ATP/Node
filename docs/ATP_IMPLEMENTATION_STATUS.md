@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-Last reviewed: June 13, 2026
+Last reviewed: June 22, 2026
 
 ## Conformance Position
 
@@ -8,6 +8,14 @@ CYPHES Node now contains an ATP-L1 repository-audit vertical slice with
 L2-style signed context leases. It completes and independently verifies one
 zero-value work order, but it is not a full implementation of every ATP
 profile, terminal path, settlement rail, or internet discovery mechanism.
+
+The product layer now also includes a local `Run Audit Skill` audit-labor
+slice. Protocol audit campaigns can be created from a pinned repository and
+scope, decomposed into work units, completed by signed node contributions,
+accepted or rejected by signed verifier decisions, assigned receipt-backed ATP
+Credits, and exported as a final markdown report bundle. This is local
+persistence and receipt accounting, not global campaign discovery, token
+settlement, or autonomous OpenClaw/Hermes execution yet.
 
 The verified path is:
 
@@ -68,6 +76,23 @@ an ATP v0.3 wire verb.
 | Durable public work index | Not implemented |
 | AutoNAT and reachability scoring | Not implemented |
 | Offline mailbox and durable retry | Not implemented |
+
+## Audit Labor Network
+
+| Capability | Status |
+| --- | --- |
+| Protocol audit campaign object | Implemented locally |
+| Mandatory pinned commit for campaigns | Implemented |
+| Work-unit decomposition | Implemented locally |
+| Signed node contribution object | Implemented locally |
+| Signed verifier result object | Implemented locally |
+| ATP Credit allocation from accepted receipts | Implemented locally |
+| Rejected/duplicate/non-reportable lead appendix | Implemented locally |
+| Final markdown report bundle export | Implemented locally |
+| Network-wide campaign/work discovery | Not implemented |
+| OpenClaw/Hermes runtime adapter | Not implemented |
+| Live bounty intake or payout | Not implemented |
+| ERC-20 or escrow settlement | Intentionally deferred |
 
 ## Verified Evidence
 

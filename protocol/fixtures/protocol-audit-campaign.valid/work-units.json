@@ -1,0 +1,26 @@
+[
+  {
+    "profile": "cyphes.audit-work-unit/0.1",
+    "profileVersion": "0.1",
+    "workUnitId": "campaign_aave_fixture_001-01-scope-mapping",
+    "campaignId": "campaign_aave_fixture_001",
+    "kind": "scope-mapping",
+    "title": "Scope mapping",
+    "instructions": "Map active scope, impact categories, known issues, and out-of-scope rules before hunting.",
+    "expectedArtifacts": ["scope-map.json", "notes.md"],
+    "status": "accepted",
+    "createdAt": "2026-06-21T00:00:00.000Z"
+  },
+  {
+    "profile": "cyphes.audit-work-unit/0.1",
+    "profileVersion": "0.1",
+    "workUnitId": "campaign_aave_fixture_001-04-defi-exploit-class-pass",
+    "campaignId": "campaign_aave_fixture_001",
+    "kind": "defi-exploit-class-pass",
+    "title": "DeFi exploit-class pass",
+    "instructions": "Record applicability and evidence for reentrancy, flash loans, oracle manipulation, mocks, and MEV.",
+    "expectedArtifacts": ["defi-matrix.json", "notes.md"],
+    "status": "rejected",
+    "createdAt": "2026-06-21T00:01:00.000Z"
+  }
+]

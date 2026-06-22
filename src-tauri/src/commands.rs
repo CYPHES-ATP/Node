@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 
@@ -6,7 +6,13 @@ use crate::{
     atp::{
         agent_id, create_signed_envelope, create_signed_envelope_with_expiry, now_rfc3339, AtpVerb,
     },
+    audit_labor::{
+        signed_contribution, signed_verification, AuditFinding, CampaignReportSnapshot,
+        ContributionArtifact, CoverageItem, CreditSummary, NodeContribution, ProtocolAuditCampaign,
+        RuntimeDescriptor, VerificationEvidence,
+    },
     audit_profile::{is_git_commit_sha, AuditContract, ReceiptApproval, RepositoryTarget},
+    bundle::export_campaign_report_bundle,
     p2p::{load_or_create_identity, spawn_swarm, SwarmCommand, ATP_PROTOCOL},
     state::{P2pState, PeerInfo},
     store::{
@@ -41,6 +47,25 @@ pub struct NetworkInfo {
     pub rendezvous_registered: bool,
     pub bootstrap_source: Option<String>,
     pub connected_peers: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtocolCampaignRequest {
+    pub protocol_name: String,
+    pub repository: RepositorySummary,
+    pub scope_text: String,
+    pub bounty_url: Option<String>,
+    pub impacts_in_scope: Vec<String>,
+    pub out_of_scope: Vec<String>,
+    pub audit_brief_text: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportedReportBundle {
+    pub campaign_id: String,
+    pub bundle_path: String,
 }
 
 #[tauri::command]
@@ -129,6 +154,168 @@ pub async fn list_audits(store: State<'_, AtpStore>) -> Result<Vec<AuditJob>, St
 }
 
 #[tauri::command]
+pub async fn list_protocol_campaigns(
+    store: State<'_, AtpStore>,
+) -> Result<Vec<ProtocolAuditCampaign>, String> {
+    store.list_protocol_campaigns()
+}
+
+#[tauri::command]
+pub async fn get_campaign_snapshot(
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+) -> Result<CampaignReportSnapshot, String> {
+    store.campaign_report_snapshot(&campaign_id)
+}
+
+#[tauri::command]
+pub async fn create_protocol_campaign(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    request: ProtocolCampaignRequest,
+) -> Result<ProtocolAuditCampaign, String> {
+    if request.repository.is_private {
+        return Err("Private repositories are not supported".to_string());
+    }
+    if !is_git_commit_sha(&request.repository.commit_sha) {
+        return Err("Protocol audit campaigns must pin an exact Git commit SHA".to_string());
+    }
+    let (keypair, _) = node_runtime(&state)?;
+    let campaign = ProtocolAuditCampaign::new(
+        request.protocol_name,
+        RepositoryTarget {
+            full_name: request.repository.full_name,
+            url: request.repository.url,
+            commit_sha: request.repository.commit_sha,
+        },
+        request.scope_text,
+        request.bounty_url,
+        request.impacts_in_scope,
+        request.out_of_scope,
+        request.audit_brief_text,
+        agent_id(&keypair.public()),
+    )?;
+    let campaign = store.create_protocol_campaign(&campaign)?;
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(campaign)
+}
+
+#[tauri::command]
+pub async fn record_campaign_contribution(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+    work_unit_id: String,
+    notes_markdown: String,
+) -> Result<NodeContribution, String> {
+    let (keypair, _) = node_runtime(&state)?;
+    let note = if notes_markdown.trim().is_empty() {
+        "Run Audit Skill local fixture contribution. Runtime adapter is connected, but OpenClaw/Hermes execution is not yet enabled in this build.".to_string()
+    } else {
+        notes_markdown
+    };
+    let artifact_bytes = note.as_bytes();
+    let artifact = ContributionArtifact {
+        path: "notes.md".to_string(),
+        media_type: "text/markdown".to_string(),
+        sha256: crate::audit_labor::sha256_ref(artifact_bytes),
+        size_bytes: artifact_bytes.len() as u64,
+    };
+    let contribution = signed_contribution(
+        &keypair,
+        campaign_id,
+        work_unit_id,
+        RuntimeDescriptor::deterministic_fixture(),
+        note,
+        vec![AuditFinding {
+            id: "CYPHES-COVERAGE-001".to_string(),
+            title: "Coverage-only audit skill output".to_string(),
+            severity: "informational".to_string(),
+            status: "non_reportable".to_string(),
+            impact: None,
+            evidence: vec![
+                "This deterministic local fixture records coverage; it does not claim an exploit."
+                    .to_string(),
+            ],
+            reportable: false,
+        }],
+        vec![artifact],
+        vec![CoverageItem {
+            area: "scope mapping".to_string(),
+            status: "completed".to_string(),
+            evidence: vec![
+                "Repository, pinned commit, scope, and runtime policy recorded.".to_string(),
+            ],
+        }],
+        vec!["CYPHES deterministic fixture: no repository code execution".to_string()],
+    )?;
+    let contribution = store.record_contribution(&contribution)?;
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(contribution)
+}
+
+#[tauri::command]
+pub async fn verify_campaign_contribution(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    contribution_id: String,
+    decision: String,
+    reason_code: String,
+    reason: String,
+) -> Result<Vec<crate::audit_labor::CreditAllocation>, String> {
+    let (keypair, _) = node_runtime(&state)?;
+    let contribution = store.get_contribution(&contribution_id)?;
+    let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
+    let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
+    let evidence_size = evidence_ref.len() as u64;
+    let verification = signed_verification(
+        &keypair,
+        contribution.campaign_id.clone(),
+        contribution.contribution_id.clone(),
+        decision,
+        reason_code,
+        reason,
+        vec![VerificationEvidence {
+            label: "signed contribution receipt".to_string(),
+            reference: evidence_ref,
+        }],
+        vec![ContributionArtifact {
+            path: "verification.md".to_string(),
+            media_type: "text/markdown".to_string(),
+            sha256: evidence_hash,
+            size_bytes: evidence_size,
+        }],
+    )?;
+    let allocations = store.record_verification(&verification)?;
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(allocations)
+}
+
+#[tauri::command]
+pub async fn export_campaign_report(
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+) -> Result<ExportedReportBundle, String> {
+    let bundle = export_campaign_report_bundle(&store, &campaign_id)?;
+    Ok(ExportedReportBundle {
+        campaign_id,
+        bundle_path: bundle.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn get_credit_summary(
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+) -> Result<CreditSummary, String> {
+    let (keypair, _) = node_runtime(&state)?;
+    store.credit_summary(&agent_id(&keypair.public()))
+}
+
+#[tauri::command]
 pub async fn create_audit(
     app: AppHandle,
     state: State<'_, P2pState>,
@@ -147,7 +334,7 @@ pub async fn create_audit(
         .parse::<f64>()
         .map_or(true, |amount| amount <= 0.0)
     {
-        return Err("Compensation must be greater than zero".to_string());
+        return Err("ATP Credits budget must be greater than zero".to_string());
     }
 
     let (keypair, sender) = node_runtime(&state)?;
@@ -172,7 +359,7 @@ pub async fn create_audit(
         id: id.clone(),
         repository,
         compensation,
-        currency: "USDC".to_string(),
+        currency: "ATP Credits".to_string(),
         scope,
         requester_agent_id: requester_agent_id.clone(),
         created_at,
@@ -453,7 +640,7 @@ pub async fn migrate_legacy_jobs(
             continue;
         }
         if legacy.requester_peer_id != peer_id
-            || legacy.currency != "USDC"
+            || !matches!(legacy.currency.as_str(), "USDC" | "ATP Credits")
             || !is_git_commit_sha(&legacy.repository.commit_sha)
         {
             skipped += 1;

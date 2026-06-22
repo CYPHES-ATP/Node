@@ -1,0 +1,90 @@
+[
+  {
+    "profile": "cyphes.audit-contribution/0.1",
+    "profileVersion": "0.1",
+    "contributionId": "contribution_scope_map_001",
+    "campaignId": "campaign_aave_fixture_001",
+    "workUnitId": "campaign_aave_fixture_001-01-scope-mapping",
+    "workerAgentId": "urn:libp2p:12D3KooWWorkerAcceptedFixture",
+    "runtime": {
+      "operator": "CYPHES local runtime operator",
+      "adapter": "cyphes-deterministic-fixture",
+      "model": "none",
+      "modelMultiplier": 0.2,
+      "toolPolicy": ["read-only pinned GitHub commit", "no repository writes", "no untrusted code execution"],
+      "connected": true
+    },
+    "notesMarkdown": "Mapped AAVE scope, pinned commit, accepted impacts, and out-of-scope rules. No exploit claim submitted.",
+    "findings": [],
+    "artifacts": [
+      {
+        "path": "scope-map.json",
+        "mediaType": "application/json",
+        "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sizeBytes": 512
+      }
+    ],
+    "coverage": [
+      {
+        "area": "scope and reportability gate",
+        "status": "completed",
+        "evidence": ["AAVE.pdf pages 1-3 and 10-13 process mapped."]
+      }
+    ],
+    "commands": ["no code execution"],
+    "createdAt": "2026-06-21T00:02:00.000Z",
+    "publicKeyBase64Url": "fixture-public-key",
+    "contributionHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "receiptHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "signature": "fixture-worker-signature"
+  },
+  {
+    "profile": "cyphes.audit-contribution/0.1",
+    "profileVersion": "0.1",
+    "contributionId": "contribution_duplicate_lead_001",
+    "campaignId": "campaign_aave_fixture_001",
+    "workUnitId": "campaign_aave_fixture_001-04-defi-exploit-class-pass",
+    "workerAgentId": "urn:libp2p:12D3KooWWorkerRejectedFixture",
+    "runtime": {
+      "operator": "CYPHES local runtime operator",
+      "adapter": "cyphes-deterministic-fixture",
+      "model": "none",
+      "modelMultiplier": 0.2,
+      "toolPolicy": ["read-only pinned GitHub commit", "no repository writes", "no untrusted code execution"],
+      "connected": true
+    },
+    "notesMarkdown": "Submitted liquidation lead was later classified as duplicate/known behavior.",
+    "findings": [
+      {
+        "id": "AAVE-DUP-001",
+        "title": "Duplicate liquidation lead",
+        "severity": "high",
+        "status": "duplicate",
+        "impact": "temporary locking of principal",
+        "evidence": ["Known public audit behavior"],
+        "reportable": true
+      }
+    ],
+    "artifacts": [
+      {
+        "path": "duplicate-lead.md",
+        "mediaType": "text/markdown",
+        "sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sizeBytes": 300
+      }
+    ],
+    "coverage": [
+      {
+        "area": "known issue search",
+        "status": "failed",
+        "evidence": ["Lead matched public prior art."]
+      }
+    ],
+    "commands": ["no code execution"],
+    "createdAt": "2026-06-21T00:03:00.000Z",
+    "publicKeyBase64Url": "fixture-public-key",
+    "contributionHash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "receiptHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "signature": "fixture-worker-signature"
+  }
+]

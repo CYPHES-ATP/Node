@@ -1,0 +1,41 @@
+[
+  {
+    "profile": "cyphes.verification-result/0.1",
+    "profileVersion": "0.1",
+    "verificationId": "verification_scope_map_accept_001",
+    "campaignId": "campaign_aave_fixture_001",
+    "targetContributionId": "contribution_scope_map_001",
+    "verifierAgentId": "urn:libp2p:12D3KooWVerifierFixture",
+    "decision": "accepted",
+    "reasonCode": "COVERAGE_ACCEPTED",
+    "reason": "Scope map is bounded, useful, and evidence-backed.",
+    "reproductionEvidence": [
+      {
+        "label": "signed contribution receipt",
+        "reference": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ],
+    "artifacts": [],
+    "createdAt": "2026-06-21T00:04:00.000Z",
+    "publicKeyBase64Url": "fixture-public-key",
+    "verificationHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "signature": "fixture-verifier-signature"
+  },
+  {
+    "profile": "cyphes.verification-result/0.1",
+    "profileVersion": "0.1",
+    "verificationId": "verification_duplicate_reject_001",
+    "campaignId": "campaign_aave_fixture_001",
+    "targetContributionId": "contribution_duplicate_lead_001",
+    "verifierAgentId": "urn:libp2p:12D3KooWVerifierFixture",
+    "decision": "rejected",
+    "reasonCode": "DUPLICATE_KNOWN_ISSUE",
+    "reason": "Lead is appendix-only because it reproduces known behavior.",
+    "reproductionEvidence": [],
+    "artifacts": [],
+    "createdAt": "2026-06-21T00:05:00.000Z",
+    "publicKeyBase64Url": "fixture-public-key",
+    "verificationHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "signature": "fixture-verifier-signature"
+  }
+]

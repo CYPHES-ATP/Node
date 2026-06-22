@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { AuditJob, LegacyAuditJob, NetworkInfo, NodeStatus } from "@/types";
+import type {
+  AuditJob,
+  CreditSummary,
+  LegacyAuditJob,
+  NetworkInfo,
+  NodeStatus,
+  ProtocolAuditCampaign,
+} from "@/types";
 
 export const LEGACY_STORAGE_KEY = "cyphes.audit-jobs.v1";
 
@@ -24,12 +31,16 @@ interface CyphesState {
   peerCount: number;
   networkInfo: NetworkInfo | null;
   jobs: AuditJob[];
+  campaigns: ProtocolAuditCampaign[];
+  creditSummary: CreditSummary;
   notice: string | null;
   setNodeOnline: (peerId: string, agentId: string) => void;
   setNodeError: (message: string) => void;
   setPeerCount: (count: number) => void;
   setNetworkInfo: (networkInfo: NetworkInfo) => void;
   replaceJobs: (jobs: AuditJob[]) => void;
+  replaceCampaigns: (campaigns: ProtocolAuditCampaign[]) => void;
+  setCreditSummary: (creditSummary: CreditSummary) => void;
   setNotice: (notice: string | null) => void;
 }
 
@@ -41,6 +52,8 @@ export const useCyphesStore = create<CyphesState>((set) => ({
   peerCount: 0,
   networkInfo: null,
   jobs: [],
+  campaigns: [],
+  creditSummary: { total: 0, allocations: [] },
   notice: null,
 
   setNodeOnline: (peerId, agentId) =>
@@ -50,5 +63,7 @@ export const useCyphesStore = create<CyphesState>((set) => ({
   setNetworkInfo: (networkInfo) =>
     set({ networkInfo, peerCount: networkInfo.connected_peers }),
   replaceJobs: (jobs) => set({ jobs }),
+  replaceCampaigns: (campaigns) => set({ campaigns }),
+  setCreditSummary: (creditSummary) => set({ creditSummary }),
   setNotice: (notice) => set({ notice }),
 }));

@@ -1,4 +1,5 @@
 mod atp;
+pub mod audit_labor;
 pub mod audit_profile;
 mod bundle;
 mod commands;
@@ -8,8 +9,10 @@ mod store;
 mod worker;
 
 use commands::{
-    accept_offer, approve_result, connect_peer, create_audit, get_network_info, get_peers,
-    list_audits, migrate_legacy_jobs, offer_audit, route_audit, run_audit, start_node,
+    accept_offer, approve_result, connect_peer, create_audit, create_protocol_campaign,
+    export_campaign_report, get_campaign_snapshot, get_credit_summary, get_network_info, get_peers,
+    list_audits, list_protocol_campaigns, migrate_legacy_jobs, offer_audit,
+    record_campaign_contribution, route_audit, run_audit, start_node, verify_campaign_contribution,
 };
 use state::P2pState;
 use store::AtpStore;
@@ -82,7 +85,14 @@ pub fn run() {
             connect_peer,
             get_peers,
             list_audits,
+            list_protocol_campaigns,
+            get_campaign_snapshot,
             create_audit,
+            create_protocol_campaign,
+            record_campaign_contribution,
+            verify_campaign_contribution,
+            export_campaign_report,
+            get_credit_summary,
             offer_audit,
             accept_offer,
             route_audit,

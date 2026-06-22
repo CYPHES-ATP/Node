@@ -56,8 +56,8 @@
   },
   "proposedCompensation": {
     "amount": "100",
-    "asset": "USDC",
-    "status": "non-payable-term"
+    "asset": "ATP Credits",
+    "status": "receipt-backed-credit-estimate"
   },
   "settlement": {
     "rail": "zero-value",

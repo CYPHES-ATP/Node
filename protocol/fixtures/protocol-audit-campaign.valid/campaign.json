@@ -1,0 +1,31 @@
+{
+  "profile": "cyphes.protocol-audit-campaign/0.1",
+  "profileVersion": "0.1",
+  "campaignId": "campaign_aave_fixture_001",
+  "protocolName": "AAVE",
+  "repository": {
+    "fullName": "aave-dao/aave-v3-origin",
+    "url": "https://github.com/aave-dao/aave-v3-origin",
+    "commitSha": "fd1fbd9150426ca8ace9cee45b4acf912ae84f5b"
+  },
+  "scopeText": "Map AAVE v3 Pool, L2Pool, liquidation, oracle, and accounting surfaces. Claims require pinned-commit evidence and local reproducibility.",
+  "bountyUrl": "https://immunefi.com/bug-bounty/aave/scope/",
+  "impactsInScope": [
+    "Direct theft of principal",
+    "Permanent locking of principal or treasury funds",
+    "Protocol insolvency",
+    "Manipulation of interest rates"
+  ],
+  "outOfScope": [
+    "Privileged key compromise",
+    "Best-practice-only recommendations",
+    "Public mainnet or testnet testing",
+    "Claims without deterministic reproduction"
+  ],
+  "auditBriefHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "auditBriefText": "Fixture derived from AAVE.pdf and CYPHES_v1.02.pdf process notes.",
+  "requesterAgentId": "urn:libp2p:12D3KooWRequesterCampaignFixture",
+  "status": "open",
+  "createdAt": "2026-06-21T00:00:00.000Z",
+  "updatedAt": "2026-06-21T00:00:00.000Z"
+}

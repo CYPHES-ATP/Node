@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/audit-contribution.v0.1.schema.json",
+  "title": "CYPHES Audit Contribution",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["profile", "profileVersion", "contributionId", "campaignId", "workUnitId", "workerAgentId", "runtime", "notesMarkdown", "artifacts", "coverage", "contributionHash", "receiptHash", "signature"],
+  "properties": {
+    "profile": { "const": "cyphes.audit-contribution/0.1" },
+    "profileVersion": { "const": "0.1" },
+    "contributionId": { "type": "string", "minLength": 1 },
+    "campaignId": { "type": "string", "minLength": 1 },
+    "workUnitId": { "type": "string", "minLength": 1 },
+    "workerAgentId": { "type": "string", "minLength": 1 },
+    "notesMarkdown": { "type": "string", "minLength": 1 },
+    "receiptHash": { "$ref": "#/$defs/sha256" },
+    "signature": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$" }
+  }
+}

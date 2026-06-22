@@ -13,11 +13,101 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     atp::{event_hash, raw_ed25519_public_key, AtpEnvelope},
+    audit_labor::{final_report_markdown, sha256_ref},
     store::{data_dir, AtpStore},
 };
 
 pub fn export_receipt_bundle(store: &AtpStore, transaction_id: &str) -> Result<PathBuf, String> {
     export_receipt_bundle_to(store, transaction_id, &data_dir()?.join("receipts"))
+}
+
+pub fn export_campaign_report_bundle(
+    store: &AtpStore,
+    campaign_id: &str,
+) -> Result<PathBuf, String> {
+    export_campaign_report_bundle_to(store, campaign_id, &data_dir()?.join("reports"))
+}
+
+pub fn export_campaign_report_bundle_to(
+    store: &AtpStore,
+    campaign_id: &str,
+    report_root: &Path,
+) -> Result<PathBuf, String> {
+    let snapshot = store.campaign_report_snapshot(campaign_id)?;
+    let bundle_dir = report_root.join(campaign_id);
+    let staging_dir = report_root.join(format!(".{campaign_id}.staging"));
+    if staging_dir.exists() {
+        fs::remove_dir_all(&staging_dir).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(staging_dir.join("receipts")).map_err(|error| error.to_string())?;
+
+    let accepted_ids = snapshot
+        .verifications
+        .iter()
+        .filter(|verification| verification.decision == "accepted")
+        .map(|verification| verification.target_contribution_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let accepted_findings = snapshot
+        .contributions
+        .iter()
+        .filter(|contribution| accepted_ids.contains(contribution.contribution_id.as_str()))
+        .flat_map(|contribution| contribution.findings.iter())
+        .filter(|finding| finding.reportable)
+        .collect::<Vec<_>>();
+
+    let report = final_report_markdown(&snapshot).into_bytes();
+    let findings =
+        serde_json::to_vec_pretty(&accepted_findings).map_err(|error| error.to_string())?;
+    let contributions =
+        serde_json::to_vec_pretty(&snapshot.contributions).map_err(|error| error.to_string())?;
+    let verifications =
+        serde_json::to_vec_pretty(&snapshot.verifications).map_err(|error| error.to_string())?;
+    let credits =
+        serde_json::to_vec_pretty(&snapshot.credits).map_err(|error| error.to_string())?;
+    let receipts_readme = b"# Receipts\n\nThis directory is reserved for portable ATP receipt bundles and signed contribution receipts. This local export references contribution receipt hashes in `contributions.json` and `credits.json`; it does not invent missing external receipts.\n".to_vec();
+
+    let files = vec![
+        ("report.md", "text/markdown", report),
+        ("findings.json", "application/json", findings),
+        ("contributions.json", "application/json", contributions),
+        ("verifications.json", "application/json", verifications),
+        ("credits.json", "application/json", credits),
+        ("receipts/README.md", "text/markdown", receipts_readme),
+    ];
+
+    let mut manifest_entries = Vec::new();
+    for (path, media_type, bytes) in &files {
+        let destination = safe_join(&staging_dir, path)?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(&destination, bytes).map_err(|error| error.to_string())?;
+        manifest_entries.push(json!({
+            "path": path,
+            "mediaType": media_type,
+            "sha256": sha256_ref(bytes),
+            "sizeBytes": bytes.len(),
+        }));
+    }
+    write_json(
+        &staging_dir.join("manifest.json"),
+        &json!({
+            "profile": "cyphes.final-audit-report/0.1",
+            "campaignId": campaign_id,
+            "protocolName": snapshot.campaign.protocol_name,
+            "repository": snapshot.campaign.repository,
+            "acceptedContributionCount": accepted_ids.len(),
+            "creditAllocationCount": snapshot.credits.len(),
+            "files": manifest_entries,
+            "generatedBy": "CYPHES/0.2.1-dev",
+        }),
+    )?;
+
+    if bundle_dir.exists() {
+        fs::remove_dir_all(&bundle_dir).map_err(|error| error.to_string())?;
+    }
+    fs::rename(&staging_dir, &bundle_dir).map_err(|error| error.to_string())?;
+    Ok(bundle_dir)
 }
 
 pub fn export_receipt_bundle_to(
