@@ -1,6 +1,6 @@
 # CYPHES Audit Labor Network
 
-Status: v0.4 developer preview
+Status: v0.5 developer preview
 
 CYPHES is a protocol-facing autonomous audit labor network built on ATP. The
 network coordinates scoped security work, records useful labor as signed
@@ -27,12 +27,18 @@ or verifiable artifact.
 1. A requester creates a Protocol Audit Campaign.
 2. The campaign records protocol name, repository URL, pinned commit, scope,
    optional bounty URL, in-scope impacts, out-of-scope rules, audit brief text
-   or hash, requester ATP identity, and status.
+   or hash, hashed requester attachments, default skill-pack metadata, optional
+   custom `SKILL.md` overlay hash, requester ATP identity, and status.
 3. CYPHES decomposes the campaign into work units.
-4. Nodes complete work units and submit signed contributions.
-5. Verifier nodes accept, reject, reproduce, challenge, or request revision.
-6. ATP Credits are issued only for accepted signed work with a verifier receipt.
-7. The final audit report bundle is exported from accepted contributions plus an
+4. Online peers receive the campaign over libp2p and persist their own local
+   copy of the campaign/work units.
+5. Worker nodes claim individual work units with signed first-claim-wins claim
+   records.
+6. Claimed workers run the audit skill with their local model and submit signed
+   contributions back to the requester.
+7. Verifier nodes accept, reject, reproduce, challenge, or request revision.
+8. ATP Credits are issued only for accepted signed work with a verifier receipt.
+9. The final audit report bundle is exported from accepted contributions plus an
    appendix of rejected, duplicate, and non-reportable leads.
 
 ## Work Unit Lifecycle
@@ -48,12 +54,32 @@ units are:
 - peer verification;
 - final report section.
 
-The v0.4 `Run Audit Pipeline` command runs the professional local pipeline in
+The v0.5 requester `Run Local Pipeline` command runs the professional local pipeline in
 order, signs each pass separately, feeds prior pass summaries into later model
-calls, and leaves peer verification as the quality gate. Future adapters can
-make each work unit independently claimable by different specialized nodes and
-can add runnable PoC attempts, invariant hypothesis testing,
-duplicate/known-issue checks, or protocol-specific checklist items.
+calls, and leaves peer verification as the quality gate. Remote nodes can also
+claim one open work unit, run that claimed unit locally, sign the contribution,
+and send it back to the requester. Future adapters can add runnable PoC
+attempts, invariant hypothesis testing, duplicate/known-issue checks, or
+protocol-specific checklist items.
+
+## Structured Customization
+
+CYPHES does not expose a raw prompt box as the core product. Requesters can
+customize campaigns through structured, receipt-hashable inputs:
+
+- **Audit Brief**: requester guidance, scope notes, bounty rules, threat model,
+  and concerns.
+- **Skill Pack**: the default CYPHES methodology reference, version, label, and
+  SHA-256 hash.
+- **Attachments**: pasted protocol docs, bounty policy, PDF excerpts, or other
+  reference text. The current implementation stores text attachments with a
+  SHA-256 hash; binary file import and PDF extraction are future adapters.
+- **Advanced Custom `SKILL.md`**: optional overlay text. CYPHES keeps the base
+  skill pack for comparability and records the custom overlay hash in the
+  effective prompt/input hash.
+
+These inputs become part of the model prompt and signed runtime hashes. They
+are not cosmetic UI fields.
 
 ## Contributor Roles
 
@@ -70,13 +96,13 @@ can contain:
 - runtime descriptor;
 - worker ATP signature.
 
-The current desktop command runs the versioned CYPHES v0.4 audit skill against
+The current desktop command runs the versioned CYPHES audit skill against
 a local model provider. The UI supports LM Studio and Ollama, hides default
 local endpoints, does not collect API keys, and records progress plus
 tokens/sec while generation is running.
 
 Each signed contribution receipt records runtime provider, model, endpoint
-class, skill hash, input hash, output hash, artifact hashes, measured
+class, effective skill hash, input hash, output hash, artifact hashes, measured
 tokens/sec, and the work-unit identity. OpenClaw/Hermes remains the next
 advanced runtime adapter for nodes that want external tool orchestration beyond
 a local model endpoint.
@@ -144,6 +170,7 @@ The local export command writes:
 ```text
 report.md
 findings.json
+claims.json
 contributions.json
 verifications.json
 credits.json
@@ -186,8 +213,9 @@ ERC-20 or escrow settlement should be added only after the network has:
 
 ## What Is Still Next
 
-- Network-wide campaign and work-unit discovery.
-- Independently claimable remote work units for specialized nodes.
+- Durable network-wide campaign/work-unit index for peers that are not online at
+  the same time.
+- Claim expiry, release, revision-request, and challenge windows.
 - OpenClaw/Hermes advanced audit runtime execution.
 - Web/API-only GitHub repository reads at pinned commits.
 - Verifier queues and challenge windows.

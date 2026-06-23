@@ -24,6 +24,25 @@
   ],
   "auditBriefHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "auditBriefText": "Fixture derived from AAVE.pdf and CYPHES_v1.02.pdf process notes.",
+  "skillPack": {
+    "skillPackId": "cyphes-audit-skill",
+    "version": "0.4",
+    "hash": "sha256:2f14a452d06b1dfc1aca03b31c6639ded5a94aea5bf4bc531eabdb7fcabb7f18",
+    "label": "CYPHES audit methodology v0.4"
+  },
+  "attachments": [
+    {
+      "attachmentId": "attachment_aave_scope_fixture",
+      "label": "Requester attachment",
+      "mediaType": "text/markdown",
+      "sha256": "sha256:26995b88c5ff391dad1b84e1e045800e150bc9d09be878b0cca626ac55a1b7df",
+      "sizeBytes": 78,
+      "text": "AAVE fixture scope excerpt. Focused path: src/contracts/protocol/pool/Pool.sol"
+    }
+  ],
+  "customSkillHash": null,
+  "customSkillLabel": null,
+  "customSkillText": null,
   "requesterAgentId": "urn:libp2p:12D3KooWRequesterCampaignFixture",
   "status": "open",
   "createdAt": "2026-06-21T00:00:00.000Z",

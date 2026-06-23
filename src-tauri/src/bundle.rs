@@ -60,6 +60,7 @@ pub fn export_campaign_report_bundle_to(
         serde_json::to_vec_pretty(&accepted_findings).map_err(|error| error.to_string())?;
     let contributions =
         serde_json::to_vec_pretty(&snapshot.contributions).map_err(|error| error.to_string())?;
+    let claims = serde_json::to_vec_pretty(&snapshot.claims).map_err(|error| error.to_string())?;
     let verifications =
         serde_json::to_vec_pretty(&snapshot.verifications).map_err(|error| error.to_string())?;
     let credits =
@@ -69,6 +70,7 @@ pub fn export_campaign_report_bundle_to(
     let files = vec![
         ("report.md", "text/markdown", report),
         ("findings.json", "application/json", findings),
+        ("claims.json", "application/json", claims),
         ("contributions.json", "application/json", contributions),
         ("verifications.json", "application/json", verifications),
         ("credits.json", "application/json", credits),

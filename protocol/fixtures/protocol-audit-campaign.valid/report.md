@@ -8,12 +8,15 @@
 | Repository | `aave-dao/aave-v3-origin` |
 | Pinned commit | `fd1fbd9150426ca8ace9cee45b4acf912ae84f5b` |
 | Campaign | `campaign_aave_fixture_001` |
+| Skill pack | `cyphes-audit-skill` `0.4` |
+| Skill pack hash | `sha256:2f14a452d06b1dfc1aca03b31c6639ded5a94aea5bf4bc531eabdb7fcabb7f18` |
+| Custom SKILL overlay | `none` |
 | Profile | `cyphes.final-audit-report/0.1` |
 | Evidence rule | Accepted CYPHES receipts only |
 
 ## Executive Summary
 
-This fixture demonstrates the CYPHES v0.4 audit labor lifecycle. It contains one accepted scope-mapping contribution, one rejected duplicate lead, one verifier acceptance, one verifier rejection, and one receipt-backed ATP Credit allocation.
+This fixture demonstrates the CYPHES v0.5 audit labor lifecycle. It contains two signed work-unit claims, one accepted scope-mapping contribution, one rejected duplicate lead, one verifier acceptance, one verifier rejection, and one receipt-backed ATP Credit allocation.
 
 No accepted reportable vulnerability is present in this fixture. The report should be read as verified coverage and duplicate-lead handling, not as a bounty claim or exploit submission.
 
@@ -31,6 +34,13 @@ CYPHES decomposes protocol audit work into signed passes. A worker node submits 
 | --- | --- | ---: | ---: | --- |
 | Scope mapping | `accepted` | 1 | 1 | `sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd` |
 | DeFi exploit-class pass | `rejected` | 1 | 0 | `sha256:1111111111111111111111111111111111111111111111111111111111111111` |
+
+## Work Unit Claims
+
+| Work Unit | Worker | Claim | Status |
+| --- | --- | --- | --- |
+| Scope mapping | `urn:libp2p:12D3KooWWorkerAcceptedFixture` | `claim_scope_map_001` | `claimed` |
+| DeFi exploit-class pass | `urn:libp2p:12D3KooWWorkerRejectedFixture` | `claim_duplicate_lead_001` | `claimed` |
 
 ## Evidence Arbitration
 

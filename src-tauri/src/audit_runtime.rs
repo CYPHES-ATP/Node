@@ -219,7 +219,7 @@ pub async fn run_local_audit_skill(
     emit_progress(app, campaign, work_unit, "Building model prompt", 32, None);
     let prompt = build_prompt(campaign, work_unit, &context, prior_contributions);
     let input_hash = sha256_ref(prompt.as_bytes());
-    let skill_hash = sha256_ref(AUDIT_SKILL_TEXT.as_bytes());
+    let skill_hash = sha256_ref(effective_skill_text(campaign).as_bytes());
 
     emit_progress(app, campaign, work_unit, "Running local model", 44, None);
     let started = Instant::now();
@@ -596,6 +596,7 @@ fn scoped_paths_from_campaign(campaign: &ProtocolAuditCampaign) -> Vec<String> {
     for source in [
         Some(campaign.scope_text.as_str()),
         campaign.audit_brief_text.as_deref(),
+        campaign.custom_skill_text.as_deref(),
     ]
     .into_iter()
     .flatten()
@@ -618,6 +619,33 @@ fn scoped_paths_from_campaign(campaign: &ProtocolAuditCampaign) -> Vec<String> {
                     if let Some(path) = normalize_scoped_path(&trimmed[prefix.len()..]) {
                         if !paths.iter().any(|existing| existing == &path) {
                             paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for attachment in &campaign.attachments {
+        if let Some(text) = &attachment.text {
+            for line in text.lines() {
+                let trimmed = line
+                    .trim()
+                    .trim_start_matches("- ")
+                    .trim_start_matches("* ")
+                    .trim();
+                let lower = trimmed.to_ascii_lowercase();
+                for prefix in [
+                    "focused path:",
+                    "focused file:",
+                    "focused directory:",
+                    "in-scope path:",
+                    "in scope path:",
+                ] {
+                    if lower.starts_with(prefix) {
+                        if let Some(path) = normalize_scoped_path(&trimmed[prefix.len()..]) {
+                            if !paths.iter().any(|existing| existing == &path) {
+                                paths.push(path);
+                            }
                         }
                     }
                 }
@@ -718,14 +746,20 @@ fn build_prompt(
     context: &RepositoryContext,
     prior_contributions: &[NodeContribution],
 ) -> String {
+    let skill_text = effective_skill_text(campaign);
+    let attachment_digest = attachment_digest(campaign);
     let mut prompt = format!(
         "{}\n\n\
          # Campaign\n\
          Protocol: {}\n\
          Repository: {} at {}\n\
+         Skill pack: {} {} ({})\n\
+         Custom SKILL hash: {}\n\
          Scope:\n{}\n\n\
+         Audit brief:\n{}\n\n\
          In-scope impacts: {}\n\
          Out-of-scope: {}\n\n\
+         # Requester Attachments\n{}\n\n\
          # Work Unit\n\
          Kind: {}\n\
          Title: {}\n\
@@ -735,11 +769,19 @@ fn build_prompt(
          Files inventoried: {}\n{}\n\n\
          # Prior Accepted Or Submitted CYPHES Passes\n{}\n\n\
          # Selected File Context\n",
-        AUDIT_SKILL_TEXT,
+        skill_text,
         campaign.protocol_name,
         campaign.repository.full_name,
         campaign.repository.commit_sha,
+        campaign.skill_pack.skill_pack_id,
+        campaign.skill_pack.version,
+        campaign.skill_pack.hash,
+        campaign.custom_skill_hash.as_deref().unwrap_or("none"),
         campaign.scope_text,
+        campaign
+            .audit_brief_text
+            .as_deref()
+            .unwrap_or("No requester audit brief supplied."),
         if campaign.impacts_in_scope.is_empty() {
             "not supplied".to_string()
         } else {
@@ -750,6 +792,7 @@ fn build_prompt(
         } else {
             campaign.out_of_scope.join("; ")
         },
+        attachment_digest,
         work_unit.kind,
         work_unit.title,
         work_unit.instructions,
@@ -772,6 +815,44 @@ fn build_prompt(
         ));
     }
     prompt
+}
+
+fn effective_skill_text(campaign: &ProtocolAuditCampaign) -> String {
+    match campaign.custom_skill_text.as_deref() {
+        Some(custom) if !custom.trim().is_empty() => format!(
+            "{}\n\n# Requester Custom SKILL.md Overlay\n\n{}",
+            AUDIT_SKILL_TEXT,
+            custom.trim()
+        ),
+        _ => AUDIT_SKILL_TEXT.to_string(),
+    }
+}
+
+fn attachment_digest(campaign: &ProtocolAuditCampaign) -> String {
+    if campaign.attachments.is_empty() {
+        return "No requester attachments supplied.".to_string();
+    }
+    campaign
+        .attachments
+        .iter()
+        .map(|attachment| {
+            format!(
+                "## {}\nMedia type: {}\nHash: {}\nBytes: {}\n{}",
+                attachment.label,
+                attachment.media_type,
+                attachment.sha256,
+                attachment.size_bytes,
+                attachment
+                    .text
+                    .as_deref()
+                    .map(|text| truncate_bytes(text, 24_000))
+                    .unwrap_or_else(
+                        || "Binary or external attachment text not embedded.".to_string()
+                    )
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn prior_contribution_digest(contributions: &[NodeContribution]) -> String {

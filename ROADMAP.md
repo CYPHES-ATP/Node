@@ -25,6 +25,14 @@ signed ATP envelopes or portable artifacts.
 - Local-model v0.4 `Run Audit Pipeline` runtime for LM Studio and Ollama,
   including model discovery, progress, tokens/sec, v0.4 skill hash, input hash,
   output hash, and signed contribution artifacts for each audit pass.
+- v0.5 campaign guidance fields: Audit Brief, hashed requester attachments,
+  default CYPHES skill-pack metadata, and optional custom `SKILL.md` overlay
+  hash included in the effective prompt/input hash.
+- Remote campaign broadcast over libp2p request/response.
+- Signed work-unit claims with first-claim-wins persistence and contribution
+  enforcement so another worker cannot submit against a claimed unit.
+- Remote worker flow: claim a campaign work unit, run it with the local model
+  on that worker node, and send the signed contribution back to the requester.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
@@ -43,18 +51,18 @@ signed ATP envelopes or portable artifacts.
 
 Status: **Partial**
 
-- Wire protocol campaigns and work units into network discovery so remote
-  nodes automatically see available audit labor.
-- Split remote worker fulfillment across claimable professional work units so
-  several specialized nodes can contribute to one campaign.
+- Persist remote campaign/work-unit discovery in a durable searchable work-order
+  index instead of only online peer broadcast.
+- Split verification and challenge handling across independently claimable
+  verifier work units.
 - Add OpenClaw/Hermes runtime adapters for nodes that want advanced tool
   orchestration beyond the built-in LM Studio/Ollama local model path.
 - Store audit skill hashes, runtime descriptors, model identifiers, tool-access
   logs, output hashes, and evidence references in contribution receipts.
 - Add verifier-node queues, challenge windows, revision requests, and duplicate
   finding resolution.
-- Improve protocol/requester UX for campaign creation, audit briefs,
-  attachment/skill-pack import, scope templates, and final report review.
+- Improve protocol/requester UX for scope templates, file attachment import,
+  PDF parsing, final report review, and claim/revision inspection.
 - Keep bounty allocation as a signed placeholder until settlement is designed.
 
 ## 2. Staging Network
@@ -127,8 +135,8 @@ Status: **Partial**
   and verifier review before adding more runtime providers.
 - Connect OpenClaw/Hermes as an advanced adapter while preserving the signed
   contribution and verification receipt shape.
-- Add campaign/work-unit discovery over rendezvous instead of local-only
-  campaign state.
+- Add a durable work-order index and reliable resend for campaigns, claims, and
+  contributions when peers are not simultaneously online.
 - Harden the worker boundary without changing the receipt profile.
 - Add deterministic negative fixtures for invalid leases and worker results.
 - Add peer persistence and reliable resend.

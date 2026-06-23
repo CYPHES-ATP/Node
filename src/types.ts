@@ -60,6 +60,23 @@ export interface ProtocolAuditCampaign {
   outOfScope: string[];
   auditBriefHash?: string;
   auditBriefText?: string;
+  skillPack: {
+    skillPackId: string;
+    version: string;
+    hash: string;
+    label: string;
+  };
+  attachments: Array<{
+    attachmentId: string;
+    label: string;
+    mediaType: string;
+    sha256: string;
+    sizeBytes: number;
+    text?: string;
+  }>;
+  customSkillHash?: string;
+  customSkillLabel?: string;
+  customSkillText?: string;
   requesterAgentId: string;
   status: string;
   createdAt: string;
@@ -76,7 +93,26 @@ export interface AuditWorkUnit {
   instructions: string;
   expectedArtifacts: string[];
   status: string;
+  claimedByAgentId?: string;
+  claimId?: string;
+  claimedAt?: string;
   createdAt: string;
+}
+
+export interface AuditWorkUnitClaim {
+  profile: string;
+  profileVersion: string;
+  claimId: string;
+  campaignId: string;
+  workUnitId: string;
+  requesterAgentId: string;
+  workerAgentId: string;
+  status: string;
+  createdAt: string;
+  expiresAt?: string;
+  publicKeyBase64Url: string;
+  claimHash: string;
+  signature: string;
 }
 
 export interface NodeContribution {
@@ -137,6 +173,7 @@ export interface CreditSummary {
 export interface CampaignReportSnapshot {
   campaign: ProtocolAuditCampaign;
   workUnits: AuditWorkUnit[];
+  claims: AuditWorkUnitClaim[];
   contributions: NodeContribution[];
   verifications: VerificationResult[];
   credits: CreditAllocation[];
