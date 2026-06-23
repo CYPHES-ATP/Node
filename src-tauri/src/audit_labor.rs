@@ -613,131 +613,288 @@ pub fn final_report_markdown(snapshot: &CampaignReportSnapshot) -> String {
         .iter()
         .filter(|contribution| rejected_ids.contains(contribution.contribution_id.as_str()))
         .collect::<Vec<_>>();
+
+    let accepted_findings = accepted_contributions
+        .iter()
+        .flat_map(|contribution| {
+            contribution
+                .findings
+                .iter()
+                .filter(|finding| finding.reportable)
+                .map(move |finding| (*contribution, finding))
+        })
+        .collect::<Vec<_>>();
+    let total_credits = snapshot
+        .credits
+        .iter()
+        .map(|credit| credit.total)
+        .sum::<u32>();
+    let accepted_count = accepted_contributions.len();
+    let verification_count = snapshot.verifications.len();
+
     let mut report = format!(
         "# CYPHES Protocol Audit Report\n\n\
+         ## Document Control\n\n\
+         | Field | Value |\n\
+         | --- | --- |\n\
+         | Protocol | {} |\n\
+         | Repository | `{}` |\n\
+         | Pinned commit | `{}` |\n\
+         | Campaign | `{}` |\n\
+         | Profile | `cyphes.final-audit-report/0.1` |\n\
+         | Evidence rule | Accepted CYPHES receipts only |\n\n\
          ## Executive Summary\n\n\
-         Protocol: **{}**\n\n\
-         Repository: `{}` at `{}`\n\n\
-         This report is generated from accepted CYPHES audit-labor receipts only. \
-         It does not claim bounty payment, token settlement, or unverified exploit validity.\n\n\
-         ## Scope\n\n{}\n\n\
-         ## Methodology\n\n\
-         CYPHES applied the repository discovery, evidence-first audit, DeFi exploit-class pass, \
-         reportability gate, and peer verification process defined for this campaign.\n\n\
-         ## Work Units Completed\n\n",
-        snapshot.campaign.protocol_name,
+         CYPHES processed **{} signed audit pass{}** for **{}**. \
+         **{} contribution{}** ha{} accepted verification and **{} ATP Credits** were issued from receipt-backed allocations.\n\n",
+        markdown_table_cell(&snapshot.campaign.protocol_name),
         snapshot.campaign.repository.full_name,
         snapshot.campaign.repository.commit_sha,
-        snapshot.campaign.scope_text
+        snapshot.campaign.campaign_id,
+        snapshot.contributions.len(),
+        plural(snapshot.contributions.len()),
+        snapshot.campaign.protocol_name,
+        accepted_count,
+        plural(accepted_count),
+        if accepted_count == 1 { "s" } else { "ve" },
+        total_credits,
     );
-    for unit in &snapshot.work_units {
-        report.push_str(&format!("- {}: `{}`\n", unit.title, unit.status));
+    if accepted_findings.is_empty() {
+        report.push_str(
+            "No accepted reportable vulnerability is present in this export. The report should be read as verified coverage and negative findings, not as a bounty claim.\n\n",
+        );
+    } else {
+        report.push_str(&format!(
+            "{} accepted reportable finding{} appear in the findings register below. Each finding is backed by a signed contribution and verifier decision.\n\n",
+            accepted_findings.len(),
+            plural(accepted_findings.len())
+        ));
     }
+
+    report.push_str("## Scope And Limits\n\n");
+    report.push_str(&snapshot.campaign.scope_text);
     report.push_str(
-        "\n## Findings Table\n\n| ID | Severity | Title | Impact |\n| --- | --- | --- | --- |\n",
+        "\n\nThis is a repository-state audit at the pinned commit. CYPHES does not certify deployed bytecode, private-key custody, off-chain operators, production integrations, or live bounty payment unless those artifacts are explicitly supplied and receipt-backed.\n\n",
     );
-    let mut accepted_finding_count = 0;
-    for contribution in &accepted_contributions {
-        for finding in contribution
-            .findings
+    if let Some(brief) = &snapshot.campaign.audit_brief_text {
+        report.push_str("### Audit Brief\n\n");
+        report.push_str(brief);
+        report.push_str("\n\n");
+    }
+
+    report.push_str(
+        "## Methodology\n\nCYPHES v0.4 decomposes repository review into professional audit passes: scope mapping, repository inventory, dependency/config review, exploit-class analysis, finding validation, final report synthesis, and peer verification. Local model output is only accepted into the final report after it is signed and verified.\n\n",
+    );
+
+    report.push_str("## Audit Pass Matrix\n\n| Pass | Status | Contributions | Accepted | Receipt evidence |\n| --- | --- | ---: | ---: | --- |\n");
+    for unit in &snapshot.work_units {
+        let unit_contributions = snapshot
+            .contributions
             .iter()
-            .filter(|finding| finding.reportable)
-        {
-            accepted_finding_count += 1;
+            .filter(|contribution| contribution.work_unit_id == unit.work_unit_id)
+            .collect::<Vec<_>>();
+        let unit_accepted = unit_contributions
+            .iter()
+            .filter(|contribution| accepted_ids.contains(contribution.contribution_id.as_str()))
+            .count();
+        let receipts = if unit_contributions.is_empty() {
+            "none".to_string()
+        } else {
+            unit_contributions
+                .iter()
+                .map(|contribution| format!("`{}`", contribution.receipt_hash))
+                .collect::<Vec<_>>()
+                .join("<br>")
+        };
+        report.push_str(&format!(
+            "| {} | `{}` | {} | {} | {} |\n",
+            markdown_table_cell(&unit.title),
+            unit.status,
+            unit_contributions.len(),
+            unit_accepted,
+            receipts
+        ));
+    }
+
+    report.push_str("\n## Evidence Arbitration\n\n");
+    if snapshot.verifications.is_empty() {
+        report.push_str("No verifier decisions are present yet. Contributions remain submitted but not accepted into the report body.\n");
+    } else {
+        report
+            .push_str("| Verification | Decision | Reason | Target |\n| --- | --- | --- | --- |\n");
+        for verification in &snapshot.verifications {
             report.push_str(&format!(
-                "| {} | {} | {} | {} |\n",
-                finding.id,
-                finding.severity,
-                finding.title,
-                finding
-                    .impact
-                    .as_deref()
-                    .unwrap_or("evidence-backed coverage")
+                "| `{}` | `{}` | {} | `{}` |\n",
+                verification.verification_id,
+                verification.decision,
+                markdown_table_cell(&verification.reason_code),
+                verification.target_contribution_id
             ));
         }
     }
-    if accepted_finding_count == 0 {
-        report.push_str("| none | n/a | No accepted reportable findings yet | n/a |\n");
-    }
-    report.push_str("\n## Accepted Findings\n\n");
-    for contribution in &accepted_contributions {
-        for finding in contribution
-            .findings
-            .iter()
-            .filter(|finding| finding.reportable)
-        {
+
+    report.push_str("\n## Findings Register\n\n| ID | Severity | Title | Impact | Source |\n| --- | --- | --- | --- | --- |\n");
+    if accepted_findings.is_empty() {
+        report.push_str("| none | n/a | No accepted reportable findings yet | n/a | n/a |\n");
+    } else {
+        for (contribution, finding) in &accepted_findings {
             report.push_str(&format!(
-                "### {}\n\nSeverity: `{}`\n\nImpact: `{}`\n\nEvidence:\n{}\n\n",
+                "| {} | {} | {} | {} | `{}` |\n",
+                markdown_table_cell(&finding.id),
+                markdown_table_cell(&finding.severity),
+                markdown_table_cell(&finding.title),
+                markdown_table_cell(
+                    finding
+                        .impact
+                        .as_deref()
+                        .unwrap_or("evidence-backed coverage")
+                ),
+                contribution.receipt_hash
+            ));
+        }
+    }
+
+    report.push_str("\n## Accepted Findings\n\n");
+    if accepted_findings.is_empty() {
+        report.push_str("No accepted reportable findings are included in this bundle.\n\n");
+    } else {
+        for (contribution, finding) in &accepted_findings {
+            report.push_str(&format!(
+                "### {} ({})\n\nSeverity: `{}`\n\nStatus: `{}`\n\nImpact: {}\n\nEvidence:\n{}\n\nReceipt: `{}`\n\n",
+                finding.id,
                 finding.title,
                 finding.severity,
+                finding.status,
                 finding.impact.as_deref().unwrap_or("not declared"),
                 finding
                     .evidence
                     .iter()
                     .map(|item| format!("- {item}"))
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("\n"),
+                contribution.receipt_hash
             ));
         }
     }
-    report.push_str("\n## Coverage Evidence\n\n");
+
+    report.push_str("## Coverage And Negative Findings\n\n");
     for contribution in &accepted_contributions {
         report.push_str(&format!(
-            "### Contribution `{}`\n\n{}\n\n",
-            contribution.contribution_id, contribution.notes_markdown
+            "### {} / `{}`\n\n{}\n\n",
+            work_unit_title(snapshot, &contribution.work_unit_id),
+            contribution.contribution_id,
+            contribution.notes_markdown
         ));
-        for coverage in &contribution.coverage {
+        if !contribution.coverage.is_empty() {
+            report.push_str("| Area | Status | Evidence |\n| --- | --- | --- |\n");
+            for coverage in &contribution.coverage {
+                report.push_str(&format!(
+                    "| {} | `{}` | {} |\n",
+                    markdown_table_cell(&coverage.area),
+                    coverage.status,
+                    markdown_table_cell(&coverage.evidence.join("; "))
+                ));
+            }
+            report.push('\n');
+        }
+    }
+
+    report.push_str("## Non-reportable, Rejected, Or Duplicate Leads\n\n");
+    let mut appendix_rows = 0usize;
+    for contribution in &accepted_contributions {
+        for finding in contribution
+            .findings
+            .iter()
+            .filter(|finding| !finding.reportable)
+        {
+            appendix_rows += 1;
             report.push_str(&format!(
-                "- {}: `{}` ({})\n",
-                coverage.area,
-                coverage.status,
-                coverage.evidence.join("; ")
+                "- `{}` / `{}`: {} (`{}`) from `{}`.\n",
+                finding.id,
+                finding.severity,
+                finding.title,
+                finding.status,
+                contribution.receipt_hash
             ));
         }
-        report.push('\n');
     }
-    report.push_str("\n## Rejected / Duplicate / Non-reportable Leads\n\n");
     for contribution in &rejected_contributions {
+        appendix_rows += 1;
         report.push_str(&format!(
             "- Contribution `{}` remains appendix-only. Receipt `{}`.\n",
             contribution.contribution_id, contribution.receipt_hash
         ));
         for finding in &contribution.findings {
             report.push_str(&format!(
-                "  - {}: {} (`{}`)\n",
+                "  - `{}`: {} (`{}`)\n",
                 finding.id, finding.title, finding.status
             ));
         }
     }
-    report.push_str("\n## Node Contribution Appendix\n\n");
+    if appendix_rows == 0 {
+        report.push_str("No rejected, duplicate, or non-reportable leads were recorded.\n");
+    }
+
+    report.push_str("\n## Runtime And Receipt Appendix\n\n");
     for contribution in &snapshot.contributions {
         report.push_str(&format!(
-            "- `{}` by `{}` using `{}` / `{}`. Receipt: `{}`.\n",
+            "- `{}` by `{}` using `{}` / `{}`. Work unit: `{}`. Receipt: `{}`. Skill: `{}`. Output: `{}`.\n",
             contribution.contribution_id,
             contribution.worker_agent_id,
             contribution.runtime.adapter,
             contribution.runtime.model,
-            contribution.receipt_hash
+            work_unit_title(snapshot, &contribution.work_unit_id),
+            contribution.receipt_hash,
+            contribution.runtime.skill_hash.as_deref().unwrap_or("not recorded"),
+            contribution.runtime.output_hash.as_deref().unwrap_or("not recorded")
         ));
     }
-    report.push_str("\n## Receipt Appendix\n\n");
-    for verification in &snapshot.verifications {
-        report.push_str(&format!(
-            "- Verification `{}`: `{}` / `{}` targeting `{}`.\n",
-            verification.verification_id,
-            verification.decision,
-            verification.reason_code,
-            verification.target_contribution_id
-        ));
-    }
+
     report.push_str("\n## Credit Allocation Summary\n\n| Receiver | Total ATP Credits | Source |\n| --- | ---: | --- |\n");
-    for credit in &snapshot.credits {
-        report.push_str(&format!(
-            "| `{}` | {} | `{}` |\n",
-            credit.receiver_agent_id, credit.total, credit.contribution_receipt_hash
-        ));
+    if snapshot.credits.is_empty() {
+        report.push_str("| none | 0 | no accepted verifier receipt yet |\n");
+    } else {
+        for credit in &snapshot.credits {
+            report.push_str(&format!(
+                "| `{}` | {} | `{}` |\n",
+                credit.receiver_agent_id, credit.total, credit.contribution_receipt_hash
+            ));
+        }
     }
+    report.push_str(&format!(
+        "\n## Report Integrity\n\nThis report contains {} contribution{}, {} verifier decision{}, and {} credit allocation{}. It is generated from local SQLite state and portable JSON artifacts; it does not invent missing external receipts.\n",
+        snapshot.contributions.len(),
+        plural(snapshot.contributions.len()),
+        verification_count,
+        plural(verification_count),
+        snapshot.credits.len(),
+        plural(snapshot.credits.len())
+    ));
     report
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
+fn markdown_table_cell(value: &str) -> String {
+    value
+        .replace('|', "\\|")
+        .replace('\n', "<br>")
+        .trim()
+        .to_string()
+}
+
+fn work_unit_title(snapshot: &CampaignReportSnapshot, work_unit_id: &str) -> String {
+    snapshot
+        .work_units
+        .iter()
+        .find(|unit| unit.work_unit_id == work_unit_id)
+        .map(|unit| unit.title.clone())
+        .unwrap_or_else(|| work_unit_id.to_string())
 }
 
 pub fn validate_campaign(campaign: &ProtocolAuditCampaign) -> Result<(), String> {
@@ -1072,7 +1229,7 @@ mod tests {
         };
         let report = final_report_markdown(&snapshot);
         let findings_section = report
-            .split("## Rejected / Duplicate / Non-reportable Leads")
+            .split("## Non-reportable, Rejected, Or Duplicate Leads")
             .next()
             .unwrap();
         assert!(findings_section.contains("Accepted issue"));

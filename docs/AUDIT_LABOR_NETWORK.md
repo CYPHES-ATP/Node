@@ -1,6 +1,6 @@
 # CYPHES Audit Labor Network
 
-Status: v0.1 developer preview
+Status: v0.4 developer preview
 
 CYPHES is a protocol-facing autonomous audit labor network built on ATP. The
 network coordinates scoped security work, records useful labor as signed
@@ -37,7 +37,7 @@ or verifiable artifact.
 
 ## Work Unit Lifecycle
 
-Work units are smaller, auditable pieces of a campaign. The default v0.1 work
+Work units are smaller, auditable pieces of a campaign. The default v0.4 work
 units are:
 
 - scope mapping;
@@ -45,11 +45,15 @@ units are:
 - dependency and configuration review;
 - DeFi exploit-class pass;
 - finding validation;
+- peer verification;
 - final report section.
 
-Future adapters can add work units for runnable PoC attempts, invariant
-hypothesis testing, duplicate/known-issue checks, peer verification, or protocol
-specific checklist items.
+The v0.4 `Run Audit Pipeline` command runs the professional local pipeline in
+order, signs each pass separately, feeds prior pass summaries into later model
+calls, and leaves peer verification as the quality gate. Future adapters can
+make each work unit independently claimable by different specialized nodes and
+can add runnable PoC attempts, invariant hypothesis testing,
+duplicate/known-issue checks, or protocol-specific checklist items.
 
 ## Contributor Roles
 
@@ -66,15 +70,16 @@ can contain:
 - runtime descriptor;
 - worker ATP signature.
 
-The current desktop command runs the versioned CYPHES audit skill against a
-local model provider. The UI supports LM Studio and Ollama, hides default local
-endpoints, does not collect API keys, and records progress plus tokens/sec while
-generation is running.
+The current desktop command runs the versioned CYPHES v0.4 audit skill against
+a local model provider. The UI supports LM Studio and Ollama, hides default
+local endpoints, does not collect API keys, and records progress plus
+tokens/sec while generation is running.
 
-The signed contribution receipt records runtime provider, model, endpoint
-class, skill hash, input hash, output hash, artifact hashes, and measured
-tokens/sec. OpenClaw/Hermes remains the next advanced runtime adapter for nodes
-that want external tool orchestration beyond a local model endpoint.
+Each signed contribution receipt records runtime provider, model, endpoint
+class, skill hash, input hash, output hash, artifact hashes, measured
+tokens/sec, and the work-unit identity. OpenClaw/Hermes remains the next
+advanced runtime adapter for nodes that want external tool orchestration beyond
+a local model endpoint.
 
 ## Verifier Roles
 
@@ -117,7 +122,7 @@ Credit buckets:
 - finding credit for valid issues;
 - bonus allocation placeholder for bounty-eligible confirmed bugs.
 
-The v0.1 scoring model is intentionally simple. It uses base work-unit points,
+The v0.4 scoring model is intentionally simple. It uses base work-unit points,
 evidence quality, verifier confidence, model multiplier, and a penalty for
 rejected or non-reportable output. The formula is deterministic so contributors
 can audit credit allocation from the receipt data.
@@ -129,7 +134,7 @@ not integrate with Immunefi, HackerOne, Code4rena, Sherlock, Hats, or direct
 protocol payout systems yet.
 
 Confirmed bounty findings can later receive bonus allocation or split logic, but
-v0.1 only records the placeholder. No UI should imply that ATP Credits are
+v0.4 only records the placeholder. No UI should imply that ATP Credits are
 redeemable bounty payouts.
 
 ## Final Report Bundle
@@ -146,10 +151,11 @@ receipts/
 manifest.json
 ```
 
-`report.md` contains executive summary, scope, methodology, completed work
-units, accepted findings, rejected/duplicate/non-reportable leads, coverage
-evidence, node contribution appendix, receipt appendix, and credit allocation
-summary.
+`report.md` contains document control, executive summary, scope and limits,
+methodology, audit pass matrix, evidence arbitration, findings register,
+accepted findings, coverage and negative findings, rejected/duplicate/
+non-reportable leads, runtime and receipt appendix, report integrity, and credit
+allocation summary.
 
 `findings.json` includes accepted contribution findings only. Rejected,
 duplicate, and non-reportable leads belong in the appendix and supporting JSON,
@@ -181,6 +187,7 @@ ERC-20 or escrow settlement should be added only after the network has:
 ## What Is Still Next
 
 - Network-wide campaign and work-unit discovery.
+- Independently claimable remote work units for specialized nodes.
 - OpenClaw/Hermes advanced audit runtime execution.
 - Web/API-only GitHub repository reads at pinned commits.
 - Verifier queues and challenge windows.

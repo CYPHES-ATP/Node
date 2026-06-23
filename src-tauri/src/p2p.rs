@@ -256,7 +256,7 @@ pub async fn spawn_swarm(
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
             let identify = identify::Behaviour::new(
                 identify::Config::new(ATP_PROTOCOL.to_string(), key.public())
-                    .with_agent_version("CYPHES/0.2.1-dev".to_string())
+                    .with_agent_version(format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
                     .with_push_listen_addr_updates(true),
             );
             Ok(AgentBehaviour {

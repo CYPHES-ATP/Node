@@ -16,7 +16,11 @@
 
 ## Download
 
-The current downloadable preview is for Apple Silicon Macs:
+The current source preview is **CYPHES v0.4.0-dev**. It adds the professional
+multi-pass audit pipeline described below. A packaged v0.4 DMG should be cut
+after two-node QA.
+
+The latest downloadable Apple Silicon developer preview is:
 
 - [Download CYPHES v0.2.5-dev](https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.5-dev)
 
@@ -36,11 +40,11 @@ code, writes five audit artifacts inside the granted namespace, and returns a
 signed result. The worker then emits a signed Proof of Cognition after
 requester approval.
 
-The desktop app also includes the first local version of the audit labor
-network: protocols can create a pinned audit campaign, CYPHES decomposes it
-into work units, nodes can record signed contributions, verifiers can accept or
-reject them, and the app can export a final report bundle generated only from
-accepted receipts.
+The desktop app also includes the v0.4 local audit labor network: protocols can
+create a pinned audit campaign, CYPHES decomposes it into professional audit
+passes, worker nodes run the local-model audit pipeline, verifiers accept or
+reject signed contributions, and the app exports a final report bundle
+generated only from accepted receipts.
 
 ## Verified Transaction
 
@@ -96,14 +100,19 @@ Artifact Two independently returns:
 - Deterministic audit work units for scope mapping, repository inventory,
   dependency/config review, DeFi exploit-class review, finding validation, and
   final report sections.
-- Local-model `Run Audit Skill` execution through LM Studio or Ollama with
+- Local-model `Run Audit Pipeline` execution through LM Studio or Ollama with
   hidden local endpoints, model discovery, progress events, tokens/sec
-  measurement, skill hash, input hash, output hash, and signed contribution
-  artifacts.
+  measurement, v0.4 skill hash, input hash, output hash, and signed
+  contribution artifacts for each audit pass.
+- Professional v0.4 audit passes for scope mapping, repository inventory,
+  dependency/config review, smart-contract exploit-class review, finding
+  validation, and final report synthesis.
 - Signed node contributions and signed verifier decisions.
 - Receipt-backed ATP Credits issued only after accepted verification results.
-- Final audit report bundle export with report markdown, findings,
-  contributions, verifications, credits, receipt notes, and manifest.
+- Final audit report bundle export with document control, methodology, audit
+  pass matrix, evidence arbitration, findings register, coverage and negative
+  findings, non-reportable/rejected lead appendix, runtime/receipt appendix,
+  credit summary, and manifest.
 - Portable Artifact Two-compatible receipt bundles under
   `~/.cyphes/receipts/<transaction-id>/`.
 - A deployable combined relay/rendezvous service with one-node and automatic
@@ -121,8 +130,8 @@ Artifact Two independently returns:
   not yet isolated in a hardened OS container or VM.
 - No escrow, token transfer, release, refund, or dispute adapter. ATP Credits
   are off-chain receipt-backed accounting only.
-- No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Skill` path is
-  local-model-only through LM Studio or Ollama.
+- No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Pipeline` path
+  is local-model-only through LM Studio or Ollama.
 - No claim that local model output is automatically a valid vulnerability.
   Findings must be backed by signed artifacts and accepted verifier receipts
   before they appear in final reports.

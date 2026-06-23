@@ -7,9 +7,9 @@ use crate::{
         agent_id, create_signed_envelope, create_signed_envelope_with_expiry, now_rfc3339, AtpVerb,
     },
     audit_labor::{
-        signed_contribution, signed_verification, AuditFinding, CampaignReportSnapshot,
-        ContributionArtifact, CoverageItem, CreditSummary, NodeContribution, ProtocolAuditCampaign,
-        RuntimeDescriptor, VerificationEvidence,
+        signed_contribution, signed_verification, AuditFinding, AuditWorkUnit,
+        CampaignReportSnapshot, ContributionArtifact, CoverageItem, CreditSummary,
+        NodeContribution, ProtocolAuditCampaign, RuntimeDescriptor, VerificationEvidence,
     },
     audit_profile::{is_git_commit_sha, AuditContract, ReceiptApproval, RepositoryTarget},
     audit_runtime::{
@@ -22,7 +22,7 @@ use crate::{
         campaign_id_for_transaction, data_dir, now_millis, AtpStore, AuditEventBody, AuditJob,
         AuditJobPayload, LegacyAuditJob, RepositorySummary,
     },
-    worker::{create_repository_leases, execute_repository_audit},
+    worker::{create_repository_leases, execute_pipeline_audit_result, execute_repository_audit},
 };
 
 #[derive(Debug, Serialize)]
@@ -225,7 +225,7 @@ pub async fn record_campaign_contribution(
 ) -> Result<NodeContribution, String> {
     let (keypair, _) = node_runtime(&state)?;
     let note = if notes_markdown.trim().is_empty() {
-        "Manual coverage contribution. Use Run Audit Skill with LM Studio or Ollama for local model execution.".to_string()
+        "Manual coverage contribution. Use Run Audit Pipeline with LM Studio or Ollama for local model execution.".to_string()
     } else {
         notes_markdown
     };
@@ -287,7 +287,16 @@ pub async fn run_campaign_audit_skill(
         .into_iter()
         .find(|unit| unit.work_unit_id == work_unit_id)
         .ok_or_else(|| "Campaign work unit not found".to_string())?;
-    let output = run_local_audit_skill(&app, &campaign, &work_unit, &provider, &model).await?;
+    let prior_contributions = snapshot.contributions;
+    let output = run_local_audit_skill(
+        &app,
+        &campaign,
+        &work_unit,
+        &provider,
+        &model,
+        &prior_contributions,
+    )
+    .await?;
     let contribution = signed_contribution(
         &keypair,
         campaign.campaign_id.clone(),
@@ -302,6 +311,24 @@ pub async fn run_campaign_audit_skill(
     let contribution = store.record_contribution(&contribution)?;
     let _ = app.emit("audit:labor_changed", ());
     Ok(contribution)
+}
+
+#[tauri::command]
+pub async fn run_campaign_audit_pipeline(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+    provider: String,
+    model: String,
+) -> Result<Vec<NodeContribution>, String> {
+    let (keypair, _) = node_runtime(&state)?;
+    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    let contributions =
+        run_professional_audit_pipeline(&app, &store, &keypair, snapshot, &provider, &model)
+            .await?;
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(contributions)
 }
 
 #[tauri::command]
@@ -342,7 +369,15 @@ pub async fn run_accepted_audit_skill(
         })
         .cloned()
         .ok_or_else(|| "Campaign has no open work units.".to_string())?;
-    let output = run_local_audit_skill(&app, &campaign, &work_unit, &provider, &model).await?;
+    let output = run_local_audit_skill(
+        &app,
+        &campaign,
+        &work_unit,
+        &provider,
+        &model,
+        &snapshot.contributions,
+    )
+    .await?;
     let contribution = signed_contribution(
         &keypair,
         campaign.campaign_id.clone(),
@@ -368,9 +403,13 @@ pub async fn run_accepted_audit_skill(
         .ok_or_else(|| "routed audit has no contract hash".to_string())?;
     let contract = store.get_contract(&job.transaction_id)?;
     let leases = store.get_leases(&job.transaction_id)?;
-    let result =
-        execute_repository_audit(&keypair, &contract, &contract_hash, &leases, &data_dir()?)
-            .await?;
+    let result = execute_pipeline_audit_result(
+        &keypair,
+        &contract,
+        &contract_hash,
+        &leases,
+        std::slice::from_ref(&contribution),
+    )?;
     store.save_execution_result(&result)?;
     sender
         .send(SwarmCommand::SendExecutionResult {
@@ -381,6 +420,164 @@ pub async fn run_accepted_audit_skill(
     let _ = app.emit("audit:labor_changed", ());
     let _ = app.emit("atp:jobs_changed", ());
     Ok(contribution)
+}
+
+#[tauri::command]
+pub async fn run_accepted_audit_pipeline(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    job_id: String,
+    provider: String,
+    model: String,
+) -> Result<Vec<NodeContribution>, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let worker_agent_id = agent_id(&keypair.public());
+    let job = store.get_job(&job_id)?;
+    if job.worker_agent_id.as_deref() != Some(worker_agent_id.as_str()) {
+        return Err("only the selected worker can execute this audit".to_string());
+    }
+    if job.status != "routed" {
+        return Err("the requester must issue an active context lease first".to_string());
+    }
+
+    let campaign_id = campaign_id_for_transaction(&job.transaction_id);
+    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    let contributions =
+        run_professional_audit_pipeline(&app, &store, &keypair, snapshot, &provider, &model)
+            .await?;
+    for contribution in &contributions {
+        sender
+            .send(SwarmCommand::SendContribution {
+                contribution: contribution.clone(),
+                audience: job.requester_agent_id.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+    }
+
+    let contract_hash = job
+        .contract_hash
+        .clone()
+        .ok_or_else(|| "routed audit has no contract hash".to_string())?;
+    let contract = store.get_contract(&job.transaction_id)?;
+    let leases = store.get_leases(&job.transaction_id)?;
+    let result = execute_pipeline_audit_result(
+        &keypair,
+        &contract,
+        &contract_hash,
+        &leases,
+        &contributions,
+    )?;
+    store.save_execution_result(&result)?;
+    sender
+        .send(SwarmCommand::SendExecutionResult {
+            result,
+            audience: contract.requester_agent_id,
+        })
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("audit:labor_changed", ());
+    let _ = app.emit("atp:jobs_changed", ());
+    Ok(contributions)
+}
+
+async fn run_professional_audit_pipeline(
+    app: &AppHandle,
+    store: &AtpStore,
+    keypair: &libp2p::identity::Keypair,
+    snapshot: CampaignReportSnapshot,
+    provider: &str,
+    model: &str,
+) -> Result<Vec<NodeContribution>, String> {
+    if model.trim().is_empty() {
+        return Err("Select a local model before running the audit pipeline.".to_string());
+    }
+    let campaign = snapshot.campaign.clone();
+    let mut prior_contributions = snapshot.contributions.clone();
+    let work_units = professional_pipeline_work_units(&snapshot);
+    if work_units.is_empty() {
+        return Err("Campaign has no pipeline work units.".to_string());
+    }
+
+    let mut contributions = Vec::new();
+    for work_unit in work_units {
+        let output = run_local_audit_skill(
+            app,
+            &campaign,
+            &work_unit,
+            provider,
+            model,
+            &prior_contributions,
+        )
+        .await?;
+        let contribution = signed_contribution(
+            keypair,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id,
+            output.runtime,
+            output.notes_markdown,
+            output.findings,
+            output.artifacts,
+            output.coverage,
+            output.commands,
+        )?;
+        let contribution = store.record_contribution(&contribution)?;
+        prior_contributions.push(contribution.clone());
+        contributions.push(contribution);
+    }
+    Ok(contributions)
+}
+
+fn professional_pipeline_work_units(snapshot: &CampaignReportSnapshot) -> Vec<AuditWorkUnit> {
+    let contributed = snapshot
+        .contributions
+        .iter()
+        .map(|contribution| contribution.work_unit_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let is_smart_contract_scope = snapshot
+        .campaign
+        .scope_text
+        .to_ascii_lowercase()
+        .contains(".sol")
+        || snapshot
+            .work_units
+            .iter()
+            .any(|unit| unit.kind == "defi-exploit-class-pass");
+    let mut kinds = vec![
+        "scope-mapping",
+        "repo-inventory",
+        "dependency-config-review",
+    ];
+    if is_smart_contract_scope {
+        kinds.push("defi-exploit-class-pass");
+    }
+    kinds.extend(["finding-validation", "final-report-section"]);
+
+    let selected = kinds
+        .iter()
+        .filter_map(|kind| {
+            snapshot
+                .work_units
+                .iter()
+                .find(|unit| {
+                    unit.kind == *kind && !contributed.contains(unit.work_unit_id.as_str())
+                })
+                .cloned()
+        })
+        .collect::<Vec<_>>();
+    if !selected.is_empty() {
+        return selected;
+    }
+
+    kinds
+        .iter()
+        .filter_map(|kind| {
+            snapshot
+                .work_units
+                .iter()
+                .find(|unit| unit.kind == *kind)
+                .cloned()
+        })
+        .collect()
 }
 
 #[tauri::command]

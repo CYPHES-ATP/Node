@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-Last reviewed: June 22, 2026
+Last reviewed: June 23, 2026
 
 ## Conformance Position
 
@@ -9,13 +9,14 @@ L2-style signed context leases. It completes and independently verifies one
 zero-value work order, but it is not a full implementation of every ATP
 profile, terminal path, settlement rail, or internet discovery mechanism.
 
-The product layer now also includes a local `Run Audit Skill` audit-labor
-slice. Protocol audit campaigns can be created from a pinned repository and
-scope, decomposed into work units, completed by signed node contributions,
-accepted or rejected by signed verifier decisions, assigned receipt-backed ATP
-Credits, and exported as a final markdown report bundle. This is local
-persistence and receipt accounting, not global campaign discovery, token
-settlement, or autonomous OpenClaw/Hermes execution yet.
+The product layer now also includes a local v0.4 `Run Audit Pipeline`
+audit-labor slice. Protocol audit campaigns can be created from a pinned
+repository and scope, decomposed into professional work units, completed by
+multi-pass signed node contributions, accepted or rejected by signed verifier
+decisions, assigned receipt-backed ATP Credits, and exported as a professional
+markdown report bundle. This is local persistence and receipt accounting, not
+global campaign discovery, token settlement, or autonomous OpenClaw/Hermes
+execution yet.
 
 The verified path is:
 
@@ -88,7 +89,8 @@ an ATP v0.3 wire verb.
 | Signed verifier result object | Implemented locally |
 | ATP Credit allocation from accepted receipts | Implemented locally |
 | Rejected/duplicate/non-reportable lead appendix | Implemented locally |
-| Final markdown report bundle export | Implemented locally |
+| v0.4 multi-pass audit pipeline | Implemented locally |
+| Professional markdown report bundle export | Implemented locally |
 | LM Studio local model runtime | Implemented locally |
 | Ollama local model runtime | Implemented locally |
 | Runtime progress and tokens/sec events | Implemented locally |

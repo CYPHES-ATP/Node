@@ -99,7 +99,7 @@ pub fn export_campaign_report_bundle_to(
             "acceptedContributionCount": accepted_ids.len(),
             "creditAllocationCount": snapshot.credits.len(),
             "files": manifest_entries,
-            "generatedBy": "CYPHES/0.2.1-dev",
+            "generatedBy": format!("CYPHES/{}", env!("CARGO_PKG_VERSION")),
         }),
     )?;
 
@@ -173,7 +173,7 @@ pub fn export_receipt_bundle_to(
             "receiptHash": receipt.receipt_hash,
             "eventRoot": receipt.event_root,
             "artifactCount": result.artifacts.len(),
-            "generatedBy": "CYPHES/0.2.1-dev",
+            "generatedBy": format!("CYPHES/{}", env!("CARGO_PKG_VERSION")),
         }),
     )?;
 
