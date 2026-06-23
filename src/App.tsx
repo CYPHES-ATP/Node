@@ -2,13 +2,11 @@ import { listen } from "@tauri-apps/api/event";
 import { type CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
-  Cpu,
   FileArchive,
   Gauge,
   Github,
   Link,
   LoaderCircle,
-  RadioTower,
   ReceiptText,
   ShieldCheck,
   Trophy,
@@ -223,7 +221,6 @@ function AppContent() {
   const runtimeProviderLabel = runtimeProvider === "ollama" ? "Ollama" : "LM Studio";
   const currentTokensPerSecond = latestRuntimeProgress?.tokensPerSecond || 0;
   const currentProgress = latestRuntimeProgress?.progress || 0;
-  const speedRotation = Math.min(132, Math.max(-132, -132 + currentTokensPerSecond * 11));
   const pendingReceiptMeter =
     latestRuntimeProgress && latestRuntimeProgress.progress < 100
       ? Math.max(1, Math.round(latestRuntimeProgress.progress * 1.25))
@@ -721,76 +718,63 @@ function AppContent() {
       <TitleBar />
 
       <main>
-        <section className="runtime-cockpit" aria-label="Audit runtime cockpit">
-          <div className="cockpit-copy">
-            <span className="eyebrow">Audit Runtime</span>
-            <h1>Local model command deck</h1>
-            <p>CYPHES uses the model server already running on this Mac. No API key. No remote inference.</p>
-            <div className="runtime-selectors">
-              <label>
-                Provider
-                <select
-                  onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
-                  value={runtimeProvider}
-                >
-                  <option value="lmstudio">LM Studio</option>
-                  <option value="ollama">Ollama</option>
-                </select>
-              </label>
-              <label>
-                Model
-                <select
-                  disabled={runtimeModels.length === 0}
-                  onChange={(event) => setRuntimeModel(event.currentTarget.value)}
-                  value={runtimeModel}
-                >
-                  {runtimeModels.length === 0 ? (
-                    <option value="">No models detected</option>
-                  ) : (
-                    runtimeModels.map((model) => (
-                      <option key={model} value={model}>{model}</option>
-                    ))
-                  )}
-                </select>
-              </label>
+        <section className="runtime-terminal" aria-label="Runtime terminal">
+          <div className="terminal-controls">
+            <label>
+              <span>Provider</span>
+              <select
+                onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
+                value={runtimeProvider}
+              >
+                <option value="lmstudio">LM Studio</option>
+                <option value="ollama">Ollama</option>
+              </select>
+            </label>
+            <label>
+              <span>Model</span>
+              <select
+                disabled={runtimeModels.length === 0}
+                onChange={(event) => setRuntimeModel(event.currentTarget.value)}
+                value={runtimeModel}
+              >
+                {runtimeModels.length === 0 ? (
+                  <option value="">No model</option>
+                ) : (
+                  runtimeModels.map((model) => (
+                    <option key={model} value={model}>{model}</option>
+                  ))
+                )}
+              </select>
+            </label>
+          </div>
+
+          <div className="terminal-status">
+            <span>{runtimePhase}</span>
+          </div>
+
+          <div className="terminal-metrics">
+            <div>
+              <Gauge size={15} />
+              <span>Tokens/sec</span>
+              <strong>{currentTokensPerSecond.toFixed(1)}</strong>
             </div>
-            <div className="runtime-phase">
-              <span>{runtimePhase}</span>
-              <strong>{currentProgress ? `${currentProgress}%` : runtimeModel ? "Armed" : "Offline"}</strong>
+            <div>
+              <Trophy size={15} />
+              <span>ATP</span>
+              <strong>{creditSummary.total + pendingReceiptMeter}</strong>
             </div>
-            <div className="progress-track cockpit-track">
-              <span style={{ width: `${currentProgress}%` }} />
+            <div>
+              <span>Run</span>
+              <strong>{currentProgress ? `${currentProgress}%` : runtimeModel ? "armed" : "offline"}</strong>
+            </div>
+            <div>
+              <span>Net</span>
+              <strong>{networkInfo?.rendezvous_registered ? "linked" : networkInfo?.relay_connected ? "sync" : "idle"}</strong>
             </div>
           </div>
 
-          <div className="speedometer" style={{ "--needle": `${speedRotation}deg` } as CSSProperties}>
-            <div className="speed-ring">
-              <span className="scanline" />
-              <div className="needle" />
-              <div className="speed-core">
-                <Gauge size={18} />
-                <span>Tokens/sec</span>
-                <strong>{currentTokensPerSecond.toFixed(1)}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="credit-console">
-            <div>
-              <Trophy size={16} />
-              <span>ATP earned</span>
-              <strong>{creditSummary.total}</strong>
-            </div>
-            <div>
-              <Cpu size={16} />
-              <span>Receipt meter</span>
-              <strong>{pendingReceiptMeter ? `+${pendingReceiptMeter}` : "idle"}</strong>
-            </div>
-            <div>
-              <RadioTower size={16} />
-              <span>Network</span>
-              <strong>{networkInfo?.rendezvous_registered ? "online" : networkInfo?.relay_connected ? "syncing" : "standby"}</strong>
-            </div>
+          <div className="terminal-progress">
+            <span style={{ width: `${currentProgress}%` } as CSSProperties} />
           </div>
         </section>
 
@@ -810,14 +794,13 @@ function AppContent() {
               {connecting ? "Dialing" : "Connect"}
             </button>
           </form>
+          {relayAddress ? (
+            <div className="share-address">
+              <span>Your relay address</span>
+              <code>{relayAddress}</code>
+            </div>
+          ) : null}
         </details>
-
-        {relayAddress ? (
-          <div className="share-address">
-            <span>Your relay address</span>
-            <code>{relayAddress}</code>
-          </div>
-        ) : null}
 
         {nodeError ? <div className="error-banner">Node error: {nodeError}</div> : null}
         {!isTauriRuntime() ? (
@@ -890,7 +873,6 @@ function AppContent() {
               <span>02</span>
               <div>
                 <h2>ATP transactions</h2>
-                <p>Existing repository-audit flow stays intact.</p>
               </div>
             </div>
 
@@ -948,7 +930,6 @@ function AppContent() {
             <span>03</span>
             <div>
               <h2>Audit labor network</h2>
-              <p>Campaigns, work units, signed contributions, verifier decisions, and ATP Credits.</p>
             </div>
           </div>
 
