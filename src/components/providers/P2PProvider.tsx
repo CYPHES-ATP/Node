@@ -66,7 +66,7 @@ export function P2PProvider({ children }: P2PProviderProps) {
           }),
           listen<{ bundlePath: string }>("atp:receipt_committed", (event) => {
             void p2p.loadAudits();
-            setNotice(`Proof of Cognition exported to ${event.payload.bundlePath}.`);
+            setNotice(`ATP transaction receipt exported to ${event.payload.bundlePath}.`);
           }),
           listen("atp:result_received", () => {
             void p2p.loadAudits();

@@ -937,8 +937,9 @@ function AppContent() {
               campaigns.map((campaign) => {
                 const snapshot = campaignSnapshots[campaign.campaignId];
                 const progress = runtimeProgress[campaign.campaignId];
+                const contributions = snapshot?.contributions.length || 0;
                 const accepted = snapshot?.verifications.filter((item) => item.decision === "accepted").length || 0;
-                const unverified = (snapshot?.contributions.length || 0) - (snapshot?.verifications.length || 0);
+                const unverified = contributions - (snapshot?.verifications.length || 0);
                 return (
                   <article className="campaign-card" key={campaign.campaignId}>
                     <div>
@@ -950,9 +951,15 @@ function AppContent() {
                       <p>{campaign.scopeText}</p>
                       <div className="repo-meta">
                         <span>{snapshot?.workUnits.length || 0} work units</span>
-                        <span>{snapshot?.contributions.length || 0} contributions</span>
+                        <span>{contributions} contributions</span>
                         <span>{accepted} accepted</span>
-                        <span>{unverified > 0 ? `${unverified} unverified` : "verified queue clear"}</span>
+                        <span>
+                          {contributions === 0
+                            ? "no local-model audit yet"
+                            : unverified > 0
+                              ? `${unverified} unverified`
+                              : "verified queue clear"}
+                        </span>
                       </div>
                       {progress ? (
                         <div className="campaign-progress">
@@ -985,9 +992,14 @@ function AppContent() {
                         <ShieldCheck size={14} />
                       </button>
                       <button
-                        disabled={actionJobId === campaign.campaignId}
+                        disabled={actionJobId === campaign.campaignId || contributions === 0}
                         onClick={() => void handleExportCampaign(campaign)}
                         type="button"
+                        title={
+                          contributions === 0
+                            ? "Run Audit Skill before exporting a report bundle."
+                            : undefined
+                        }
                       >
                         Export report
                         <FileArchive size={14} />
