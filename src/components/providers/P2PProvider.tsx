@@ -56,6 +56,16 @@ export function P2PProvider({ children }: P2PProviderProps) {
             void p2p.loadProtocolCampaigns();
             setNotice(`Requester accepted audit contribution: ${event.payload.contributionId.slice(0, 22)}...`);
           }),
+          listen<{ verificationId: string; creditTotal: number }>("audit:verification_received", (event) => {
+            void p2p.loadProtocolCampaigns();
+            void p2p.refreshCreditSummary();
+            setNotice(`Verification received; ${event.payload.creditTotal} ATP Credits recorded.`);
+          }),
+          listen<{ verificationId: string; creditTotal: number }>("audit:verification_acknowledged", (event) => {
+            void p2p.loadProtocolCampaigns();
+            void p2p.refreshCreditSummary();
+            setNotice(`Worker acknowledged verification ${event.payload.verificationId.slice(0, 22)}... for ${event.payload.creditTotal} ATP Credits.`);
+          }),
           listen<AtpAck>("atp:delivery_acknowledged", (event) => {
             const state = event.payload.state || "committed";
             setNotice(`Peer verified and committed ATP state: ${state}.`);

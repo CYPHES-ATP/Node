@@ -616,6 +616,95 @@ impl AtpStore {
         Ok(allocations)
     }
 
+    pub fn record_verification_bundle(
+        &self,
+        verification: &VerificationResult,
+        allocations: &[CreditAllocation],
+    ) -> Result<Vec<CreditAllocation>, String> {
+        verify_signed_verification(verification)?;
+        let contribution = self.get_contribution(&verification.target_contribution_id)?;
+        if verification.campaign_id != contribution.campaign_id {
+            return Err("verification campaign does not match contribution".to_string());
+        }
+        if verification.decision != "accepted" && !allocations.is_empty() {
+            return Err("non-accepted verification cannot carry credit allocations".to_string());
+        }
+        for allocation in allocations {
+            if allocation.campaign_id != contribution.campaign_id
+                || allocation.contribution_id != contribution.contribution_id
+                || allocation.verification_id != verification.verification_id
+                || allocation.contribution_receipt_hash != contribution.receipt_hash
+            {
+                return Err("credit allocation does not match verification bundle".to_string());
+            }
+        }
+
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO audit_verifications
+                    (verification_id, campaign_id, target_contribution_id, verifier_agent_id,
+                     decision, verification_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    verification.verification_id,
+                    verification.campaign_id,
+                    verification.target_contribution_id,
+                    verification.verifier_agent_id,
+                    verification.decision,
+                    serde_json::to_string(verification).map_err(|error| error.to_string())?,
+                    millis_from_rfc3339(&verification.created_at)?,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        let contribution_status = match verification.decision.as_str() {
+            "accepted" | "reproduced" => "accepted",
+            "rejected" => "rejected",
+            "challenged" => "challenged",
+            "revision_requested" => "revision_requested",
+            _ => "reviewed",
+        };
+        transaction
+            .execute(
+                "UPDATE audit_contributions
+                 SET status = ?2
+                 WHERE contribution_id = ?1",
+                params![verification.target_contribution_id, contribution_status],
+            )
+            .map_err(|error| error.to_string())?;
+        update_work_unit_status(
+            &transaction,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            contribution_status,
+        )?;
+        for allocation in allocations {
+            transaction
+                .execute(
+                    "INSERT OR IGNORE INTO credit_allocations
+                        (allocation_id, campaign_id, contribution_id, verification_id,
+                         receiver_agent_id, total, allocation_json, issued_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        allocation.allocation_id,
+                        allocation.campaign_id,
+                        allocation.contribution_id,
+                        allocation.verification_id,
+                        allocation.receiver_agent_id,
+                        allocation.total as i64,
+                        serde_json::to_string(allocation).map_err(|error| error.to_string())?,
+                        millis_from_rfc3339(&allocation.issued_at)?,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(allocations.to_vec())
+    }
+
     pub fn get_contribution(&self, contribution_id: &str) -> Result<NodeContribution, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         contribution_in_connection(&connection, contribution_id)
@@ -641,6 +730,58 @@ impl AtpStore {
             .collect::<Result<Vec<CreditAllocation>, String>>()?;
         let total = allocations.iter().map(|allocation| allocation.total).sum();
         Ok(CreditSummary { total, allocations })
+    }
+
+    pub fn verification_bundles_for_worker(
+        &self,
+        worker_agent_id: &str,
+    ) -> Result<Vec<(VerificationResult, Vec<CreditAllocation>)>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let verifications = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT v.verification_json
+                     FROM audit_verifications v
+                     INNER JOIN audit_contributions c
+                        ON c.contribution_id = v.target_contribution_id
+                     WHERE c.worker_agent_id = ?1
+                     ORDER BY v.created_at, v.verification_id",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(params![worker_agent_id], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?;
+            rows.map(|row| {
+                let json = row.map_err(|error| error.to_string())?;
+                serde_json::from_str(&json).map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<VerificationResult>, String>>()?
+        };
+
+        let mut bundles = Vec::new();
+        for verification in verifications {
+            let allocations = {
+                let mut statement = connection
+                    .prepare(
+                        "SELECT allocation_json FROM credit_allocations
+                         WHERE verification_id = ?1
+                         ORDER BY issued_at, allocation_id",
+                    )
+                    .map_err(|error| error.to_string())?;
+                let rows = statement
+                    .query_map(params![verification.verification_id], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .map_err(|error| error.to_string())?;
+                rows.map(|row| {
+                    let json = row.map_err(|error| error.to_string())?;
+                    serde_json::from_str(&json).map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<CreditAllocation>, String>>()?
+            };
+            bundles.push((verification, allocations));
+        }
+        Ok(bundles)
     }
 
     pub fn campaign_report_snapshot(
@@ -2208,8 +2349,9 @@ mod tests {
     use crate::{
         atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
         audit_labor::{
-            signed_contribution, signed_verification, signed_work_unit_claim, AuditFinding,
-            ContributionArtifact, CoverageItem, RuntimeDescriptor, VerificationEvidence,
+            allocate_credits, signed_contribution, signed_verification, signed_work_unit_claim,
+            AuditFinding, ContributionArtifact, CoverageItem, RuntimeDescriptor,
+            VerificationEvidence,
         },
         audit_profile::{contract_hash, AuditContract, ReceiptApproval, RepositoryTarget},
         bundle::{export_campaign_report_bundle_to, export_receipt_bundle_to},
@@ -2681,6 +2823,78 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.claims.len(), 1);
         assert_eq!(snapshot.contributions.len(), 1);
+    }
+
+    #[test]
+    fn verification_bundles_credit_the_worker_and_are_idempotent() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "dependency-config-review")
+            .unwrap();
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id,
+            RuntimeDescriptor::deterministic_fixture(),
+            "Reviewed dependency and configuration posture with bounded evidence.".to_string(),
+            vec![],
+            vec![labor_artifact("dependency-review.md")],
+            vec![CoverageItem {
+                area: "dependency and config review".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["No repository code execution.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution).unwrap();
+        let verification = signed_verification(
+            &requester,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Contribution is bounded, signed, and useful.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+        let allocations = allocate_credits(&contribution, &verification).unwrap();
+        let worker_agent = agent_id(&worker.public());
+        let worker_total = allocations
+            .iter()
+            .filter(|allocation| allocation.receiver_agent_id == worker_agent)
+            .map(|allocation| allocation.total)
+            .sum::<u32>();
+
+        let first = store
+            .record_verification_bundle(&verification, &allocations)
+            .unwrap();
+        assert_eq!(first.len(), allocations.len());
+        let bundles = store
+            .verification_bundles_for_worker(&worker_agent)
+            .unwrap();
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].0.verification_id, verification.verification_id);
+        assert_eq!(bundles[0].1.len(), allocations.len());
+        let summary = store.credit_summary(&worker_agent).unwrap();
+        assert_eq!(summary.total, worker_total);
+
+        store
+            .record_verification_bundle(&verification, &allocations)
+            .unwrap();
+        let duplicate_summary = store.credit_summary(&worker_agent).unwrap();
+        assert_eq!(duplicate_summary.total, worker_total);
     }
 
     #[tokio::test]

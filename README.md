@@ -111,6 +111,15 @@ Artifact Two independently returns:
 - Remote worker flow: claim a work unit, run the claimed unit with LM Studio or
   Ollama on that worker's Mac, sign the contribution, and send it back to the
   requester.
+- Requester verification sends signed verification results and receipt-backed
+  ATP Credit allocations back to the contributing worker, including idempotent
+  resend when that worker reconnects.
+- Operator UI is centered on **Work Orders**: every campaign exposes each work
+  unit, status, claimant, contribution count, verifier state, and per-unit
+  claim/run controls.
+- `campaign.html` provides a separate protocol/admin console for creating
+  signed campaigns, viewing network state, ATP proof logs, receipt trails,
+  protocol events, and developer-facing ATP envelope metadata.
 - Local-model `Run Audit Pipeline` execution through LM Studio or Ollama with
   hidden local endpoints, model discovery, progress events, tokens/sec
   measurement, effective skill hash, input hash, output hash, and signed
@@ -168,6 +177,12 @@ git clone https://github.com/CYPHES-ATP/Node.git
 cd Node
 npm install
 npm run tauri dev
+```
+
+For the protocol/admin console during development, open:
+
+```text
+http://localhost:1420/campaign.html
 ```
 
 The node creates:
