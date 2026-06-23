@@ -572,14 +572,18 @@ function AppContent() {
     }
   }
 
-  async function handleClaimWorkUnit(campaign: ProtocolAuditCampaign) {
-    setActionJobId(campaign.campaignId);
+  async function handleClaimWorkUnit(campaign: ProtocolAuditCampaign, workUnitId?: string) {
+    const actionId = workUnitId ? `${campaign.campaignId}:${workUnitId}` : campaign.campaignId;
+    setActionJobId(actionId);
     try {
       const snapshot =
         campaignSnapshots[campaign.campaignId] ||
         (await refreshCampaignSnapshot(campaign.campaignId));
-      const unit = snapshot.workUnits.find((item) => item.status === "open");
+      const unit = workUnitId
+        ? snapshot.workUnits.find((item) => item.workUnitId === workUnitId)
+        : snapshot.workUnits.find((item) => item.status === "open");
       if (!unit) throw new Error("No open work unit is claimable.");
+      if (unit.status !== "open") throw new Error(`${unit.title} is not open for claim.`);
       const claim = await p2p.claimCampaignWorkUnit(campaign.campaignId, unit.workUnitId);
       await refreshCampaignSnapshot(campaign.campaignId);
       setNotice(`Claimed ${unit.title}. Claim ${claim.claimId.slice(0, 22)}... sent to requester.`);
@@ -590,8 +594,9 @@ function AppContent() {
     }
   }
 
-  async function handleRunClaimedWorkUnit(campaign: ProtocolAuditCampaign) {
-    setActionJobId(campaign.campaignId);
+  async function handleRunClaimedWorkUnit(campaign: ProtocolAuditCampaign, workUnitId?: string) {
+    const actionId = workUnitId ? `${campaign.campaignId}:${workUnitId}` : campaign.campaignId;
+    setActionJobId(actionId);
     try {
       if (!runtimeModel) {
         throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
@@ -600,7 +605,10 @@ function AppContent() {
         campaignSnapshots[campaign.campaignId] ||
         (await refreshCampaignSnapshot(campaign.campaignId));
       const claim = snapshot.claims.find(
-        (item) => item.workerAgentId === agentId && item.status === "claimed",
+        (item) =>
+          item.workerAgentId === agentId &&
+          item.status === "claimed" &&
+          (!workUnitId || item.workUnitId === workUnitId),
       );
       if (!claim) throw new Error("Claim a work unit before running it.");
       const contribution = await p2p.runClaimedWorkUnit(
@@ -757,6 +765,8 @@ function AppContent() {
     return <div className="job-outcome">{outcome}</div>;
   }
 
+  const showLegacyProtocolMechanics = false;
+
   return (
     <div className="app-shell">
       <TitleBar />
@@ -812,8 +822,8 @@ function AppContent() {
               <strong>{currentProgress ? `${currentProgress}%` : runtimeModel ? "armed" : "offline"}</strong>
             </div>
             <div>
-              <span>Net</span>
-              <strong>{networkInfo?.rendezvous_registered ? "linked" : networkInfo?.relay_connected ? "sync" : "idle"}</strong>
+              <span>Peers</span>
+              <strong>{peerCount}</strong>
             </div>
           </div>
 
@@ -853,6 +863,7 @@ function AppContent() {
           </div>
         ) : null}
 
+        {showLegacyProtocolMechanics ? (
         <div className="workspace">
           <section className="panel compose-panel">
             <div className="section-heading">
@@ -1002,12 +1013,13 @@ function AppContent() {
             </div>
           </section>
         </div>
+        ) : null}
 
         <section className="panel labor-panel">
           <div className="section-heading">
-            <span>03</span>
+            <span>Live</span>
             <div>
-              <h2>Audit labor network</h2>
+              <h2>Work Orders</h2>
             </div>
           </div>
 
@@ -1016,23 +1028,17 @@ function AppContent() {
               <div className="empty-state compact">
                 <ShieldCheck size={24} />
                 <strong>No protocol campaigns yet</strong>
-                <span>Create a campaign above to decompose it into verifiable work units.</span>
+                <span>Create a campaign from campaign.html; this app receives signed work orders.</span>
               </div>
             ) : (
               campaigns.map((campaign) => {
                 const snapshot = campaignSnapshots[campaign.campaignId];
                 const progress = runtimeProgress[campaign.campaignId];
+                const workUnits = snapshot?.workUnits || [];
                 const contributions = snapshot?.contributions.length || 0;
                 const accepted = snapshot?.verifications.filter((item) => item.decision === "accepted").length || 0;
                 const unverified = contributions - (snapshot?.verifications.length || 0);
                 const isMine = campaign.requesterAgentId === agentId;
-                const myClaim = snapshot?.claims.find(
-                  (item) => item.workerAgentId === agentId && item.status === "claimed",
-                );
-                const firstOpenUnit = snapshot?.workUnits.find((unit) => unit.status === "open");
-                const myClaimContribution = myClaim
-                  ? snapshot?.contributions.find((item) => item.workUnitId === myClaim.workUnitId && item.workerAgentId === agentId)
-                  : undefined;
                 const claimedCount = snapshot?.claims.filter((item) => item.status === "claimed").length || 0;
                 return (
                   <article className="campaign-card" key={campaign.campaignId}>
@@ -1047,7 +1053,7 @@ function AppContent() {
                         <code>{shortCommit(campaign.repository.commitSha)}</code>
                       </div>
                       <div className="repo-meta">
-                        <span>{snapshot?.workUnits.length || 0} work units</span>
+                        <span>{workUnits.length} work units</span>
                         <span>{claimedCount} claimed</span>
                         <span>{contributions} contributions</span>
                         <span>{accepted} accepted</span>
@@ -1071,6 +1077,84 @@ function AppContent() {
                           <small>{progress.tokensPerSecond ? `${progress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
                         </div>
                       ) : null}
+                      <div className="work-unit-list">
+                        {workUnits.map((unit) => {
+                          const unitContributions = snapshot?.contributions.filter(
+                            (item) => item.workUnitId === unit.workUnitId,
+                          ) || [];
+                          const contributionIds = new Set(
+                            unitContributions.map((item) => item.contributionId),
+                          );
+                          const unitVerifications = snapshot?.verifications.filter((item) =>
+                            contributionIds.has(item.targetContributionId),
+                          ) || [];
+                          const myClaim = snapshot?.claims.find(
+                            (item) =>
+                              item.workUnitId === unit.workUnitId &&
+                              item.workerAgentId === agentId &&
+                              item.status === "claimed",
+                          );
+                          const myContribution = unitContributions.find(
+                            (item) => item.workerAgentId === agentId,
+                          );
+                          const latestVerification = unitVerifications[unitVerifications.length - 1];
+                          const verifierState = latestVerification?.decision ||
+                            (unitContributions.length > 0 ? "awaiting verifier" : unit.status);
+                          const claimedBy = unit.claimedByAgentId
+                            ? truncatePeerId(unit.claimedByAgentId)
+                            : "open";
+                          const actionId = `${campaign.campaignId}:${unit.workUnitId}`;
+                          return (
+                            <div className="work-unit-row" key={unit.workUnitId}>
+                              <div className="work-unit-main">
+                                <strong>{unit.title}</strong>
+                                <span>{unit.kind}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Status</small>
+                                <span className={`unit-pill ${unit.status}`}>{unit.status}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Claimed by</small>
+                                <span>{claimedBy}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Contrib</small>
+                                <span>{unitContributions.length}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Verifier</small>
+                                <span>{verifierState}</span>
+                              </div>
+                              <div className="work-unit-action">
+                                {isMine ? (
+                                  <span>{unitContributions.length > 0 ? "reviewable" : "awaiting node"}</span>
+                                ) : unit.status === "open" ? (
+                                  <button
+                                    disabled={actionJobId === actionId}
+                                    onClick={() => void handleClaimWorkUnit(campaign, unit.workUnitId)}
+                                    type="button"
+                                  >
+                                    Claim
+                                  </button>
+                                ) : myContribution ? (
+                                  <span>{latestVerification ? latestVerification.decision : "submitted"}</span>
+                                ) : myClaim ? (
+                                  <button
+                                    disabled={actionJobId === actionId || !runtimeModel}
+                                    onClick={() => void handleRunClaimedWorkUnit(campaign, unit.workUnitId)}
+                                    type="button"
+                                  >
+                                    {runtimeModel ? "Run" : "Model"}
+                                  </button>
+                                ) : (
+                                  <span>{unit.claimedByAgentId ? "claimed" : "locked"}</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div className="campaign-actions">
                       {isMine ? (
@@ -1105,26 +1189,8 @@ function AppContent() {
                             <FileArchive size={14} />
                           </button>
                         </>
-                      ) : myClaimContribution ? (
-                        <div className="job-outcome">Contribution sent: {myClaimContribution.receiptHash.slice(0, 19)}...</div>
-                      ) : myClaim ? (
-                        <button
-                          disabled={actionJobId === campaign.campaignId || !runtimeModel}
-                          onClick={() => void handleRunClaimedWorkUnit(campaign)}
-                          type="button"
-                        >
-                          {runtimeModel ? "Run claimed unit" : "Select local model"}
-                          <ArrowRight size={14} />
-                        </button>
                       ) : (
-                        <button
-                          disabled={actionJobId === campaign.campaignId || !firstOpenUnit}
-                          onClick={() => void handleClaimWorkUnit(campaign)}
-                          type="button"
-                        >
-                          {firstOpenUnit ? "Claim work unit" : "No open units"}
-                          <ArrowRight size={14} />
-                        </button>
+                        <div className="job-outcome">Claim and run individual work units.</div>
                       )}
                     </div>
                   </article>
