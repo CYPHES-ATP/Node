@@ -32,6 +32,15 @@ export function P2PProvider({ children }: P2PProviderProps) {
             void p2p.loadProtocolCampaigns();
             void p2p.refreshCreditSummary();
           }),
+          listen<{ contributionId: string }>("audit:contribution_received", (event) => {
+            void p2p.loadProtocolCampaigns();
+            void p2p.refreshCreditSummary();
+            setNotice(`Remote audit contribution received: ${event.payload.contributionId.slice(0, 22)}...`);
+          }),
+          listen<{ contributionId: string }>("audit:contribution_acknowledged", (event) => {
+            void p2p.loadProtocolCampaigns();
+            setNotice(`Requester accepted audit contribution: ${event.payload.contributionId.slice(0, 22)}...`);
+          }),
           listen<AtpAck>("atp:delivery_acknowledged", (event) => {
             const state = event.payload.state || "committed";
             setNotice(`Peer verified and committed ATP state: ${state}.`);

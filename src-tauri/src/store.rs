@@ -5,7 +5,7 @@ use std::{
 };
 
 use base64::Engine as _;
-use chrono::DateTime;
+use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
@@ -138,6 +138,10 @@ pub struct TransactionContext {
 #[derive(Clone)]
 pub struct AtpStore {
     connection: Arc<Mutex<Connection>>,
+}
+
+pub fn campaign_id_for_transaction(transaction_id: &str) -> String {
+    format!("campaign_{transaction_id}")
 }
 
 impl AtpStore {
@@ -1514,6 +1518,7 @@ fn apply_audit_event(
                     ],
                 )
                 .map_err(|error| error.to_string())?;
+            materialize_campaign_for_job(transaction, job)?;
         }
         AuditEventBody::WorkerOffer {
             worker_agent_id,
@@ -1598,6 +1603,90 @@ fn apply_audit_event(
         }
     }
     Ok(())
+}
+
+fn materialize_campaign_for_job(
+    transaction: &Transaction<'_>,
+    job: &AuditJobPayload,
+) -> Result<(), String> {
+    let campaign_id = campaign_id_for_transaction(&job.id);
+    let exists = transaction
+        .query_row(
+            "SELECT 1 FROM protocol_audit_campaigns WHERE campaign_id = ?1",
+            params![campaign_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .is_some();
+    if exists {
+        return Ok(());
+    }
+
+    let created_at = rfc3339_from_millis(job.created_at);
+    let mut campaign = ProtocolAuditCampaign::new(
+        protocol_name_from_repository(&job.repository.full_name),
+        RepositoryTarget {
+            full_name: job.repository.full_name.clone(),
+            url: job.repository.url.clone(),
+            commit_sha: job.repository.commit_sha.clone(),
+        },
+        job.scope.join("\n"),
+        None,
+        vec![
+            "Evidence-backed repository risk".to_string(),
+            "Reportable security impact if proven".to_string(),
+        ],
+        vec![
+            "Best-practice-only notes".to_string(),
+            "Claims without reproducible evidence".to_string(),
+            "Production testing or unauthorized external interaction".to_string(),
+        ],
+        Some(format!(
+            "ATP transaction: {}. ATP Credits budget: {} {}.",
+            job.id, job.compensation, job.currency
+        )),
+        job.requester_agent_id.clone(),
+    )?;
+    campaign.campaign_id = campaign_id;
+    campaign.created_at = created_at.clone();
+    campaign.updated_at = created_at;
+    validate_campaign(&campaign)?;
+    transaction
+        .execute(
+            "INSERT INTO protocol_audit_campaigns
+                (campaign_id, campaign_json, status, requester_agent_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                campaign.campaign_id,
+                serde_json::to_string(&campaign).map_err(|error| error.to_string())?,
+                campaign.status,
+                campaign.requester_agent_id,
+                millis_from_rfc3339(&campaign.created_at)?,
+                millis_from_rfc3339(&campaign.updated_at)?,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    for work_unit in default_work_units(&campaign) {
+        insert_work_unit(transaction, &work_unit)?;
+    }
+    Ok(())
+}
+
+fn protocol_name_from_repository(full_name: &str) -> String {
+    full_name
+        .split('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(full_name)
+        .to_string()
+}
+
+fn rfc3339_from_millis(millis: u64) -> String {
+    Utc.timestamp_millis_opt(millis as i64)
+        .single()
+        .unwrap_or_else(Utc::now)
+        .to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 fn update_job_state(
@@ -1909,6 +1998,11 @@ mod tests {
             .unwrap();
         assert!(second.duplicate);
         assert_eq!(store.list_jobs().unwrap().len(), 1);
+        let campaign_id = campaign_id_for_transaction("audit-1");
+        let snapshot = store.campaign_report_snapshot(&campaign_id).unwrap();
+        assert_eq!(snapshot.campaign.repository.full_name, "bitcoin/bitcoin");
+        assert_eq!(snapshot.work_units.len(), 7);
+        assert_eq!(snapshot.contributions.len(), 0);
     }
 
     #[test]

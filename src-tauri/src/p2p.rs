@@ -13,6 +13,7 @@ use tokio::{select, sync::mpsc, time::MissedTickBehavior};
 
 use crate::{
     atp::{agent_id, create_signed_envelope, AtpAck, AtpEnvelope, AtpVerb},
+    audit_labor::NodeContribution,
     bundle::export_receipt_bundle,
     state::{P2pState, PeerInfo},
     store::{now_millis, rejection_ack, AtpStore, AuditEventBody},
@@ -59,6 +60,10 @@ pub enum SwarmCommand {
         result: SignedExecutionResult,
         audience: String,
     },
+    SendContribution {
+        contribution: NodeContribution,
+        audience: String,
+    },
     Dial(Multiaddr),
 }
 
@@ -67,6 +72,7 @@ pub enum SwarmCommand {
 enum WireRequest {
     Envelope(AtpEnvelope),
     ExecutionResult(SignedExecutionResult),
+    Contribution(NodeContribution),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +85,13 @@ enum WireResponse {
         result_hash: String,
         reason: Option<String>,
     },
+    Contribution {
+        accepted: bool,
+        campaign_id: String,
+        contribution_id: String,
+        receipt_hash: String,
+        reason: Option<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -87,6 +100,11 @@ enum PendingOutbound {
     ExecutionResult {
         transaction_id: String,
         result_hash: String,
+    },
+    Contribution {
+        campaign_id: String,
+        contribution_id: String,
+        receipt_hash: String,
     },
 }
 
@@ -321,6 +339,18 @@ pub async fn spawn_swarm(
                                 &mut outbound,
                             );
                         }
+                        SwarmCommand::SendContribution {
+                            contribution,
+                            audience,
+                        } => {
+                            send_contribution(
+                                &mut swarm,
+                                &state,
+                                contribution,
+                                &audience,
+                                &mut outbound,
+                            );
+                        }
                         SwarmCommand::Dial(address) => {
                             if let Err(error) = swarm.dial(address.clone()) {
                                 let _ = app.emit(
@@ -408,6 +438,7 @@ fn handle_swarm_event(
                             Ok(ack) => {
                                 if !ack.duplicate {
                                     let _ = app.emit("atp:jobs_changed", ());
+                                    let _ = app.emit("audit:labor_changed", ());
                                     maybe_attest(
                                         swarm,
                                         app,
@@ -466,6 +497,38 @@ fn handle_swarm_event(
                             },
                         }
                     }
+                    WireRequest::Contribution(contribution) => {
+                        let campaign_id = contribution.campaign_id.clone();
+                        let contribution_id = contribution.contribution_id.clone();
+                        let receipt_hash = contribution.receipt_hash.clone();
+                        match store.record_contribution(&contribution) {
+                            Ok(_) => {
+                                let _ = app.emit("audit:labor_changed", ());
+                                let _ = app.emit(
+                                    "audit:contribution_received",
+                                    serde_json::json!({
+                                        "campaignId": campaign_id,
+                                        "contributionId": contribution_id,
+                                        "receiptHash": receipt_hash,
+                                    }),
+                                );
+                                WireResponse::Contribution {
+                                    accepted: true,
+                                    campaign_id,
+                                    contribution_id,
+                                    receipt_hash,
+                                    reason: None,
+                                }
+                            }
+                            Err(reason) => WireResponse::Contribution {
+                                accepted: false,
+                                campaign_id,
+                                contribution_id,
+                                receipt_hash,
+                                reason: Some(reason),
+                            },
+                        }
+                    }
                 };
                 let _ = swarm
                     .behaviour_mut()
@@ -487,6 +550,7 @@ fn handle_swarm_event(
                             );
                         } else if ack.accepted {
                             let _ = app.emit("atp:jobs_changed", ());
+                            let _ = app.emit("audit:labor_changed", ());
                             let _ = app.emit("atp:delivery_acknowledged", ack);
                         } else {
                             let _ = app.emit(
@@ -521,6 +585,28 @@ fn handle_swarm_event(
                             }),
                         );
                     }
+                    WireResponse::Contribution {
+                        accepted,
+                        campaign_id,
+                        contribution_id,
+                        receipt_hash,
+                        reason,
+                    } => {
+                        let _ = app.emit(
+                            if accepted {
+                                "audit:contribution_acknowledged"
+                            } else {
+                                "atp:delivery_failed"
+                            },
+                            serde_json::json!({
+                                "peerId": peer.to_string(),
+                                "campaignId": campaign_id,
+                                "contributionId": contribution_id,
+                                "receiptHash": receipt_hash,
+                                "reason": reason,
+                            }),
+                        );
+                    }
                 }
                 if pending.is_none() {
                     let _ = app.emit(
@@ -545,6 +631,15 @@ fn handle_swarm_event(
                     transaction_id,
                     result_hash,
                 }) => (None, Some(transaction_id), Some(result_hash)),
+                Some(PendingOutbound::Contribution {
+                    campaign_id,
+                    contribution_id,
+                    receipt_hash,
+                }) => (
+                    None,
+                    Some(format!("{campaign_id}:{contribution_id}")),
+                    Some(receipt_hash),
+                ),
                 None => (None, None, None),
             };
             let _ = app.emit(
@@ -983,6 +1078,30 @@ fn send_execution_result(
             PendingOutbound::ExecutionResult {
                 transaction_id: result.transaction_id.clone(),
                 result_hash: result.result_hash.clone(),
+            },
+        );
+    }
+}
+
+fn send_contribution(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    contribution: NodeContribution,
+    audience: &str,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let peers = target_peers(state, Some(audience));
+    for peer_id in peers {
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
+        outbound.insert(
+            request_id,
+            PendingOutbound::Contribution {
+                campaign_id: contribution.campaign_id.clone(),
+                contribution_id: contribution.contribution_id.clone(),
+                receipt_hash: contribution.receipt_hash.clone(),
             },
         );
     }

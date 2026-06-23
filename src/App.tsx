@@ -1,10 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
-  Check,
   Cpu,
-  Database,
   FileArchive,
   Gauge,
   Github,
@@ -14,7 +12,6 @@ import {
   ReceiptText,
   ShieldCheck,
   Trophy,
-  Users,
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { P2PProvider } from "@/components/providers/P2PProvider";
@@ -155,6 +152,38 @@ function deliveryLabel(job: AuditJob) {
   return "Signed locally, no peer receipt";
 }
 
+function scopeLine(scopeText: string, prefix: string) {
+  return scopeText
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.toLowerCase().startsWith(prefix.toLowerCase()))
+    ?.slice(prefix.length)
+    .trim();
+}
+
+function campaignFocus(campaign: ProtocolAuditCampaign) {
+  return (
+    scopeLine(campaign.scopeText, "Focused path:") ||
+    scopeLine(campaign.scopeText, "Focused file:") ||
+    "Full repository"
+  );
+}
+
+function shortCommit(commitSha: string) {
+  return commitSha ? commitSha.slice(0, 7).toUpperCase() : "UNPINNED";
+}
+
+function preferredWorkUnit(snapshot: CampaignReportSnapshot) {
+  const preferredKind = snapshot.campaign.scopeText.toLowerCase().includes(".sol")
+    ? "defi-exploit-class-pass"
+    : "dependency-config-review";
+  return (
+    snapshot.workUnits.find((item) => item.status === "open" && item.kind === preferredKind) ||
+    snapshot.workUnits.find((item) => item.status === "open") ||
+    snapshot.workUnits[0]
+  );
+}
+
 function AppContent() {
   const p2p = useP2P();
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -170,6 +199,7 @@ function AppContent() {
   const [runtimeStatus, setRuntimeStatus] = useState<LocalModelList | null>(null);
   const [runtimeProgress, setRuntimeProgress] = useState<Record<string, AuditRuntimeProgress>>({});
   const [latestRuntimeProgress, setLatestRuntimeProgress] = useState<AuditRuntimeProgress | null>(null);
+  const [autoRunJobs, setAutoRunJobs] = useState<Record<string, true>>({});
 
   const nodeStatus = useCyphesStore((state) => state.nodeStatus);
   const nodeError = useCyphesStore((state) => state.nodeError);
@@ -191,6 +221,17 @@ function AppContent() {
     address.includes("/p2p-circuit/"),
   );
   const runtimeProviderLabel = runtimeProvider === "ollama" ? "Ollama" : "LM Studio";
+  const currentTokensPerSecond = latestRuntimeProgress?.tokensPerSecond || 0;
+  const currentProgress = latestRuntimeProgress?.progress || 0;
+  const speedRotation = Math.min(132, Math.max(-132, -132 + currentTokensPerSecond * 11));
+  const pendingReceiptMeter =
+    latestRuntimeProgress && latestRuntimeProgress.progress < 100
+      ? Math.max(1, Math.round(latestRuntimeProgress.progress * 1.25))
+      : 0;
+  const runtimePhase =
+    latestRuntimeProgress?.phase ||
+    runtimeStatus?.message ||
+    (runtimeModel ? "Runtime armed" : "Runtime offline");
 
   async function refreshRuntimeModels(provider = runtimeProvider) {
     const listing = await p2p.listLocalModelModels(provider);
@@ -262,6 +303,20 @@ function AppContent() {
     const timer = window.setTimeout(() => setNotice(null), 5_000);
     return () => window.clearTimeout(timer);
   }, [notice, setNotice]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !agentId || !runtimeModel) return;
+    const nextJob = jobs.find(
+      (job) =>
+        job.status === "routed" &&
+        job.workerAgentId === agentId &&
+        !job.resultHash &&
+        !autoRunJobs[job.id],
+    );
+    if (!nextJob) return;
+    setAutoRunJobs((current) => ({ ...current, [nextJob.id]: true }));
+    void handleRunAcceptedAuditSkill(nextJob, true);
+  }, [agentId, autoRunJobs, jobs, runtimeModel, runtimeProvider]);
 
   async function resolveCommit(apiUrl: string, ref: string, optional = false) {
     const commitResponse = await fetch(
@@ -407,12 +462,6 @@ function AppContent() {
         credits.toString(),
         inspected.scope,
       );
-      await p2p.createProtocolCampaign(
-        repository,
-        repository.fullName.split("/")[0],
-        inspected.scopeText,
-        credits.toString(),
-      );
       setRepositoryUrl("");
       setNotice(
         peerCount > 0
@@ -478,11 +527,20 @@ function AppContent() {
     }
   }
 
-  async function handleRun(job: AuditJob) {
+  async function handleRunAcceptedAuditSkill(job: AuditJob, automatic = false) {
     setActionJobId(job.id);
     try {
-      await p2p.runAudit(job.id);
-      setNotice("ATP repository worker completed; signed result sent to the requester.");
+      if (!runtimeModel) {
+        throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
+      }
+      const contribution = await p2p.runAcceptedAuditSkill(
+        job.id,
+        runtimeProvider,
+        runtimeModel,
+      );
+      setNotice(
+        `${automatic ? "Accepted work started automatically. " : ""}${contribution.runtime?.model || runtimeModel} signed audit contribution ${contribution.receiptHash.slice(0, 19)}...`,
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -503,9 +561,7 @@ function AppContent() {
         throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
       }
       const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
-      const unit =
-        snapshot.workUnits.find((item) => item.status === "open") ||
-        snapshot.workUnits[0];
+      const unit = preferredWorkUnit(snapshot);
       if (!unit) throw new Error("Campaign has no work units.");
       const contribution = await p2p.runCampaignAuditSkill(
         campaign.campaignId,
@@ -611,11 +667,11 @@ function AppContent() {
     if (job.status === "routed" && !isMine && !job.resultHash) {
       return (
         <button
-          disabled={actionJobId === job.id}
-          onClick={() => void handleRun(job)}
+          disabled={actionJobId === job.id || !runtimeModel}
+          onClick={() => void handleRunAcceptedAuditSkill(job)}
           type="button"
         >
-          {actionJobId === job.id ? "Running worker" : "Run ATP worker"}
+          {actionJobId === job.id ? "Running model" : runtimeModel ? "Run model audit" : "Select local model"}
           <ArrowRight size={14} />
         </button>
       );
@@ -665,96 +721,76 @@ function AppContent() {
       <TitleBar />
 
       <main>
-        <section aria-label="Current capabilities" className="truth-strip">
-          <div>
-            <Database size={15} />
-            <span>ATP state</span>
-            <strong>Signed + SQLite</strong>
+        <section className="runtime-cockpit" aria-label="Audit runtime cockpit">
+          <div className="cockpit-copy">
+            <span className="eyebrow">Audit Runtime</span>
+            <h1>Local model command deck</h1>
+            <p>CYPHES uses the model server already running on this Mac. No API key. No remote inference.</p>
+            <div className="runtime-selectors">
+              <label>
+                Provider
+                <select
+                  onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
+                  value={runtimeProvider}
+                >
+                  <option value="lmstudio">LM Studio</option>
+                  <option value="ollama">Ollama</option>
+                </select>
+              </label>
+              <label>
+                Model
+                <select
+                  disabled={runtimeModels.length === 0}
+                  onChange={(event) => setRuntimeModel(event.currentTarget.value)}
+                  value={runtimeModel}
+                >
+                  {runtimeModels.length === 0 ? (
+                    <option value="">No models detected</option>
+                  ) : (
+                    runtimeModels.map((model) => (
+                      <option key={model} value={model}>{model}</option>
+                    ))
+                  )}
+                </select>
+              </label>
+            </div>
+            <div className="runtime-phase">
+              <span>{runtimePhase}</span>
+              <strong>{currentProgress ? `${currentProgress}%` : runtimeModel ? "Armed" : "Offline"}</strong>
+            </div>
+            <div className="progress-track cockpit-track">
+              <span style={{ width: `${currentProgress}%` }} />
+            </div>
           </div>
-          <div>
-            <Users size={15} />
-            <span>Connected</span>
-            <strong>{peerCount} {peerCount === 1 ? "peer" : "peers"}</strong>
-          </div>
-          <div>
-            <RadioTower size={15} />
-            <span>Internet network</span>
-            <strong className={networkInfo?.rendezvous_registered ? "" : "warning"}>
-              {networkInfo?.rendezvous_registered
-                ? "Discoverable"
-                : networkInfo?.relay_connected
-                  ? "Registering"
-                  : networkInfo?.relay_configured
-                    ? "Connecting"
-                    : "Not configured"}
-            </strong>
-          </div>
-          <div>
-            <ShieldCheck size={15} />
-            <span>Audit runtime</span>
-            <strong className={runtimeModel ? "" : "warning"}>
-              {runtimeModel || "No local model"}
-            </strong>
-          </div>
-          <div>
-            <Trophy size={15} />
-            <span>ATP earned</span>
-            <strong>{creditSummary.total} credits</strong>
-          </div>
-        </section>
 
-        <section className="runtime-panel" aria-label="Audit runtime">
-          <div className="runtime-copy">
-            <Cpu size={16} />
-            <div>
-              <span>Audit Runtime</span>
-              <strong>Local models only</strong>
-              <p>No API key. CYPHES uses the local model server already running on this Mac.</p>
+          <div className="speedometer" style={{ "--needle": `${speedRotation}deg` } as CSSProperties}>
+            <div className="speed-ring">
+              <span className="scanline" />
+              <div className="needle" />
+              <div className="speed-core">
+                <Gauge size={18} />
+                <span>Tokens/sec</span>
+                <strong>{currentTokensPerSecond.toFixed(1)}</strong>
+              </div>
             </div>
           </div>
-          <label>
-            Provider
-            <select
-              onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
-              value={runtimeProvider}
-            >
-              <option value="lmstudio">LM Studio</option>
-              <option value="ollama">Ollama</option>
-            </select>
-          </label>
-          <label>
-            Model
-            <select
-              disabled={runtimeModels.length === 0}
-              onChange={(event) => setRuntimeModel(event.currentTarget.value)}
-              value={runtimeModel}
-            >
-              {runtimeModels.length === 0 ? (
-                <option value="">No models detected</option>
-              ) : (
-                runtimeModels.map((model) => (
-                  <option key={model} value={model}>{model}</option>
-                ))
-              )}
-            </select>
-          </label>
-          <div className="runtime-meter">
+
+          <div className="credit-console">
             <div>
-              <Gauge size={14} />
-              <span>{latestRuntimeProgress?.phase || runtimeStatus?.message || "Waiting for local model"}</span>
-              <strong>{latestRuntimeProgress ? `${latestRuntimeProgress.progress}%` : runtimeModel ? "Ready" : "Offline"}</strong>
+              <Trophy size={16} />
+              <span>ATP earned</span>
+              <strong>{creditSummary.total}</strong>
             </div>
-            <div className="progress-track">
-              <span style={{ width: `${latestRuntimeProgress?.progress || 0}%` }} />
+            <div>
+              <Cpu size={16} />
+              <span>Receipt meter</span>
+              <strong>{pendingReceiptMeter ? `+${pendingReceiptMeter}` : "idle"}</strong>
             </div>
-          </div>
-          <div className="token-gauge">
-            <span>Tokens/sec</span>
-            <strong>
-              {latestRuntimeProgress?.tokensPerSecond
-                ? latestRuntimeProgress.tokensPerSecond.toFixed(1)
-                : "0.0"}
-            </strong>
+            <div>
+              <RadioTower size={16} />
+              <span>Network</span>
+              <strong>{networkInfo?.rendezvous_registered ? "online" : networkInfo?.relay_connected ? "syncing" : "standby"}</strong>
+            </div>
           </div>
         </section>
 
@@ -828,16 +864,6 @@ function AppContent() {
                   <span>ATP Credits</span>
                 </div>
                 <p>Receipt-backed accounting only. No ERC-20, escrow, or bounty payout is represented in this build.</p>
-              </div>
-
-              <div className="scope">
-                <span className="scope-label">Audit scope</span>
-                {AUDIT_SCOPE.map((item) => (
-                  <div key={item}>
-                    <Check size={14} />
-                    <span>{item}</span>
-                  </div>
-                ))}
               </div>
 
               {formError ? <div className="form-error">{formError}</div> : null}
@@ -945,10 +971,13 @@ function AppContent() {
                     <div>
                       <div className="job-topline">
                         <span className="job-status routed">{campaign.status}</span>
-                        <span>{campaign.repository.fullName}@{campaign.repository.commitSha.slice(0, 7)}</span>
+                        <span>{campaign.repository.fullName}</span>
                       </div>
                       <h3>{campaign.protocolName}</h3>
-                      <p>{campaign.scopeText}</p>
+                      <div className="campaign-target">
+                        <span>{campaignFocus(campaign)}</span>
+                        <code>{shortCommit(campaign.repository.commitSha)}</code>
+                      </div>
                       <div className="repo-meta">
                         <span>{snapshot?.workUnits.length || 0} work units</span>
                         <span>{contributions} contributions</span>

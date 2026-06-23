@@ -153,7 +153,7 @@ export function useP2P() {
       compensation,
       scope,
     });
-    await loadAudits();
+    await Promise.all([loadAudits(), loadProtocolCampaigns()]);
     return job;
   }
 
@@ -215,6 +215,20 @@ export function useP2P() {
       model,
     });
     await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    return contribution;
+  }
+
+  async function runAcceptedAuditSkill(
+    jobId: string,
+    provider: string,
+    model: string,
+  ) {
+    const contribution = await invoke<NodeContribution>("run_accepted_audit_skill", {
+      jobId,
+      provider,
+      model,
+    });
+    await Promise.all([loadAudits(), loadProtocolCampaigns(), refreshCreditSummary()]);
     return contribution;
   }
 
@@ -290,6 +304,7 @@ export function useP2P() {
     createProtocolCampaign,
     recordCampaignContribution,
     runCampaignAuditSkill,
+    runAcceptedAuditSkill,
     verifyCampaignContribution,
     exportCampaignReport,
     offerAudit,

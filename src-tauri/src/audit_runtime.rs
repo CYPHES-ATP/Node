@@ -496,7 +496,7 @@ async fn repository_context(
     );
     let response = client
         .get(tree_url)
-        .header(USER_AGENT, "CYPHES/0.2.3-dev")
+        .header(USER_AGENT, "CYPHES/0.2.4-dev")
         .header(ACCEPT, "application/vnd.github+json")
         .send()
         .await
@@ -696,7 +696,7 @@ async fn fetch_raw_file(
     );
     let response = client
         .get(url)
-        .header(USER_AGENT, "CYPHES/0.2.3-dev")
+        .header(USER_AGENT, "CYPHES/0.2.4-dev")
         .send()
         .await
         .map_err(|error| error.to_string())?;

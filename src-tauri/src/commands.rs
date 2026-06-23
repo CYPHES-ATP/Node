@@ -19,8 +19,8 @@ use crate::{
     p2p::{load_or_create_identity, spawn_swarm, SwarmCommand, ATP_PROTOCOL},
     state::{P2pState, PeerInfo},
     store::{
-        data_dir, now_millis, AtpStore, AuditEventBody, AuditJob, AuditJobPayload, LegacyAuditJob,
-        RepositorySummary,
+        campaign_id_for_transaction, data_dir, now_millis, AtpStore, AuditEventBody, AuditJob,
+        AuditJobPayload, LegacyAuditJob, RepositorySummary,
     },
     worker::{create_repository_leases, execute_repository_audit},
 };
@@ -305,6 +305,85 @@ pub async fn run_campaign_audit_skill(
 }
 
 #[tauri::command]
+pub async fn run_accepted_audit_skill(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    job_id: String,
+    provider: String,
+    model: String,
+) -> Result<NodeContribution, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let worker_agent_id = agent_id(&keypair.public());
+    let job = store.get_job(&job_id)?;
+    if job.worker_agent_id.as_deref() != Some(worker_agent_id.as_str()) {
+        return Err("only the selected worker can execute this audit".to_string());
+    }
+    if job.status != "routed" {
+        return Err("the requester must issue an active context lease first".to_string());
+    }
+    let campaign_id = campaign_id_for_transaction(&job.transaction_id);
+    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    let campaign = snapshot.campaign;
+    let preferred_kind = if campaign.scope_text.to_ascii_lowercase().contains(".sol") {
+        "defi-exploit-class-pass"
+    } else {
+        "dependency-config-review"
+    };
+    let work_unit = snapshot
+        .work_units
+        .iter()
+        .find(|unit| unit.status == "open" && unit.kind == preferred_kind)
+        .or_else(|| {
+            snapshot
+                .work_units
+                .iter()
+                .find(|unit| unit.status == "open")
+        })
+        .cloned()
+        .ok_or_else(|| "Campaign has no open work units.".to_string())?;
+    let output = run_local_audit_skill(&app, &campaign, &work_unit, &provider, &model).await?;
+    let contribution = signed_contribution(
+        &keypair,
+        campaign.campaign_id.clone(),
+        work_unit.work_unit_id,
+        output.runtime,
+        output.notes_markdown,
+        output.findings,
+        output.artifacts,
+        output.coverage,
+        output.commands,
+    )?;
+    let contribution = store.record_contribution(&contribution)?;
+    sender
+        .send(SwarmCommand::SendContribution {
+            contribution: contribution.clone(),
+            audience: job.requester_agent_id.clone(),
+        })
+        .map_err(|error| error.to_string())?;
+
+    let contract_hash = job
+        .contract_hash
+        .clone()
+        .ok_or_else(|| "routed audit has no contract hash".to_string())?;
+    let contract = store.get_contract(&job.transaction_id)?;
+    let leases = store.get_leases(&job.transaction_id)?;
+    let result =
+        execute_repository_audit(&keypair, &contract, &contract_hash, &leases, &data_dir()?)
+            .await?;
+    store.save_execution_result(&result)?;
+    sender
+        .send(SwarmCommand::SendExecutionResult {
+            result,
+            audience: contract.requester_agent_id,
+        })
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("audit:labor_changed", ());
+    let _ = app.emit("atp:jobs_changed", ());
+    Ok(contribution)
+}
+
+#[tauri::command]
 pub async fn verify_campaign_contribution(
     app: AppHandle,
     state: State<'_, P2pState>,
@@ -427,6 +506,7 @@ pub async fn create_audit(
         .send(SwarmCommand::SendEnvelope(envelope))
         .map_err(|error| error.to_string())?;
     let _ = app.emit("atp:jobs_changed", ());
+    let _ = app.emit("audit:labor_changed", ());
     store.get_job(&id)
 }
 

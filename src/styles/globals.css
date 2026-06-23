@@ -325,6 +325,248 @@ main {
   white-space: nowrap;
 }
 
+.runtime-cockpit {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) 340px 220px;
+  gap: 18px;
+  min-height: 300px;
+  padding: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 246, 255, 0.22);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(0, 246, 255, 0.18), transparent 30rem),
+    linear-gradient(145deg, rgba(0, 246, 255, 0.09), rgba(199, 255, 71, 0.025) 46%, rgba(0, 0, 0, 0.38)),
+    rgba(0, 0, 0, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(245, 251, 250, 0.08),
+    0 0 70px rgba(0, 246, 255, 0.08);
+}
+
+.runtime-cockpit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent, rgba(0, 246, 255, 0.09), transparent),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 9px);
+  mix-blend-mode: screen;
+  opacity: 0.55;
+  animation: cockpit-sweep 4.8s linear infinite;
+}
+
+.runtime-cockpit > * {
+  position: relative;
+  z-index: 1;
+}
+
+.eyebrow,
+.runtime-selectors label,
+.runtime-phase span,
+.credit-console span,
+.speed-core span {
+  display: block;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.cockpit-copy h1 {
+  max-width: 520px;
+  margin: 10px 0 0;
+  font-size: clamp(30px, 4.7vw, 58px);
+  font-weight: 680;
+  letter-spacing: -0.06em;
+  line-height: 0.94;
+}
+
+.cockpit-copy p {
+  max-width: 520px;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.runtime-selectors {
+  display: grid;
+  grid-template-columns: 180px minmax(220px, 1fr);
+  gap: 12px;
+  max-width: 560px;
+  margin-top: 24px;
+}
+
+.runtime-selectors select {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 246, 255, 0.24);
+  border-radius: 10px;
+  outline: 0;
+  background: rgba(0, 0, 0, 0.48);
+  color: var(--ink);
+  box-shadow: inset 0 0 22px rgba(0, 246, 255, 0.035);
+}
+
+.runtime-selectors select:focus {
+  border-color: var(--cyan);
+}
+
+.runtime-phase {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  max-width: 560px;
+  margin-top: 22px;
+}
+
+.runtime-phase span {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-phase strong {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.cockpit-track {
+  max-width: 560px;
+  height: 7px;
+  margin-top: 10px;
+  background: rgba(245, 251, 250, 0.075);
+}
+
+.speedometer {
+  display: grid;
+  place-items: center;
+}
+
+.speed-ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 282px;
+  height: 282px;
+  border: 1px solid rgba(0, 246, 255, 0.2);
+  border-radius: 50%;
+  background:
+    conic-gradient(from 225deg, rgba(0, 246, 255, 0.1), rgba(0, 246, 255, 0.65), rgba(199, 255, 71, 0.76), rgba(255, 112, 67, 0.55), transparent 272deg),
+    radial-gradient(circle, rgba(0, 0, 0, 0.95) 0 52%, rgba(0, 246, 255, 0.13) 53% 55%, rgba(0, 0, 0, 0.82) 56% 100%);
+  box-shadow:
+    inset 0 0 40px rgba(0, 0, 0, 0.8),
+    0 0 48px rgba(0, 246, 255, 0.11);
+}
+
+.speed-ring::before,
+.speed-ring::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+}
+
+.speed-ring::before {
+  inset: 20px;
+  border: 1px dashed rgba(245, 251, 250, 0.14);
+}
+
+.speed-ring::after {
+  inset: 66px;
+  border: 1px solid rgba(245, 251, 250, 0.08);
+  background: radial-gradient(circle, rgba(0, 246, 255, 0.08), rgba(0, 0, 0, 0.72));
+}
+
+.scanline {
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 310deg, rgba(0, 246, 255, 0.3) 340deg, transparent 360deg);
+  animation: radar-spin 2.6s linear infinite;
+}
+
+.needle {
+  position: absolute;
+  z-index: 3;
+  width: 3px;
+  height: 102px;
+  border-radius: 999px;
+  background: linear-gradient(var(--green), rgba(199, 255, 71, 0.1));
+  box-shadow: 0 0 18px rgba(199, 255, 71, 0.68);
+  transform: rotate(var(--needle)) translateY(-39px);
+  transform-origin: 50% 100%;
+  transition: transform 320ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.speed-core {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 122px;
+  height: 122px;
+  border: 1px solid rgba(245, 251, 250, 0.12);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  text-align: center;
+}
+
+.speed-core svg {
+  color: var(--cyan);
+}
+
+.speed-core strong {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 30px;
+  letter-spacing: -0.08em;
+}
+
+.credit-console {
+  display: grid;
+  align-content: stretch;
+  gap: 12px;
+}
+
+.credit-console > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  min-height: 82px;
+  padding: 14px;
+  border: 1px solid rgba(245, 251, 250, 0.1);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.31);
+}
+
+.credit-console svg {
+  grid-row: 1 / 3;
+  color: var(--cyan);
+}
+
+.credit-console strong {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 22px;
+  letter-spacing: -0.04em;
+}
+
+@keyframes cockpit-sweep {
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(50%); }
+}
+
+@keyframes radar-spin {
+  to { transform: rotate(360deg); }
+}
+
 .runtime-panel {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 190px 240px minmax(220px, 1fr) 110px;
@@ -683,6 +925,34 @@ form > label,
   white-space: pre-line;
 }
 
+.campaign-target {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.campaign-target span,
+.campaign-target code {
+  max-width: min(620px, 100%);
+  overflow: hidden;
+  padding: 7px 10px;
+  border: 1px solid rgba(0, 246, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(0, 246, 255, 0.055);
+  color: var(--cyan-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campaign-target code {
+  border-color: rgba(199, 255, 71, 0.2);
+  background: rgba(199, 255, 71, 0.045);
+  color: var(--green);
+}
+
 .campaign-actions {
   display: flex;
   align-items: flex-end;
@@ -939,6 +1209,14 @@ footer {
   }
 
   .runtime-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-cockpit {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-selectors {
     grid-template-columns: 1fr;
   }
 
