@@ -794,7 +794,7 @@ form > label,
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
   padding: 18px;
-  min-height: 220px;
+  min-height: 168px;
   border: 1px solid rgba(0, 246, 255, 0.16);
   border-radius: 0;
   background:
@@ -911,10 +911,72 @@ form > label,
   font-size: 10px;
 }
 
+.work-unit-dropdown {
+  margin-top: 16px;
+  border: 1px solid rgba(0, 246, 255, 0.15);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.work-unit-dropdown summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.work-unit-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.work-unit-dropdown summary::before {
+  content: "+";
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 13px;
+  justify-self: start;
+  position: absolute;
+  transform: translateX(-2px);
+}
+
+.work-unit-dropdown[open] summary::before {
+  content: "-";
+}
+
+.work-unit-dropdown summary span {
+  padding-left: 18px;
+  color: var(--cyan-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.work-unit-dropdown summary strong {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.work-unit-dropdown[open] summary {
+  border-bottom: 1px solid rgba(0, 246, 255, 0.14);
+}
+
 .work-unit-list {
   display: grid;
   gap: 8px;
-  margin-top: 16px;
+  max-height: 310px;
+  padding: 10px;
+  overflow: auto;
+  scrollbar-color: var(--cyan) rgba(245, 251, 250, 0.06);
+  scrollbar-width: thin;
 }
 
 .work-unit-row {

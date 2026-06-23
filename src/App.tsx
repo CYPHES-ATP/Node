@@ -1040,6 +1040,8 @@ function AppContent() {
                 const unverified = contributions - (snapshot?.verifications.length || 0);
                 const isMine = campaign.requesterAgentId === agentId;
                 const claimedCount = snapshot?.claims.filter((item) => item.status === "claimed").length || 0;
+                const openUnitCount = workUnits.filter((unit) => unit.status === "open").length;
+                const activeUnitCount = workUnits.filter((unit) => unit.status !== "open").length;
                 return (
                   <article className="campaign-card" key={campaign.campaignId}>
                     <div>
@@ -1077,7 +1079,16 @@ function AppContent() {
                           <small>{progress.tokensPerSecond ? `${progress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
                         </div>
                       ) : null}
-                      <div className="work-unit-list">
+                      <details className="work-unit-dropdown">
+                        <summary>
+                          <span>Select work unit</span>
+                          <strong>
+                            {isMine && unverified > 0
+                              ? `${unverified} needs verification`
+                              : `${openUnitCount} open / ${activeUnitCount} active`}
+                          </strong>
+                        </summary>
+                        <div className="work-unit-list">
                         {workUnits.map((unit) => {
                           const unitContributions = snapshot?.contributions.filter(
                             (item) => item.workUnitId === unit.workUnitId,
@@ -1163,7 +1174,8 @@ function AppContent() {
                             </div>
                           );
                         })}
-                      </div>
+                        </div>
+                      </details>
                     </div>
                     <div className="campaign-actions">
                       {isMine ? (
