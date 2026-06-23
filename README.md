@@ -18,7 +18,7 @@
 
 The current downloadable preview is for Apple Silicon Macs:
 
-- [Download CYPHES v0.2.4-dev](https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.4-dev)
+- [Download CYPHES v0.2.5-dev](https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.5-dev)
 
 This developer build is not Apple-notarized yet. After dragging `CYPHES` to
 Applications, Control-click the app, select **Open**, then confirm **Open**.
