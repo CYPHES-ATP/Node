@@ -80,10 +80,10 @@ coordination and bounded work, not a claim of comprehensive source-code
 vulnerability analysis.
 
 The ATP transaction worker remains a deterministic repository worker. The
-separate audit-labor action, **Run Audit Skill**, uses a local model provider
+separate audit-labor action, **Run Audit Pipeline**, uses a local model provider
 through LM Studio or Ollama, reads pinned GitHub context without cloning or
 executing repository code, records skill/model/input/output hashes, and signs
-the resulting contribution artifacts.
+the resulting contribution artifacts for each audit pass.
 
 ## Receipt
 

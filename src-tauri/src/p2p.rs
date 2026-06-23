@@ -13,7 +13,7 @@ use tokio::{select, sync::mpsc, time::MissedTickBehavior};
 
 use crate::{
     atp::{agent_id, create_signed_envelope, AtpAck, AtpEnvelope, AtpVerb},
-    audit_labor::NodeContribution,
+    audit_labor::{AuditWorkUnitClaim, NodeContribution, ProtocolAuditCampaign},
     bundle::export_receipt_bundle,
     state::{P2pState, PeerInfo},
     store::{now_millis, rejection_ack, AtpStore, AuditEventBody},
@@ -56,6 +56,11 @@ struct PublishedNetworkConfig {
 #[derive(Debug, Clone)]
 pub enum SwarmCommand {
     SendEnvelope(AtpEnvelope),
+    SendCampaign(ProtocolAuditCampaign),
+    SendWorkUnitClaim {
+        claim: AuditWorkUnitClaim,
+        audience: String,
+    },
     SendExecutionResult {
         result: SignedExecutionResult,
         audience: String,
@@ -71,6 +76,8 @@ pub enum SwarmCommand {
 #[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
 enum WireRequest {
     Envelope(AtpEnvelope),
+    Campaign(ProtocolAuditCampaign),
+    WorkUnitClaim(AuditWorkUnitClaim),
     ExecutionResult(SignedExecutionResult),
     Contribution(NodeContribution),
 }
@@ -79,6 +86,18 @@ enum WireRequest {
 #[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
 enum WireResponse {
     Envelope(AtpAck),
+    Campaign {
+        accepted: bool,
+        campaign_id: String,
+        reason: Option<String>,
+    },
+    WorkUnitClaim {
+        accepted: bool,
+        campaign_id: String,
+        work_unit_id: String,
+        claim_id: String,
+        reason: Option<String>,
+    },
     ExecutionResult {
         accepted: bool,
         transaction_id: String,
@@ -97,6 +116,12 @@ enum WireResponse {
 #[derive(Debug)]
 enum PendingOutbound {
     Envelope(String),
+    Campaign(String),
+    WorkUnitClaim {
+        campaign_id: String,
+        work_unit_id: String,
+        claim_id: String,
+    },
     ExecutionResult {
         transaction_id: String,
         result_hash: String,
@@ -256,7 +281,7 @@ pub async fn spawn_swarm(
             let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
             let identify = identify::Behaviour::new(
                 identify::Config::new(ATP_PROTOCOL.to_string(), key.public())
-                    .with_agent_version("CYPHES/0.2.1-dev".to_string())
+                    .with_agent_version(format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
                     .with_push_listen_addr_updates(true),
             );
             Ok(AgentBehaviour {
@@ -329,6 +354,18 @@ pub async fn spawn_swarm(
                     match command {
                         SwarmCommand::SendEnvelope(envelope) => {
                             send_envelope(&mut swarm, &state, envelope, &mut outbound);
+                        }
+                        SwarmCommand::SendCampaign(campaign) => {
+                            send_campaign(&mut swarm, &state, campaign, &mut outbound);
+                        }
+                        SwarmCommand::SendWorkUnitClaim { claim, audience } => {
+                            send_work_unit_claim(
+                                &mut swarm,
+                                &state,
+                                claim,
+                                &audience,
+                                &mut outbound,
+                            );
                         }
                         SwarmCommand::SendExecutionResult { result, audience } => {
                             send_execution_result(
@@ -469,6 +506,63 @@ fn handle_swarm_event(
                         };
                         WireResponse::Envelope(ack)
                     }
+                    WireRequest::Campaign(campaign) => {
+                        let campaign_id = campaign.campaign_id.clone();
+                        match store.upsert_protocol_campaign(&campaign) {
+                            Ok(_) => {
+                                let _ = app.emit("audit:labor_changed", ());
+                                let _ = app.emit(
+                                    "audit:campaign_received",
+                                    serde_json::json!({
+                                        "campaignId": campaign_id,
+                                        "protocolName": campaign.protocol_name,
+                                    }),
+                                );
+                                WireResponse::Campaign {
+                                    accepted: true,
+                                    campaign_id,
+                                    reason: None,
+                                }
+                            }
+                            Err(reason) => WireResponse::Campaign {
+                                accepted: false,
+                                campaign_id,
+                                reason: Some(reason),
+                            },
+                        }
+                    }
+                    WireRequest::WorkUnitClaim(claim) => {
+                        let campaign_id = claim.campaign_id.clone();
+                        let work_unit_id = claim.work_unit_id.clone();
+                        let claim_id = claim.claim_id.clone();
+                        match store.record_work_unit_claim(&claim) {
+                            Ok(_) => {
+                                let _ = app.emit("audit:labor_changed", ());
+                                let _ = app.emit(
+                                    "audit:work_unit_claimed",
+                                    serde_json::json!({
+                                        "campaignId": campaign_id,
+                                        "workUnitId": work_unit_id,
+                                        "claimId": claim_id,
+                                    }),
+                                );
+                                WireResponse::WorkUnitClaim {
+                                    accepted: true,
+                                    campaign_id,
+                                    work_unit_id,
+                                    claim_id,
+                                    reason: None,
+                                }
+                            }
+                            Err(reason) => WireResponse::WorkUnitClaim {
+                                accepted: false,
+                                campaign_id,
+                                work_unit_id,
+                                claim_id,
+                                reason: Some(reason),
+                            },
+                        }
+                    }
                     WireRequest::ExecutionResult(result) => {
                         let transaction_id = result.transaction_id.clone();
                         let result_hash = result.result_hash.clone();
@@ -565,6 +659,46 @@ fn handle_swarm_event(
                             );
                         }
                     }
+                    WireResponse::Campaign {
+                        accepted,
+                        campaign_id,
+                        reason,
+                    } => {
+                        let _ = app.emit(
+                            if accepted {
+                                "audit:campaign_acknowledged"
+                            } else {
+                                "atp:delivery_failed"
+                            },
+                            serde_json::json!({
+                                "peerId": peer.to_string(),
+                                "campaignId": campaign_id,
+                                "reason": reason,
+                            }),
+                        );
+                    }
+                    WireResponse::WorkUnitClaim {
+                        accepted,
+                        campaign_id,
+                        work_unit_id,
+                        claim_id,
+                        reason,
+                    } => {
+                        let _ = app.emit(
+                            if accepted {
+                                "audit:work_unit_claim_acknowledged"
+                            } else {
+                                "atp:delivery_failed"
+                            },
+                            serde_json::json!({
+                                "peerId": peer.to_string(),
+                                "campaignId": campaign_id,
+                                "workUnitId": work_unit_id,
+                                "claimId": claim_id,
+                                "reason": reason,
+                            }),
+                        );
+                    }
                     WireResponse::ExecutionResult {
                         accepted,
                         transaction_id,
@@ -627,6 +761,16 @@ fn handle_swarm_event(
             let pending = outbound.remove(&request_id);
             let (event_hash, transaction_id, result_hash) = match pending {
                 Some(PendingOutbound::Envelope(event_hash)) => (Some(event_hash), None, None),
+                Some(PendingOutbound::Campaign(campaign_id)) => (None, Some(campaign_id), None),
+                Some(PendingOutbound::WorkUnitClaim {
+                    campaign_id,
+                    work_unit_id,
+                    claim_id,
+                }) => (
+                    None,
+                    Some(format!("{campaign_id}:{work_unit_id}:{claim_id}")),
+                    None,
+                ),
                 Some(PendingOutbound::ExecutionResult {
                     transaction_id,
                     result_hash,
@@ -1037,6 +1181,19 @@ fn on_peer_connected(
             outbound.insert(request_id, PendingOutbound::Envelope(event_hash));
         }
     }
+    if let Ok(campaigns) = store.list_protocol_campaigns() {
+        for campaign in campaigns
+            .into_iter()
+            .filter(|campaign| campaign.requester_agent_id == local_agent_id)
+        {
+            let campaign_id = campaign.campaign_id.clone();
+            let request_id = swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer_id, WireRequest::Campaign(campaign));
+            outbound.insert(request_id, PendingOutbound::Campaign(campaign_id));
+        }
+    }
     let _ = app.emit(
         "p2p:peer_connected",
         serde_json::json!({ "peerId": peer_id.to_string() }),
@@ -1057,6 +1214,47 @@ fn send_envelope(
             .request_response
             .send_request(&peer_id, WireRequest::Envelope(envelope.clone()));
         outbound.insert(request_id, PendingOutbound::Envelope(hash.clone()));
+    }
+}
+
+fn send_campaign(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    campaign: ProtocolAuditCampaign,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    for peer_id in target_peers(state, None) {
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, WireRequest::Campaign(campaign.clone()));
+        outbound.insert(
+            request_id,
+            PendingOutbound::Campaign(campaign.campaign_id.clone()),
+        );
+    }
+}
+
+fn send_work_unit_claim(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    claim: AuditWorkUnitClaim,
+    audience: &str,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    for peer_id in target_peers(state, Some(audience)) {
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
+        outbound.insert(
+            request_id,
+            PendingOutbound::WorkUnitClaim {
+                campaign_id: claim.campaign_id.clone(),
+                work_unit_id: claim.work_unit_id.clone(),
+                claim_id: claim.claim_id.clone(),
+            },
+        );
     }
 }
 

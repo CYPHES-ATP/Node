@@ -16,7 +16,11 @@
 
 ## Download
 
-The current downloadable preview is for Apple Silicon Macs:
+The current source preview is **CYPHES v0.5.0-dev**. It adds remotely
+claimable audit work units on top of the professional local-model audit
+pipeline. A packaged v0.5 DMG should be cut after two-node QA.
+
+The latest downloadable Apple Silicon developer preview is:
 
 - [Download CYPHES v0.2.5-dev](https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.5-dev)
 
@@ -36,11 +40,13 @@ code, writes five audit artifacts inside the granted namespace, and returns a
 signed result. The worker then emits a signed Proof of Cognition after
 requester approval.
 
-The desktop app also includes the first local version of the audit labor
-network: protocols can create a pinned audit campaign, CYPHES decomposes it
-into work units, nodes can record signed contributions, verifiers can accept or
-reject them, and the app can export a final report bundle generated only from
-accepted receipts.
+The desktop app also includes the v0.5 audit labor network: protocols can
+create a pinned audit campaign with an audit brief, hashed reference
+attachments, and an optional custom `SKILL.md` overlay; CYPHES decomposes it
+into professional audit passes; remote worker nodes can claim individual work
+units, run the local-model audit skill, and return signed contributions;
+verifiers accept or reject signed work; and the app exports a final report
+bundle generated only from accepted receipts.
 
 ## Verified Transaction
 
@@ -92,18 +98,32 @@ Artifact Two independently returns:
 - Requester verification and zero-value `SETTLE`.
 - Worker-signed `ATTEST` Proof of Cognition.
 - Local protocol audit campaigns with pinned commits, scope, optional bounty
-  URL, in-scope impacts, out-of-scope rules, and audit brief text.
+  URL, in-scope impacts, out-of-scope rules, audit brief text, hashed
+  requester attachments, default skill-pack metadata, and optional custom
+  `SKILL.md` overlay hash.
 - Deterministic audit work units for scope mapping, repository inventory,
   dependency/config review, DeFi exploit-class review, finding validation, and
   final report sections.
-- Local-model `Run Audit Skill` execution through LM Studio or Ollama with
+- Remote campaign broadcast over libp2p so discovered CYPHES nodes see
+  protocol campaigns without manually copying SQLite state.
+- Signed, first-claim-wins work-unit claims that prevent another worker from
+  submitting against a claimed unit.
+- Remote worker flow: claim a work unit, run the claimed unit with LM Studio or
+  Ollama on that worker's Mac, sign the contribution, and send it back to the
+  requester.
+- Local-model `Run Audit Pipeline` execution through LM Studio or Ollama with
   hidden local endpoints, model discovery, progress events, tokens/sec
-  measurement, skill hash, input hash, output hash, and signed contribution
-  artifacts.
+  measurement, effective skill hash, input hash, output hash, and signed
+  contribution artifacts for each audit pass.
+- Professional v0.4 audit passes for scope mapping, repository inventory,
+  dependency/config review, smart-contract exploit-class review, finding
+  validation, and final report synthesis.
 - Signed node contributions and signed verifier decisions.
 - Receipt-backed ATP Credits issued only after accepted verification results.
-- Final audit report bundle export with report markdown, findings,
-  contributions, verifications, credits, receipt notes, and manifest.
+- Final audit report bundle export with document control, methodology, audit
+  pass matrix, evidence arbitration, findings register, coverage and negative
+  findings, non-reportable/rejected lead appendix, runtime/receipt appendix,
+  credit summary, and manifest.
 - Portable Artifact Two-compatible receipt bundles under
   `~/.cyphes/receipts/<transaction-id>/`.
 - A deployable combined relay/rendezvous service with one-node and automatic
@@ -117,12 +137,14 @@ Artifact Two independently returns:
 - Rendezvous discovers online nodes, not a durable or searchable work-order
   index.
 - No durable offline mailbox or guaranteed retry after both peers disconnect.
+- Campaign and claim delivery currently requires online peers; there is no
+  durable, searchable, replicated work-order index yet.
 - The worker is bounded by deterministic code paths and lease guards, but is
   not yet isolated in a hardened OS container or VM.
 - No escrow, token transfer, release, refund, or dispute adapter. ATP Credits
   are off-chain receipt-backed accounting only.
-- No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Skill` path is
-  local-model-only through LM Studio or Ollama.
+- No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Pipeline` path
+  is local-model-only through LM Studio or Ollama.
 - No claim that local model output is automatically a valid vulnerability.
   Findings must be backed by signed artifacts and accepted verifier receipts
   before they appear in final reports.

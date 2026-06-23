@@ -9,6 +9,9 @@
     "instructions": "Map active scope, impact categories, known issues, and out-of-scope rules before hunting.",
     "expectedArtifacts": ["scope-map.json", "notes.md"],
     "status": "accepted",
+    "claimedByAgentId": "urn:libp2p:12D3KooWWorkerAcceptedFixture",
+    "claimId": "claim_scope_map_001",
+    "claimedAt": "2026-06-21T00:01:30.000Z",
     "createdAt": "2026-06-21T00:00:00.000Z"
   },
   {
@@ -21,6 +24,9 @@
     "instructions": "Record applicability and evidence for reentrancy, flash loans, oracle manipulation, mocks, and MEV.",
     "expectedArtifacts": ["defi-matrix.json", "notes.md"],
     "status": "rejected",
+    "claimedByAgentId": "urn:libp2p:12D3KooWWorkerRejectedFixture",
+    "claimId": "claim_duplicate_lead_001",
+    "claimedAt": "2026-06-21T00:02:30.000Z",
     "createdAt": "2026-06-21T00:01:00.000Z"
   }
 ]

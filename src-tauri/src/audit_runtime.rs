@@ -8,16 +8,17 @@ use tauri::{AppHandle, Emitter};
 use crate::{
     audit_labor::{
         sha256_ref, AuditFinding, AuditWorkUnit, ContributionArtifact, CoverageItem,
-        ProtocolAuditCampaign, RuntimeDescriptor,
+        NodeContribution, ProtocolAuditCampaign, RuntimeDescriptor,
     },
     audit_profile::RepositoryTarget,
 };
 
-const AUDIT_SKILL_TEXT: &str = include_str!("../../protocol/skills/cyphes-audit-skill.v0.1.md");
+const AUDIT_SKILL_TEXT: &str = include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
 const MAX_TREE_FILES: usize = 20_000;
 const MAX_SELECTED_FILES: usize = 16;
 const MAX_FILE_BYTES: usize = 28_000;
 const MAX_CONTEXT_BYTES: usize = 180_000;
+const MAX_MODEL_OUTPUT_TOKENS: u32 = 6_500;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,6 +196,7 @@ pub async fn run_local_audit_skill(
     work_unit: &AuditWorkUnit,
     provider: &str,
     model: &str,
+    prior_contributions: &[NodeContribution],
 ) -> Result<LocalAuditSkillRun, String> {
     let provider = normalize_provider(provider);
     if model.trim().is_empty() {
@@ -215,9 +217,9 @@ pub async fn run_local_audit_skill(
     let context = repository_context(&client, campaign).await?;
 
     emit_progress(app, campaign, work_unit, "Building model prompt", 32, None);
-    let prompt = build_prompt(campaign, work_unit, &context);
+    let prompt = build_prompt(campaign, work_unit, &context, prior_contributions);
     let input_hash = sha256_ref(prompt.as_bytes());
-    let skill_hash = sha256_ref(AUDIT_SKILL_TEXT.as_bytes());
+    let skill_hash = sha256_ref(effective_skill_text(campaign).as_bytes());
 
     emit_progress(app, campaign, work_unit, "Running local model", 44, None);
     let started = Instant::now();
@@ -261,7 +263,8 @@ pub async fn run_local_audit_skill(
         "repository": campaign.repository,
         "workUnitId": work_unit.work_unit_id,
         "selectedFiles": context.selected_files.iter().map(|file| &file.path).collect::<Vec<_>>(),
-        "treeTruncated": context.truncated,
+            "treeTruncated": context.truncated,
+            "priorContributionCount": prior_contributions.len(),
     }))
     .map_err(|error| error.to_string())?;
     let findings_json =
@@ -393,7 +396,7 @@ async fn run_openai_compatible_chat(
         .json(&json!({
             "model": model,
             "temperature": 0.2,
-            "max_tokens": 2200,
+            "max_tokens": MAX_MODEL_OUTPUT_TOKENS,
             "messages": [
                 {
                     "role": "system",
@@ -443,7 +446,10 @@ async fn run_ollama_chat(
         .json(&json!({
             "model": model,
             "stream": false,
-            "options": {"temperature": 0.2},
+            "options": {
+                "temperature": 0.2,
+                "num_predict": MAX_MODEL_OUTPUT_TOKENS
+            },
             "messages": [
                 {
                     "role": "system",
@@ -496,7 +502,7 @@ async fn repository_context(
     );
     let response = client
         .get(tree_url)
-        .header(USER_AGENT, "CYPHES/0.2.4-dev")
+        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
         .header(ACCEPT, "application/vnd.github+json")
         .send()
         .await
@@ -590,6 +596,7 @@ fn scoped_paths_from_campaign(campaign: &ProtocolAuditCampaign) -> Vec<String> {
     for source in [
         Some(campaign.scope_text.as_str()),
         campaign.audit_brief_text.as_deref(),
+        campaign.custom_skill_text.as_deref(),
     ]
     .into_iter()
     .flatten()
@@ -612,6 +619,33 @@ fn scoped_paths_from_campaign(campaign: &ProtocolAuditCampaign) -> Vec<String> {
                     if let Some(path) = normalize_scoped_path(&trimmed[prefix.len()..]) {
                         if !paths.iter().any(|existing| existing == &path) {
                             paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for attachment in &campaign.attachments {
+        if let Some(text) = &attachment.text {
+            for line in text.lines() {
+                let trimmed = line
+                    .trim()
+                    .trim_start_matches("- ")
+                    .trim_start_matches("* ")
+                    .trim();
+                let lower = trimmed.to_ascii_lowercase();
+                for prefix in [
+                    "focused path:",
+                    "focused file:",
+                    "focused directory:",
+                    "in-scope path:",
+                    "in scope path:",
+                ] {
+                    if lower.starts_with(prefix) {
+                        if let Some(path) = normalize_scoped_path(&trimmed[prefix.len()..]) {
+                            if !paths.iter().any(|existing| existing == &path) {
+                                paths.push(path);
+                            }
                         }
                     }
                 }
@@ -696,7 +730,7 @@ async fn fetch_raw_file(
     );
     let response = client
         .get(url)
-        .header(USER_AGENT, "CYPHES/0.2.4-dev")
+        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -710,15 +744,22 @@ fn build_prompt(
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
     context: &RepositoryContext,
+    prior_contributions: &[NodeContribution],
 ) -> String {
+    let skill_text = effective_skill_text(campaign);
+    let attachment_digest = attachment_digest(campaign);
     let mut prompt = format!(
         "{}\n\n\
          # Campaign\n\
          Protocol: {}\n\
          Repository: {} at {}\n\
+         Skill pack: {} {} ({})\n\
+         Custom SKILL hash: {}\n\
          Scope:\n{}\n\n\
+         Audit brief:\n{}\n\n\
          In-scope impacts: {}\n\
          Out-of-scope: {}\n\n\
+         # Requester Attachments\n{}\n\n\
          # Work Unit\n\
          Kind: {}\n\
          Title: {}\n\
@@ -726,12 +767,21 @@ fn build_prompt(
          # Repository Inventory\n\
          Tree truncated by GitHub: {}\n\
          Files inventoried: {}\n{}\n\n\
+         # Prior Accepted Or Submitted CYPHES Passes\n{}\n\n\
          # Selected File Context\n",
-        AUDIT_SKILL_TEXT,
+        skill_text,
         campaign.protocol_name,
         campaign.repository.full_name,
         campaign.repository.commit_sha,
+        campaign.skill_pack.skill_pack_id,
+        campaign.skill_pack.version,
+        campaign.skill_pack.hash,
+        campaign.custom_skill_hash.as_deref().unwrap_or("none"),
         campaign.scope_text,
+        campaign
+            .audit_brief_text
+            .as_deref()
+            .unwrap_or("No requester audit brief supplied."),
         if campaign.impacts_in_scope.is_empty() {
             "not supplied".to_string()
         } else {
@@ -742,6 +792,7 @@ fn build_prompt(
         } else {
             campaign.out_of_scope.join("; ")
         },
+        attachment_digest,
         work_unit.kind,
         work_unit.title,
         work_unit.instructions,
@@ -753,7 +804,8 @@ fn build_prompt(
             .take(250)
             .map(|path| format!("- {path}"))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n"),
+        prior_contribution_digest(prior_contributions)
     );
 
     for file in &context.selected_files {
@@ -763,6 +815,91 @@ fn build_prompt(
         ));
     }
     prompt
+}
+
+fn effective_skill_text(campaign: &ProtocolAuditCampaign) -> String {
+    match campaign.custom_skill_text.as_deref() {
+        Some(custom) if !custom.trim().is_empty() => format!(
+            "{}\n\n# Requester Custom SKILL.md Overlay\n\n{}",
+            AUDIT_SKILL_TEXT,
+            custom.trim()
+        ),
+        _ => AUDIT_SKILL_TEXT.to_string(),
+    }
+}
+
+fn attachment_digest(campaign: &ProtocolAuditCampaign) -> String {
+    if campaign.attachments.is_empty() {
+        return "No requester attachments supplied.".to_string();
+    }
+    campaign
+        .attachments
+        .iter()
+        .map(|attachment| {
+            format!(
+                "## {}\nMedia type: {}\nHash: {}\nBytes: {}\n{}",
+                attachment.label,
+                attachment.media_type,
+                attachment.sha256,
+                attachment.size_bytes,
+                attachment
+                    .text
+                    .as_deref()
+                    .map(|text| truncate_bytes(text, 24_000))
+                    .unwrap_or_else(
+                        || "Binary or external attachment text not embedded.".to_string()
+                    )
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn prior_contribution_digest(contributions: &[NodeContribution]) -> String {
+    if contributions.is_empty() {
+        return "No prior passes supplied for this campaign run.".to_string();
+    }
+    contributions
+        .iter()
+        .take(8)
+        .map(|contribution| {
+            let findings = if contribution.findings.is_empty() {
+                "no findings recorded".to_string()
+            } else {
+                contribution
+                    .findings
+                    .iter()
+                    .take(6)
+                    .map(|finding| {
+                        format!(
+                            "{} [{} / {}]: {}",
+                            finding.id, finding.severity, finding.status, finding.title
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            };
+            let coverage = contribution
+                .coverage
+                .iter()
+                .take(6)
+                .map(|item| format!("{}={}", item.area, item.status))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!(
+                "## Prior pass: {}\nWork unit: {}\nReceipt: {}\nModel: {} / {}\nCoverage: {}\nFindings/leads: {}\nNotes:\n{}\n",
+                contribution.contribution_id,
+                contribution.work_unit_id,
+                contribution.receipt_hash,
+                contribution.runtime.adapter,
+                contribution.runtime.model,
+                if coverage.is_empty() { "none declared" } else { &coverage },
+                findings,
+                truncate_bytes(&contribution.notes_markdown, 6_000)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Debug)]

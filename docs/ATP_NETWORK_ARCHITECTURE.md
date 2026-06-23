@@ -670,10 +670,11 @@ verification.
 
 ## Audit Labor Network Layer
 
-The v0.1 audit labor network sits above the repository-audit ATP transaction.
-It adds protocol audit campaigns, work units, local-model audit skill execution,
-signed node contributions, signed verifier decisions, ATP Credit allocation,
-and markdown report bundle export.
+The v0.4 audit labor network sits above the repository-audit ATP transaction.
+It adds protocol audit campaigns, professional work units, local-model
+multi-pass audit pipeline execution, signed node contributions, signed verifier
+decisions, ATP Credit allocation, and professional markdown report bundle
+export.
 
 This layer intentionally does not add fake reputation, token balances, bounty
 payouts, or exploit claims. A contribution becomes credit-eligible only after a

@@ -628,6 +628,44 @@ form > label,
   color: rgba(245, 251, 250, 0.3);
 }
 
+.textarea-shell {
+  align-items: stretch;
+  min-height: 88px;
+  padding: 12px 15px;
+}
+
+.textarea-shell textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.textarea-shell textarea::placeholder {
+  color: rgba(245, 251, 250, 0.3);
+}
+
+.advanced-skill {
+  margin: 0 0 22px;
+}
+
+.advanced-skill summary {
+  width: fit-content;
+  margin-bottom: 10px;
+  color: var(--cyan-soft);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
 .input-shell > span {
   color: var(--cyan-soft);
   font-family: var(--mono);

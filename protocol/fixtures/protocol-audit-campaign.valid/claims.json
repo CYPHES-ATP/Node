@@ -1,0 +1,32 @@
+[
+  {
+    "profile": "cyphes.audit-work-unit-claim/0.1",
+    "profileVersion": "0.1",
+    "claimId": "claim_scope_map_001",
+    "campaignId": "campaign_aave_fixture_001",
+    "workUnitId": "campaign_aave_fixture_001-01-scope-mapping",
+    "requesterAgentId": "urn:libp2p:12D3KooWRequesterCampaignFixture",
+    "workerAgentId": "urn:libp2p:12D3KooWWorkerAcceptedFixture",
+    "status": "claimed",
+    "createdAt": "2026-06-21T00:01:30.000Z",
+    "expiresAt": null,
+    "publicKeyBase64Url": "fixture-public-key",
+    "claimHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "signature": "fixture-worker-claim-signature"
+  },
+  {
+    "profile": "cyphes.audit-work-unit-claim/0.1",
+    "profileVersion": "0.1",
+    "claimId": "claim_duplicate_lead_001",
+    "campaignId": "campaign_aave_fixture_001",
+    "workUnitId": "campaign_aave_fixture_001-04-defi-exploit-class-pass",
+    "requesterAgentId": "urn:libp2p:12D3KooWRequesterCampaignFixture",
+    "workerAgentId": "urn:libp2p:12D3KooWWorkerRejectedFixture",
+    "status": "claimed",
+    "createdAt": "2026-06-21T00:02:30.000Z",
+    "expiresAt": null,
+    "publicKeyBase64Url": "fixture-public-key",
+    "claimHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "signature": "fixture-worker-claim-signature"
+  }
+]
