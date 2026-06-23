@@ -5,7 +5,10 @@ import { isTauriRuntime, truncatePeerId } from "@/lib/utils";
 import type {
   AuditJob,
   BackendPeerInfo,
+  CampaignReportSnapshot,
+  CreditAllocation,
   CreditSummary,
+  ExportedReportBundle,
   NetworkInfo,
   ProtocolAuditCampaign,
   RepositorySummary,
@@ -53,6 +56,7 @@ interface AdminState {
   peers: BackendPeerInfo[];
   credits: CreditSummary;
   networkInfo: NetworkInfo | null;
+  snapshots: Record<string, CampaignReportSnapshot>;
 }
 
 function parseGitHubInput(value: string): GitHubInputTarget | null {
@@ -177,6 +181,7 @@ function CampaignConsole() {
     peers: [],
     credits: { total: 0, allocations: [] },
     networkInfo: null,
+    snapshots: {},
   });
   const [agentId, setAgentId] = useState("");
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -187,6 +192,7 @@ function CampaignConsole() {
   const [notice, setNotice] = useState("Native node not connected yet.");
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [actionCampaignId, setActionCampaignId] = useState<string | null>(null);
 
   const sortedJobs = useMemo(
     () => [...admin.jobs].sort((a, b) => b.createdAt - a.createdAt),
@@ -212,8 +218,31 @@ function CampaignConsole() {
       invoke<NetworkInfo>("get_network_info"),
       invoke<CreditSummary>("get_credit_summary"),
     ]);
+    const snapshotEntries = await Promise.all(
+      campaigns.map(async (campaign) => {
+        try {
+          const snapshot = await invoke<CampaignReportSnapshot>("get_campaign_snapshot", {
+            campaignId: campaign.campaignId,
+          });
+          return [campaign.campaignId, snapshot] as const;
+        } catch {
+          return null;
+        }
+      }),
+    );
     setAgentId(networkInfo.agent_id);
-    setAdmin({ campaigns, jobs, peers, credits: creditSummary, networkInfo });
+    setAdmin({
+      campaigns,
+      jobs,
+      peers,
+      credits: creditSummary,
+      networkInfo,
+      snapshots: Object.fromEntries(
+        snapshotEntries.filter(
+          (entry): entry is [string, CampaignReportSnapshot] => Boolean(entry),
+        ),
+      ),
+    });
   }
 
   useEffect(() => {
@@ -270,6 +299,63 @@ function CampaignConsole() {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function verifyCampaign(campaign: ProtocolAuditCampaign) {
+    setError("");
+    setActionCampaignId(campaign.campaignId);
+    try {
+      const snapshot =
+        admin.snapshots[campaign.campaignId] ||
+        (await invoke<CampaignReportSnapshot>("get_campaign_snapshot", {
+          campaignId: campaign.campaignId,
+        }));
+      const verifiedIds = new Set(
+        snapshot.verifications.map((item) => item.targetContributionId),
+      );
+      const pending = snapshot.contributions.filter(
+        (item) => !verifiedIds.has(item.contributionId),
+      );
+      if (pending.length === 0) {
+        throw new Error("No unverified contribution is available.");
+      }
+      const issued: CreditAllocation[] = [];
+      for (const contribution of pending) {
+        issued.push(
+          ...(await invoke<CreditAllocation[]>("verify_campaign_contribution", {
+            contributionId: contribution.contributionId,
+            decision: "accepted",
+            reasonCode: "COVERAGE_ACCEPTED",
+            reason: "Contribution is bounded, signed, and useful for campaign coverage.",
+          })),
+        );
+      }
+      const total = issued.reduce((sum, item) => sum + item.total, 0);
+      setNotice(
+        `${pending.length} contribution${pending.length === 1 ? "" : "s"} accepted; ${total} ATP Credits issued and returned to worker.`,
+      );
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActionCampaignId(null);
+    }
+  }
+
+  async function exportCampaign(campaign: ProtocolAuditCampaign) {
+    setError("");
+    setActionCampaignId(campaign.campaignId);
+    try {
+      const bundle = await invoke<ExportedReportBundle>("export_campaign_report", {
+        campaignId: campaign.campaignId,
+      });
+      setNotice(`Final audit report bundle exported to ${bundle.bundlePath}.`);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActionCampaignId(null);
     }
   }
 
@@ -418,17 +504,76 @@ function CampaignConsole() {
           </div>
         </div>
         <div className="campaign-admin-list">
-          {sortedCampaigns.map((campaign) => (
-            <article key={campaign.campaignId}>
-              <div>
-                <strong>{campaign.protocolName}</strong>
-                <span>{campaign.repository.fullName}@{shortHash(campaign.repository.commitSha)}</span>
-              </div>
-              <code>{truncatePeerId(campaign.requesterAgentId)}</code>
-              <span>{campaign.status}</span>
-              <span>{campaign.skillPack.label}</span>
-            </article>
-          ))}
+          {sortedCampaigns.map((campaign) => {
+            const snapshot = admin.snapshots[campaign.campaignId];
+            const contributions = snapshot?.contributions.length || 0;
+            const accepted =
+              snapshot?.verifications.filter((item) => item.decision === "accepted").length || 0;
+            const unverified = contributions - (snapshot?.verifications.length || 0);
+            const workUnits = snapshot?.workUnits || [];
+            return (
+              <article className="campaign-admin-event" key={campaign.campaignId}>
+                <div className="campaign-admin-event-main">
+                  <div>
+                    <strong>{campaign.protocolName}</strong>
+                    <span>{campaign.repository.fullName}@{shortHash(campaign.repository.commitSha)}</span>
+                  </div>
+                  <code>{truncatePeerId(campaign.requesterAgentId)}</code>
+                  <span>{campaign.status}</span>
+                  <span>{campaign.skillPack.label}</span>
+                </div>
+                <div className="campaign-admin-metrics">
+                  <span>{workUnits.length} work units</span>
+                  <span>{contributions} contributions</span>
+                  <span>{accepted} accepted</span>
+                  <span className={unverified > 0 ? "needs-action" : ""}>
+                    {unverified > 0 ? `${unverified} needs verification` : "verified queue clear"}
+                  </span>
+                </div>
+                <div className="campaign-admin-work-units">
+                  {workUnits.map((unit) => {
+                    const unitContributions = snapshot?.contributions.filter(
+                      (item) => item.workUnitId === unit.workUnitId,
+                    ) || [];
+                    const contributionIds = new Set(
+                      unitContributions.map((item) => item.contributionId),
+                    );
+                    const unitVerifications = snapshot?.verifications.filter((item) =>
+                      contributionIds.has(item.targetContributionId),
+                    ) || [];
+                    const latestVerification = unitVerifications[unitVerifications.length - 1];
+                    return (
+                      <div key={unit.workUnitId}>
+                        <strong>{unit.title}</strong>
+                        <span>{unit.status}</span>
+                        <span>{unitContributions.length} contrib</span>
+                        <span>
+                          {latestVerification?.decision ||
+                            (unitContributions.length > 0 ? "awaiting verifier" : "open")}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="campaign-admin-actions">
+                  <button
+                    disabled={actionCampaignId === campaign.campaignId || unverified === 0}
+                    onClick={() => void verifyCampaign(campaign)}
+                    type="button"
+                  >
+                    {unverified > 0 ? `Verify ${unverified}` : "Verify queue clear"}
+                  </button>
+                  <button
+                    disabled={actionCampaignId === campaign.campaignId || contributions === 0}
+                    onClick={() => void exportCampaign(campaign)}
+                    type="button"
+                  >
+                    Export report
+                  </button>
+                </div>
+              </article>
+            );
+          })}
           {sortedCampaigns.length === 0 ? <p>No campaigns committed yet.</p> : null}
         </div>
       </section>
