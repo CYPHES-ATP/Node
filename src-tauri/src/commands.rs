@@ -709,7 +709,7 @@ pub async fn verify_campaign_contribution(
     reason_code: String,
     reason: String,
 ) -> Result<Vec<crate::audit_labor::CreditAllocation>, String> {
-    let (keypair, _) = node_runtime(&state)?;
+    let (keypair, sender) = node_runtime(&state)?;
     let contribution = store.get_contribution(&contribution_id)?;
     let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
     let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
@@ -733,6 +733,16 @@ pub async fn verify_campaign_contribution(
         }],
     )?;
     let allocations = store.record_verification(&verification)?;
+    let local_agent_id = agent_id(&keypair.public());
+    if contribution.worker_agent_id != local_agent_id {
+        sender
+            .send(SwarmCommand::SendVerificationResult {
+                verification: verification.clone(),
+                allocations: allocations.clone(),
+                audience: contribution.worker_agent_id,
+            })
+            .map_err(|error| error.to_string())?;
+    }
     let _ = app.emit("audit:labor_changed", ());
     Ok(allocations)
 }

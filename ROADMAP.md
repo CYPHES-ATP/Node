@@ -33,6 +33,15 @@ signed ATP envelopes or portable artifacts.
   enforcement so another worker cannot submit against a claimed unit.
 - Remote worker flow: claim a campaign work unit, run it with the local model
   on that worker node, and send the signed contribution back to the requester.
+- Signed verification-result bundles return accepted/rejected decisions and
+  ATP Credit allocations to the contributing worker, with idempotent resend on
+  reconnect.
+- Desktop operator UI now presents **Work Orders** as the primary surface:
+  per-unit status, claimant, contribution count, verifier state, claim buttons,
+  and run buttons for claimed work.
+- `campaign.html` separates protocol/admin campaign creation, network stats,
+  ATP proof logs, receipt trails, protocol events, and developer ATP envelope
+  inspection from the worker cockpit.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
@@ -136,7 +145,8 @@ Status: **Partial**
 - Connect OpenClaw/Hermes as an advanced adapter while preserving the signed
   contribution and verification receipt shape.
 - Add a durable work-order index and reliable resend for campaigns, claims, and
-  contributions when peers are not simultaneously online.
+  contributions when peers are not simultaneously online. Verification/credit
+  result resend is now implemented for reconnecting workers.
 - Harden the worker boundary without changing the receipt profile.
 - Add deterministic negative fixtures for invalid leases and worker results.
 - Add peer persistence and reliable resend.
