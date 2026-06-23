@@ -1127,8 +1127,17 @@ function AppContent() {
                                 <span>{verifierState}</span>
                               </div>
                               <div className="work-unit-action">
-                                {isMine ? (
-                                  <span>{unitContributions.length > 0 ? "reviewable" : "awaiting node"}</span>
+                                {isMine ? unitContributions.length > unitVerifications.length ? (
+                                  <button
+                                    className="needs-action-button"
+                                    disabled={actionJobId === campaign.campaignId}
+                                    onClick={() => void handleVerifyQueue(campaign)}
+                                    type="button"
+                                  >
+                                    Verify
+                                  </button>
+                                ) : (
+                                  <span>{unitContributions.length > 0 ? "verified" : "awaiting node"}</span>
                                 ) : unit.status === "open" ? (
                                   <button
                                     disabled={actionJobId === actionId}
@@ -1172,7 +1181,7 @@ function AppContent() {
                             onClick={() => void handleVerifyQueue(campaign)}
                             type="button"
                           >
-                            Verify queue
+                            {unverified > 0 ? `Verify ${unverified}` : "Verify queue"}
                             <ShieldCheck size={14} />
                           </button>
                           <button
