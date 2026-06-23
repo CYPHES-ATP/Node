@@ -14,6 +14,7 @@ import type {
   NodeContribution,
   ProtocolAuditCampaign,
   RepositorySummary,
+  AuditWorkUnitClaim,
 } from "@/types";
 
 interface StartNodeResponse {
@@ -144,6 +145,9 @@ export function useP2P() {
     repository: RepositorySummary,
     compensation: string,
     scope: string[],
+    auditBriefText = "",
+    attachmentText = "",
+    customSkillText = "",
   ) {
     if (!isTauriRuntime()) {
       throw new Error("Audit requests can only be created in the native CYPHES app.");
@@ -152,6 +156,9 @@ export function useP2P() {
       repository,
       compensation,
       scope,
+      auditBriefText,
+      attachmentText,
+      customSkillText,
     });
     await Promise.all([loadAudits(), loadProtocolCampaigns()]);
     return job;
@@ -162,6 +169,9 @@ export function useP2P() {
     protocolName: string,
     scopeText: string,
     creditBudget: string,
+    auditBriefText = "",
+    attachmentText = "",
+    customSkillText = "",
   ) {
     if (!isTauriRuntime()) {
       throw new Error("Protocol campaigns can only be created in the native CYPHES app.");
@@ -181,11 +191,41 @@ export function useP2P() {
           "Claims without reproducible evidence",
           "Production testing or unauthorized external interaction",
         ],
-        auditBriefText: `ATP Credits budget: ${creditBudget}. Credits are off-chain receipt-backed accounting only.`,
+        auditBriefText: [
+          `ATP Credits budget: ${creditBudget}. Credits are off-chain receipt-backed accounting only.`,
+          auditBriefText.trim(),
+        ].filter(Boolean).join("\n\n"),
+        attachmentText,
+        customSkillText,
       },
     });
     await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
     return campaign;
+  }
+
+  async function claimCampaignWorkUnit(campaignId: string, workUnitId: string) {
+    const claim = await invoke<AuditWorkUnitClaim>("claim_campaign_work_unit", {
+      campaignId,
+      workUnitId,
+    });
+    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    return claim;
+  }
+
+  async function runClaimedWorkUnit(
+    campaignId: string,
+    workUnitId: string,
+    provider: string,
+    model: string,
+  ) {
+    const contribution = await invoke<NodeContribution>("run_claimed_work_unit", {
+      campaignId,
+      workUnitId,
+      provider,
+      model,
+    });
+    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    return contribution;
   }
 
   async function recordCampaignContribution(
@@ -218,6 +258,20 @@ export function useP2P() {
     return contribution;
   }
 
+  async function runCampaignAuditPipeline(
+    campaignId: string,
+    provider: string,
+    model: string,
+  ) {
+    const contributions = await invoke<NodeContribution[]>("run_campaign_audit_pipeline", {
+      campaignId,
+      provider,
+      model,
+    });
+    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    return contributions;
+  }
+
   async function runAcceptedAuditSkill(
     jobId: string,
     provider: string,
@@ -230,6 +284,20 @@ export function useP2P() {
     });
     await Promise.all([loadAudits(), loadProtocolCampaigns(), refreshCreditSummary()]);
     return contribution;
+  }
+
+  async function runAcceptedAuditPipeline(
+    jobId: string,
+    provider: string,
+    model: string,
+  ) {
+    const contributions = await invoke<NodeContribution[]>("run_accepted_audit_pipeline", {
+      jobId,
+      provider,
+      model,
+    });
+    await Promise.all([loadAudits(), loadProtocolCampaigns(), refreshCreditSummary()]);
+    return contributions;
   }
 
   async function verifyCampaignContribution(
@@ -302,9 +370,13 @@ export function useP2P() {
     migrateLegacyJobs,
     createAudit,
     createProtocolCampaign,
+    claimCampaignWorkUnit,
+    runClaimedWorkUnit,
     recordCampaignContribution,
     runCampaignAuditSkill,
+    runCampaignAuditPipeline,
     runAcceptedAuditSkill,
+    runAcceptedAuditPipeline,
     verifyCampaignContribution,
     exportCampaignReport,
     offerAudit,

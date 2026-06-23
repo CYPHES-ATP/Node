@@ -20,6 +20,7 @@ use crate::{
         agent_id, now_rfc3339, public_key_from_raw_ed25519, raw_ed25519_public_key, sign_canonical,
         verify_canonical,
     },
+    audit_labor::NodeContribution,
     audit_profile::{AuditArtifact, AuditContract, RepositoryTarget},
 };
 
@@ -340,6 +341,68 @@ pub async fn execute_repository_audit(
     Ok(result)
 }
 
+pub fn execute_pipeline_audit_result(
+    keypair: &identity::Keypair,
+    contract: &AuditContract,
+    contract_hash: &str,
+    leases: &[ContextLease],
+    contributions: &[NodeContribution],
+) -> Result<SignedExecutionResult, String> {
+    if contributions.is_empty() {
+        return Err("pipeline execution result requires at least one contribution".to_string());
+    }
+    let repository_lease = leases
+        .iter()
+        .find(|lease| lease.operations.len() == 1 && lease.operations[0] == "read")
+        .ok_or_else(|| "repository read lease missing".to_string())?;
+    let artifact_lease = leases
+        .iter()
+        .find(|lease| lease.operations.len() == 1 && lease.operations[0] == "write")
+        .ok_or_else(|| "artifact write lease missing".to_string())?;
+    ensure_active_lease(repository_lease, "read")?;
+    ensure_active_lease(artifact_lease, "write")?;
+
+    let mut access_log = vec![LeaseAccess {
+        allowed: true,
+        lease_id: repository_lease.id.clone(),
+        operation: "read".to_string(),
+        path: format!("{}/", repository_lease.boundary),
+        reason: "pipeline used read-only pinned GitHub API context".to_string(),
+        time: now_rfc3339(),
+    }];
+    let artifact_contents = build_pipeline_artifacts(contract, contributions)?;
+    let mut artifacts = Vec::new();
+    for (path, media_type, bytes) in artifact_contents {
+        let relative = path
+            .strip_prefix("artifacts/")
+            .ok_or_else(|| "artifact path is outside the contracted namespace".to_string())?;
+        access_log.push(LeaseAccess {
+            allowed: true,
+            lease_id: artifact_lease.id.clone(),
+            operation: "write".to_string(),
+            path: format!("{}/{}", artifact_lease.boundary, relative),
+            reason: "pipeline materialized signed contribution evidence".to_string(),
+            time: now_rfc3339(),
+        });
+        artifacts.push(ExecutionArtifact {
+            path,
+            media_type,
+            sha256: sha256_bytes(&bytes),
+            size_bytes: bytes.len() as u64,
+            content_base64: URL_SAFE_NO_PAD.encode(bytes),
+        });
+    }
+
+    signed_execution_result(
+        keypair,
+        contract,
+        contract_hash,
+        leases,
+        access_log,
+        artifacts,
+    )
+}
+
 pub fn verify_execution_result(
     result: &SignedExecutionResult,
     contract: &AuditContract,
@@ -603,7 +666,7 @@ fn build_artifacts(
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "CYPHES deterministic repository auditor", "version": "0.2.1-dev"}},
+            "tool": {"driver": {"name": "CYPHES deterministic repository auditor", "version": env!("CARGO_PKG_VERSION")}},
             "results": sarif_results
         }]
     }))
@@ -671,6 +734,184 @@ fn build_artifacts(
     Ok(artifacts)
 }
 
+fn build_pipeline_artifacts(
+    contract: &AuditContract,
+    contributions: &[NodeContribution],
+) -> Result<Vec<(String, String, Vec<u8>)>, String> {
+    let report = format!(
+        "# CYPHES v0.4 Pipeline Result\n\n\
+         Repository: `{}` at `{}`\n\n\
+         This ATP-L1 execution result packages {} signed audit pipeline contribution{} for requester review. \
+         The worker used read-only pinned GitHub context and did not clone, execute, fuzz, deploy, or mutate repository code.\n\n\
+         ## Contributions\n\n{}\n",
+        contract.repository.full_name,
+        contract.repository.commit_sha,
+        contributions.len(),
+        if contributions.len() == 1 { "" } else { "s" },
+        contributions
+            .iter()
+            .map(|contribution| format!(
+                "- `{}` / `{}` / receipt `{}`",
+                contribution.work_unit_id, contribution.runtime.model, contribution.receipt_hash
+            ))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let findings = contributions
+        .iter()
+        .flat_map(|contribution| {
+            contribution.findings.iter().map(move |finding| {
+                serde_json::json!({
+                    "contributionId": contribution.contribution_id,
+                    "workUnitId": contribution.work_unit_id,
+                    "receiptHash": contribution.receipt_hash,
+                    "finding": finding,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let findings_json = serde_json::to_vec_pretty(&serde_json::json!({
+        "schemaVersion": "0.4",
+        "repository": contract.repository,
+        "findings": findings,
+    }))
+    .map_err(|error| error.to_string())?;
+    let sarif_results = findings
+        .iter()
+        .map(|entry| {
+            let finding = &entry["finding"];
+            serde_json::json!({
+                "ruleId": finding["id"],
+                "level": match finding["severity"].as_str().unwrap_or("low") {
+                    "critical" | "high" => "error",
+                    "medium" => "warning",
+                    _ => "note",
+                },
+                "message": {"text": finding["title"]},
+                "properties": {
+                    "contributionId": entry["contributionId"],
+                    "receiptHash": entry["receiptHash"],
+                    "reportable": finding["reportable"]
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let sarif = serde_json::to_vec_pretty(&serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "CYPHES v0.4 audit pipeline", "version": env!("CARGO_PKG_VERSION")}},
+            "results": sarif_results
+        }]
+    }))
+    .map_err(|error| error.to_string())?;
+    let checks = serde_json::to_vec_pretty(&serde_json::json!({
+        "schemaVersion": "0.4",
+        "repositoryCommit": contract.repository.commit_sha,
+        "codeExecuted": false,
+        "repositoryCloned": false,
+        "networkUsedAfterFetch": false,
+        "pipelineContributions": contributions.len(),
+        "checks": [
+            {"name": "signed-contributions", "status": "passed", "observed": contributions.len()},
+            {"name": "local-model-runtime", "status": "passed"},
+            {"name": "repository-execution", "status": "not_applicable"}
+        ]
+    }))
+    .map_err(|error| error.to_string())?;
+    let mut artifacts = vec![
+        (
+            "artifacts/audit-report.md".to_string(),
+            "text/markdown".to_string(),
+            report.into_bytes(),
+        ),
+        (
+            "artifacts/findings.json".to_string(),
+            "application/json".to_string(),
+            findings_json,
+        ),
+        (
+            "artifacts/results.sarif".to_string(),
+            "application/sarif+json".to_string(),
+            sarif,
+        ),
+        (
+            "artifacts/checks.json".to_string(),
+            "application/json".to_string(),
+            checks,
+        ),
+    ];
+    let manifest_entries = artifacts
+        .iter()
+        .map(|(path, media_type, bytes)| {
+            serde_json::json!({
+                "path": path,
+                "mediaType": media_type,
+                "sha256": sha256_bytes(bytes),
+                "sizeBytes": bytes.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let manifest = serde_json::to_vec_pretty(&serde_json::json!({
+        "schemaVersion": "0.4",
+        "transactionId": contract.transaction_id,
+        "contractHash": crate::audit_profile::contract_hash(contract)?,
+        "repository": contract.repository,
+        "pipelineContributionReceipts": contributions
+            .iter()
+            .map(|contribution| &contribution.receipt_hash)
+            .collect::<Vec<_>>(),
+        "artifacts": manifest_entries,
+    }))
+    .map_err(|error| error.to_string())?;
+    artifacts.push((
+        "artifacts/manifest.json".to_string(),
+        "application/json".to_string(),
+        manifest,
+    ));
+    Ok(artifacts)
+}
+
+fn signed_execution_result(
+    keypair: &identity::Keypair,
+    contract: &AuditContract,
+    contract_hash: &str,
+    leases: &[ContextLease],
+    access_log: Vec<LeaseAccess>,
+    artifacts: Vec<ExecutionArtifact>,
+) -> Result<SignedExecutionResult, String> {
+    let public_key = raw_ed25519_public_key(&keypair.public())?;
+    let mut result = SignedExecutionResult {
+        transaction_id: contract.transaction_id.clone(),
+        worker_agent_id: agent_id(&keypair.public()),
+        contract_hash: contract_hash.to_string(),
+        repository: contract.repository.clone(),
+        lease_ids: leases.iter().map(|lease| lease.id.clone()).collect(),
+        access_log,
+        artifacts,
+        created_at: now_rfc3339(),
+        public_key_base64_url: URL_SAFE_NO_PAD.encode(public_key),
+        result_hash: String::new(),
+        signature: String::new(),
+    };
+    result.result_hash = canonical_hash(&result.signing_payload())?;
+    result.signature = sign_canonical(keypair, &result.signing_payload())?;
+    Ok(result)
+}
+
+fn ensure_active_lease(lease: &ContextLease, operation: &str) -> Result<(), String> {
+    if !lease.operations.iter().any(|allowed| allowed == operation) {
+        return Err(format!(
+            "ATP_LEASE_DENIED: lease does not permit {operation}"
+        ));
+    }
+    let now = Utc::now();
+    if now < parse_time(&lease.ttl.start)? || now > parse_time(&lease.ttl.end)? {
+        return Err("ATP_LEASE_DENIED: lease is outside its ttl".to_string());
+    }
+    Ok(())
+}
+
 async fn download_checkout(
     repository: &RepositoryTarget,
     checkout_dir: &Path,
@@ -680,7 +921,7 @@ async fn download_checkout(
         repository.full_name, repository.commit_sha
     );
     let response = reqwest::Client::builder()
-        .user_agent("CYPHES/0.2.1-dev")
+        .user_agent(format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
         .redirect(reqwest::redirect::Policy::limited(2))
         .build()
         .map_err(|error| error.to_string())?
@@ -821,6 +1062,10 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        audit_labor::{signed_contribution, ContributionArtifact, CoverageItem, RuntimeDescriptor},
+        audit_profile::{contract_hash, AuditContract},
+    };
 
     #[test]
     fn artifact_paths_cannot_escape_the_write_boundary() {
@@ -865,5 +1110,71 @@ mod tests {
         result.verify().unwrap();
         result.artifacts[0].content_base64 = URL_SAFE_NO_PAD.encode(b"tampered");
         assert!(result.verify().is_err());
+    }
+
+    #[test]
+    fn pipeline_execution_result_satisfies_atp_without_repository_download() {
+        let requester = identity::Keypair::generate_ed25519();
+        let worker = identity::Keypair::generate_ed25519();
+        let repository = RepositoryTarget {
+            full_name: "Uniswap/v2-core".to_string(),
+            url: "https://github.com/Uniswap/v2-core".to_string(),
+            commit_sha: "6a9e7c97860676e0992f22a49665760444c1cdf5".to_string(),
+        };
+        let transaction_id = "audit-pipeline-test".to_string();
+        let contract = AuditContract::repository_audit(
+            transaction_id.clone(),
+            agent_id(&requester.public()),
+            agent_id(&worker.public()),
+            repository,
+            vec!["Focused path: contracts/UniswapV2ERC20.sol".to_string()],
+            "100".to_string(),
+            (Utc::now() + chrono::Duration::minutes(30))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        );
+        let contract_hash = contract_hash(&contract).unwrap();
+        let leases = create_repository_leases(&requester, &contract).unwrap();
+        let notes = b"Pipeline contribution notes";
+        let contribution = signed_contribution(
+            &worker,
+            format!("campaign_{transaction_id}"),
+            format!("campaign_{transaction_id}-01-scope-mapping"),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped scope using read-only pinned GitHub context.".to_string(),
+            vec![],
+            vec![ContributionArtifact {
+                path: "audit-skill-output.md".to_string(),
+                media_type: "text/markdown".to_string(),
+                sha256: crate::audit_labor::sha256_ref(notes),
+                size_bytes: notes.len() as u64,
+            }],
+            vec![CoverageItem {
+                area: "scope mapping".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["contracts/UniswapV2ERC20.sol".to_string()],
+            }],
+            vec!["read-only GitHub API context".to_string()],
+        )
+        .unwrap();
+
+        let result = execute_pipeline_audit_result(
+            &worker,
+            &contract,
+            &contract_hash,
+            &leases,
+            &[contribution],
+        )
+        .unwrap();
+        verify_execution_result(&result, &contract, &leases).unwrap();
+        let report = result
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == "artifacts/audit-report.md")
+            .unwrap()
+            .bytes()
+            .unwrap();
+        assert!(String::from_utf8(report)
+            .unwrap()
+            .contains("did not clone, execute, fuzz, deploy, or mutate repository code"));
     }
 }

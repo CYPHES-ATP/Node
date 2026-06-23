@@ -16,8 +16,9 @@ use crate::{
     },
     audit_labor::{
         allocate_credits, default_work_units, validate_campaign, verify_signed_contribution,
-        verify_signed_verification, AuditWorkUnit, CampaignReportSnapshot, CreditAllocation,
-        CreditSummary, NodeContribution, ProtocolAuditCampaign, VerificationResult,
+        verify_signed_verification, verify_signed_work_unit_claim, AuditWorkUnit,
+        AuditWorkUnitClaim, CampaignReportSnapshot, CreditAllocation, CreditSummary,
+        NodeContribution, ProtocolAuditCampaign, VerificationResult,
     },
     audit_profile::{
         contract_hash, receipt_signature_value, validate_contract, validate_receipt,
@@ -48,6 +49,12 @@ pub struct AuditJobPayload {
     pub compensation: String,
     pub currency: String,
     pub scope: Vec<String>,
+    #[serde(default)]
+    pub audit_brief_text: Option<String>,
+    #[serde(default)]
+    pub attachment_text: Option<String>,
+    #[serde(default)]
+    pub custom_skill_text: Option<String>,
     pub requester_agent_id: String,
     pub created_at: u64,
 }
@@ -333,6 +340,49 @@ impl AtpStore {
         Ok(campaign.clone())
     }
 
+    pub fn upsert_protocol_campaign(
+        &self,
+        campaign: &ProtocolAuditCampaign,
+    ) -> Result<ProtocolAuditCampaign, String> {
+        validate_campaign(campaign)?;
+        let work_units = default_work_units(campaign);
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let exists = transaction
+            .query_row(
+                "SELECT 1 FROM protocol_audit_campaigns WHERE campaign_id = ?1",
+                params![campaign.campaign_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+            .is_some();
+        if !exists {
+            transaction
+                .execute(
+                    "INSERT INTO protocol_audit_campaigns
+                        (campaign_id, campaign_json, status, requester_agent_id, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        campaign.campaign_id,
+                        serde_json::to_string(campaign).map_err(|error| error.to_string())?,
+                        campaign.status,
+                        campaign.requester_agent_id,
+                        millis_from_rfc3339(&campaign.created_at)?,
+                        millis_from_rfc3339(&campaign.updated_at)?,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+            for work_unit in &work_units {
+                insert_work_unit(&transaction, work_unit)?;
+            }
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(campaign.clone())
+    }
+
     pub fn list_protocol_campaigns(&self) -> Result<Vec<ProtocolAuditCampaign>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let mut statement = connection
@@ -355,6 +405,73 @@ impl AtpStore {
     pub fn list_work_units(&self, campaign_id: &str) -> Result<Vec<AuditWorkUnit>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         work_units_in_connection(&connection, campaign_id)
+    }
+
+    pub fn record_work_unit_claim(
+        &self,
+        claim: &AuditWorkUnitClaim,
+    ) -> Result<AuditWorkUnitClaim, String> {
+        verify_signed_work_unit_claim(claim)?;
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let campaign = campaign_in_transaction(&transaction, &claim.campaign_id)?;
+        if campaign.requester_agent_id != claim.requester_agent_id {
+            return Err("claim requester does not match campaign requester".to_string());
+        }
+        let work_unit =
+            work_unit_in_transaction(&transaction, &claim.campaign_id, &claim.work_unit_id)?;
+        if matches!(
+            work_unit.status.as_str(),
+            "submitted" | "accepted" | "rejected" | "challenged" | "revision_requested"
+        ) {
+            return Err("work unit already has submitted or reviewed work".to_string());
+        }
+        let existing = transaction
+            .query_row(
+                "SELECT claim_json FROM audit_work_unit_claims
+                 WHERE campaign_id = ?1 AND work_unit_id = ?2 AND status = 'claimed'",
+                params![claim.campaign_id, claim.work_unit_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(json) = existing {
+            let existing_claim: AuditWorkUnitClaim =
+                serde_json::from_str(&json).map_err(|error| error.to_string())?;
+            if existing_claim.claim_id == claim.claim_id {
+                return Ok(existing_claim);
+            }
+            return Err("work unit is already claimed by another node".to_string());
+        }
+        transaction
+            .execute(
+                "INSERT INTO audit_work_unit_claims
+                    (claim_id, campaign_id, work_unit_id, worker_agent_id, requester_agent_id,
+                     status, claim_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    claim.claim_id,
+                    claim.campaign_id,
+                    claim.work_unit_id,
+                    claim.worker_agent_id,
+                    claim.requester_agent_id,
+                    claim.status,
+                    serde_json::to_string(claim).map_err(|error| error.to_string())?,
+                    millis_from_rfc3339(&claim.created_at)?,
+                    now_millis() as i64,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        update_work_unit_claim_status(
+            &transaction,
+            &claim.campaign_id,
+            &claim.work_unit_id,
+            claim,
+        )?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(claim.clone())
     }
 
     pub fn record_contribution(
@@ -386,6 +503,16 @@ impl AtpStore {
         if work_unit.is_none() {
             return Err("contribution work unit is not known locally".to_string());
         }
+        let work_unit = work_unit_in_connection(
+            &connection,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+        )?;
+        if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
+            if claimed_by != contribution.worker_agent_id {
+                return Err("work unit is claimed by another worker".to_string());
+            }
+        }
         connection
             .execute(
                 "INSERT INTO audit_contributions
@@ -403,18 +530,12 @@ impl AtpStore {
                 ],
             )
             .map_err(|error| error.to_string())?;
-        connection
-            .execute(
-                "UPDATE audit_work_units
-                 SET status = 'submitted', updated_at = ?3
-                 WHERE campaign_id = ?1 AND work_unit_id = ?2",
-                params![
-                    contribution.campaign_id,
-                    contribution.work_unit_id,
-                    now_millis() as i64,
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+        update_work_unit_status(
+            &connection,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            "submitted",
+        )?;
         Ok(contribution.clone())
     }
 
@@ -465,6 +586,12 @@ impl AtpStore {
                 params![verification.target_contribution_id, contribution_status],
             )
             .map_err(|error| error.to_string())?;
+        update_work_unit_status(
+            &transaction,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            contribution_status,
+        )?;
         for allocation in &allocations {
             transaction
                 .execute(
@@ -525,6 +652,7 @@ impl AtpStore {
         Ok(CampaignReportSnapshot {
             campaign,
             work_units: work_units_in_connection(&connection, campaign_id)?,
+            claims: claims_in_connection(&connection, campaign_id)?,
             contributions: contributions_in_connection(&connection, campaign_id)?,
             verifications: verifications_in_connection(&connection, campaign_id)?,
             credits: credits_in_connection(&connection, campaign_id)?,
@@ -943,6 +1071,23 @@ impl AtpStore {
                  );
                  CREATE INDEX IF NOT EXISTS audit_work_units_campaign
                     ON audit_work_units(campaign_id, created_at);
+
+                 CREATE TABLE IF NOT EXISTS audit_work_unit_claims (
+                    claim_id TEXT PRIMARY KEY,
+                    campaign_id TEXT NOT NULL,
+                    work_unit_id TEXT NOT NULL,
+                    worker_agent_id TEXT NOT NULL,
+                    requester_agent_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    claim_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                 );
+                 CREATE UNIQUE INDEX IF NOT EXISTS audit_work_unit_claims_active_unit
+                    ON audit_work_unit_claims(campaign_id, work_unit_id)
+                    WHERE status = 'claimed';
+                 CREATE INDEX IF NOT EXISTS audit_work_unit_claims_campaign
+                    ON audit_work_unit_claims(campaign_id, created_at);
 
                  CREATE TABLE IF NOT EXISTS audit_contributions (
                     contribution_id TEXT PRIMARY KEY,
@@ -1624,6 +1769,29 @@ fn materialize_campaign_for_job(
     }
 
     let created_at = rfc3339_from_millis(job.created_at);
+    let mut attachments = Vec::new();
+    if let Some(text) = job
+        .attachment_text
+        .as_ref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        attachments.push(crate::audit_labor::CampaignAttachment::from_text(
+            "Requester attachment".to_string(),
+            text.clone(),
+        )?);
+    }
+    let brief = [
+        Some(format!(
+            "ATP transaction: {}. ATP Credits budget: {} {}.",
+            job.id, job.compensation, job.currency
+        )),
+        job.audit_brief_text.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|text| !text.trim().is_empty())
+    .collect::<Vec<_>>()
+    .join("\n\n");
     let mut campaign = ProtocolAuditCampaign::new(
         protocol_name_from_repository(&job.repository.full_name),
         RepositoryTarget {
@@ -1642,10 +1810,10 @@ fn materialize_campaign_for_job(
             "Claims without reproducible evidence".to_string(),
             "Production testing or unauthorized external interaction".to_string(),
         ],
-        Some(format!(
-            "ATP transaction: {}. ATP Credits budget: {} {}.",
-            job.id, job.compensation, job.currency
-        )),
+        Some(brief),
+        None,
+        attachments,
+        job.custom_skill_text.clone(),
         job.requester_agent_id.clone(),
     )?;
     campaign.campaign_id = campaign_id;
@@ -1767,11 +1935,96 @@ fn insert_work_unit(
     Ok(())
 }
 
+fn update_work_unit_status(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+    status: &str,
+) -> Result<(), String> {
+    let json = connection
+        .query_row(
+            "SELECT work_unit_json FROM audit_work_units
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![campaign_id, work_unit_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let mut work_unit: AuditWorkUnit =
+        serde_json::from_str(&json).map_err(|error| error.to_string())?;
+    work_unit.status = status.to_string();
+    connection
+        .execute(
+            "UPDATE audit_work_units
+             SET status = ?3, work_unit_json = ?4, updated_at = ?5
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![
+                campaign_id,
+                work_unit_id,
+                status,
+                serde_json::to_string(&work_unit).map_err(|error| error.to_string())?,
+                now_millis() as i64,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn update_work_unit_claim_status(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+    claim: &AuditWorkUnitClaim,
+) -> Result<(), String> {
+    let json = connection
+        .query_row(
+            "SELECT work_unit_json FROM audit_work_units
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![campaign_id, work_unit_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let mut work_unit: AuditWorkUnit =
+        serde_json::from_str(&json).map_err(|error| error.to_string())?;
+    work_unit.status = claim.status.clone();
+    work_unit.claimed_by_agent_id = Some(claim.worker_agent_id.clone());
+    work_unit.claim_id = Some(claim.claim_id.clone());
+    work_unit.claimed_at = Some(claim.created_at.clone());
+    connection
+        .execute(
+            "UPDATE audit_work_units
+             SET status = ?3, work_unit_json = ?4, updated_at = ?5
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![
+                campaign_id,
+                work_unit_id,
+                claim.status,
+                serde_json::to_string(&work_unit).map_err(|error| error.to_string())?,
+                now_millis() as i64,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn campaign_in_connection(
     connection: &Connection,
     campaign_id: &str,
 ) -> Result<ProtocolAuditCampaign, String> {
     let json = connection
+        .query_row(
+            "SELECT campaign_json FROM protocol_audit_campaigns WHERE campaign_id = ?1",
+            params![campaign_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn campaign_in_transaction(
+    transaction: &Transaction<'_>,
+    campaign_id: &str,
+) -> Result<ProtocolAuditCampaign, String> {
+    let json = transaction
         .query_row(
             "SELECT campaign_json FROM protocol_audit_campaigns WHERE campaign_id = ?1",
             params![campaign_id],
@@ -1789,6 +2042,58 @@ fn work_units_in_connection(
         .prepare(
             "SELECT work_unit_json FROM audit_work_units
              WHERE campaign_id = ?1 ORDER BY created_at, work_unit_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![campaign_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
+fn work_unit_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+) -> Result<AuditWorkUnit, String> {
+    let json = connection
+        .query_row(
+            "SELECT work_unit_json FROM audit_work_units
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![campaign_id, work_unit_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn work_unit_in_transaction(
+    transaction: &Transaction<'_>,
+    campaign_id: &str,
+    work_unit_id: &str,
+) -> Result<AuditWorkUnit, String> {
+    let json = transaction
+        .query_row(
+            "SELECT work_unit_json FROM audit_work_units
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![campaign_id, work_unit_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+
+fn claims_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+) -> Result<Vec<AuditWorkUnitClaim>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT claim_json FROM audit_work_unit_claims
+             WHERE campaign_id = ?1 ORDER BY created_at, claim_id",
         )
         .map_err(|error| error.to_string())?;
     let rows = statement
@@ -1903,8 +2208,8 @@ mod tests {
     use crate::{
         atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
         audit_labor::{
-            signed_contribution, signed_verification, AuditFinding, ContributionArtifact,
-            CoverageItem, RuntimeDescriptor, VerificationEvidence,
+            signed_contribution, signed_verification, signed_work_unit_claim, AuditFinding,
+            ContributionArtifact, CoverageItem, RuntimeDescriptor, VerificationEvidence,
         },
         audit_profile::{contract_hash, AuditContract, ReceiptApproval, RepositoryTarget},
         bundle::{export_campaign_report_bundle_to, export_receipt_bundle_to},
@@ -1950,6 +2255,9 @@ mod tests {
                 "Privileged key compromise".to_string(),
             ],
             Some("AAVE Immunefi scope handoff".to_string()),
+            None,
+            Vec::new(),
+            None,
             requester_agent,
         )
         .unwrap()
@@ -1975,6 +2283,9 @@ mod tests {
             compensation: "100".to_string(),
             currency: "ATP Credits".to_string(),
             scope: vec!["Dependency risk".to_string()],
+            audit_brief_text: None,
+            attachment_text: None,
+            custom_skill_text: None,
             requester_agent_id: local_agent.clone(),
             created_at: now_millis(),
         };
@@ -2027,6 +2338,9 @@ mod tests {
             compensation: "100".to_string(),
             currency: "ATP Credits".to_string(),
             scope: vec!["Repository audit".to_string()],
+            audit_brief_text: None,
+            attachment_text: None,
+            custom_skill_text: None,
             requester_agent_id: requester_agent.clone(),
             created_at: now_millis(),
         };
@@ -2176,6 +2490,15 @@ mod tests {
         )
         .unwrap();
         store.record_contribution(&accepted_contribution).unwrap();
+        let submitted_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        assert_eq!(
+            submitted_units
+                .iter()
+                .find(|unit| unit.work_unit_id == accepted_contribution.work_unit_id)
+                .unwrap()
+                .status,
+            "submitted"
+        );
         let accepted_verification = signed_verification(
             &verifier,
             campaign.campaign_id.clone(),
@@ -2192,6 +2515,15 @@ mod tests {
         .unwrap();
         let allocations = store.record_verification(&accepted_verification).unwrap();
         assert_eq!(allocations.len(), 2);
+        let accepted_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        assert_eq!(
+            accepted_units
+                .iter()
+                .find(|unit| unit.work_unit_id == accepted_contribution.work_unit_id)
+                .unwrap()
+                .status,
+            "accepted"
+        );
         assert!(allocations
             .iter()
             .all(|allocation| allocation.contribution_receipt_hash
@@ -2237,6 +2569,15 @@ mod tests {
             .record_verification(&rejected_verification)
             .unwrap()
             .is_empty());
+        let rejected_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        assert_eq!(
+            rejected_units
+                .iter()
+                .find(|unit| unit.work_unit_id == rejected_contribution.work_unit_id)
+                .unwrap()
+                .status,
+            "rejected"
+        );
 
         let snapshot = store
             .campaign_report_snapshot(&campaign.campaign_id)
@@ -2252,11 +2593,94 @@ mod tests {
         assert!(bundle.join("receipts/README.md").is_file());
         let report = fs::read_to_string(bundle.join("report.md")).unwrap();
         let findings_section = report
-            .split("## Rejected / Duplicate / Non-reportable Leads")
+            .split("## Non-reportable, Rejected, Or Duplicate Leads")
             .next()
             .unwrap();
+        assert!(report.contains("## Document Control"));
+        assert!(report.contains("## Audit Pass Matrix"));
+        assert!(report.contains("## Evidence Arbitration"));
+        assert!(report.contains("## Runtime And Receipt Appendix"));
         assert!(!findings_section.contains("Duplicate lead"));
         assert!(report.contains("Duplicate lead"));
+    }
+
+    #[test]
+    fn work_unit_claims_are_signed_and_prevent_conflicting_worker_submissions() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let other_worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+
+        let claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+        let claimed = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.work_unit_id == work_unit.work_unit_id)
+            .unwrap();
+        assert_eq!(claimed.status, "claimed");
+        assert_eq!(
+            claimed.claimed_by_agent_id.as_deref(),
+            Some(agent_id(&worker.public()).as_str())
+        );
+
+        let conflicting_claim =
+            signed_work_unit_claim(&other_worker, &campaign, &work_unit).unwrap();
+        assert!(store.record_work_unit_claim(&conflicting_claim).is_err());
+
+        let wrong_worker_contribution = signed_contribution(
+            &other_worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Attempted to submit work for another node's claim.".to_string(),
+            vec![],
+            vec![labor_artifact("wrong-worker.md")],
+            vec![CoverageItem {
+                area: "claim enforcement".to_string(),
+                status: "attempted".to_string(),
+                evidence: vec!["Submission should be rejected.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        assert!(store
+            .record_contribution(&wrong_worker_contribution)
+            .is_err());
+
+        let claimed_worker_contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id,
+            RuntimeDescriptor::deterministic_fixture(),
+            "Submitted repo inventory for the claimed work unit.".to_string(),
+            vec![],
+            vec![labor_artifact("repo-map.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Pinned tree inventoried.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        store
+            .record_contribution(&claimed_worker_contribution)
+            .unwrap();
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.contributions.len(), 1);
     }
 
     #[tokio::test]
@@ -2292,6 +2716,9 @@ mod tests {
                     compensation: "100".to_string(),
                     currency: "ATP Credits".to_string(),
                     scope: scope.clone(),
+                    audit_brief_text: None,
+                    attachment_text: None,
+                    custom_skill_text: None,
                     requester_agent_id: requester_agent.clone(),
                     created_at: now_millis(),
                 },
