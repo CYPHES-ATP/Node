@@ -10,12 +10,13 @@ mod store;
 mod worker;
 
 use commands::{
-    accept_offer, approve_result, connect_peer, create_audit, create_protocol_campaign,
-    export_campaign_report, get_campaign_snapshot, get_credit_summary, get_network_info, get_peers,
-    list_audits, list_local_model_models, list_local_model_providers, list_protocol_campaigns,
-    migrate_legacy_jobs, offer_audit, record_campaign_contribution, route_audit,
-    run_accepted_audit_pipeline, run_accepted_audit_skill, run_audit, run_campaign_audit_pipeline,
-    run_campaign_audit_skill, start_node, verify_campaign_contribution,
+    accept_offer, approve_result, claim_campaign_work_unit, connect_peer, create_audit,
+    create_protocol_campaign, export_campaign_report, get_campaign_snapshot, get_credit_summary,
+    get_network_info, get_peers, list_audits, list_local_model_models, list_local_model_providers,
+    list_protocol_campaigns, migrate_legacy_jobs, offer_audit, record_campaign_contribution,
+    route_audit, run_accepted_audit_pipeline, run_accepted_audit_skill, run_audit,
+    run_campaign_audit_pipeline, run_campaign_audit_skill, run_claimed_work_unit, start_node,
+    verify_campaign_contribution,
 };
 use state::P2pState;
 use store::AtpStore;
@@ -96,6 +97,8 @@ pub fn run() {
             create_protocol_campaign,
             record_campaign_contribution,
             run_campaign_audit_skill,
+            claim_campaign_work_unit,
+            run_claimed_work_unit,
             run_campaign_audit_pipeline,
             run_accepted_audit_skill,
             run_accepted_audit_pipeline,

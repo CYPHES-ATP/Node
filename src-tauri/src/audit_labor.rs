@@ -16,11 +16,61 @@ use crate::{
 
 pub const CAMPAIGN_PROFILE: &str = "cyphes.protocol-audit-campaign/0.1";
 pub const WORK_UNIT_PROFILE: &str = "cyphes.audit-work-unit/0.1";
+pub const WORK_UNIT_CLAIM_PROFILE: &str = "cyphes.audit-work-unit-claim/0.1";
 pub const CONTRIBUTION_PROFILE: &str = "cyphes.audit-contribution/0.1";
 pub const VERIFICATION_PROFILE: &str = "cyphes.verification-result/0.1";
 pub const CREDIT_PROFILE: &str = "cyphes.credit-ledger/0.1";
 pub const FINAL_REPORT_PROFILE: &str = "cyphes.final-audit-report/0.1";
 pub const AUDIT_LABOR_PROFILE_VERSION: &str = "0.1";
+pub const DEFAULT_SKILL_PACK_ID: &str = "cyphes-audit-skill";
+pub const DEFAULT_SKILL_PACK_VERSION: &str = "0.4";
+pub const DEFAULT_SKILL_PACK_LABEL: &str = "CYPHES audit methodology v0.4";
+
+const DEFAULT_AUDIT_SKILL_TEXT: &str =
+    include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillPackReference {
+    pub skill_pack_id: String,
+    pub version: String,
+    pub hash: String,
+    pub label: String,
+}
+
+impl Default for SkillPackReference {
+    fn default() -> Self {
+        default_skill_pack_reference()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CampaignAttachment {
+    pub attachment_id: String,
+    pub label: String,
+    pub media_type: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+impl CampaignAttachment {
+    pub fn from_text(label: String, text: String) -> Result<Self, String> {
+        if label.trim().is_empty() || text.trim().is_empty() {
+            return Err("campaign attachment requires a label and text".to_string());
+        }
+        Ok(Self {
+            attachment_id: format!("attachment_{}", Uuid::new_v4().simple()),
+            label,
+            media_type: "text/markdown".to_string(),
+            sha256: sha256_ref(text.as_bytes()),
+            size_bytes: text.len() as u64,
+            text: Some(text),
+        })
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +86,16 @@ pub struct ProtocolAuditCampaign {
     pub out_of_scope: Vec<String>,
     pub audit_brief_hash: Option<String>,
     pub audit_brief_text: Option<String>,
+    #[serde(default)]
+    pub skill_pack: SkillPackReference,
+    #[serde(default)]
+    pub attachments: Vec<CampaignAttachment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_skill_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_skill_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_skill_text: Option<String>,
     pub requester_agent_id: String,
     pub status: String,
     pub created_at: String,
@@ -51,12 +111,23 @@ impl ProtocolAuditCampaign {
         impacts_in_scope: Vec<String>,
         out_of_scope: Vec<String>,
         audit_brief_text: Option<String>,
+        skill_pack: Option<SkillPackReference>,
+        attachments: Vec<CampaignAttachment>,
+        custom_skill_text: Option<String>,
         requester_agent_id: String,
     ) -> Result<Self, String> {
         validate_repository_target(&repository)?;
         if protocol_name.trim().is_empty() || scope_text.trim().is_empty() {
             return Err("protocol name and scope are required".to_string());
         }
+        for attachment in &attachments {
+            validate_campaign_attachment(attachment)?;
+        }
+        let custom_skill_hash = custom_skill_text
+            .as_ref()
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| sha256_ref(text.as_bytes()));
+        let custom_skill_text = custom_skill_text.filter(|text| !text.trim().is_empty());
         let now = now_rfc3339();
         let campaign_id = format!(
             "campaign_{}_{}",
@@ -78,6 +149,13 @@ impl ProtocolAuditCampaign {
             out_of_scope,
             audit_brief_hash,
             audit_brief_text,
+            skill_pack: skill_pack.unwrap_or_default(),
+            attachments,
+            custom_skill_hash,
+            custom_skill_label: custom_skill_text
+                .as_ref()
+                .map(|_| "Requester custom SKILL.md overlay".to_string()),
+            custom_skill_text,
             requester_agent_id,
             status: "open".to_string(),
             created_at: now.clone(),
@@ -98,7 +176,32 @@ pub struct AuditWorkUnit {
     pub instructions: String,
     pub expected_artifacts: Vec<String>,
     pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_by_agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditWorkUnitClaim {
+    pub profile: String,
+    pub profile_version: String,
+    pub claim_id: String,
+    pub campaign_id: String,
+    pub work_unit_id: String,
+    pub requester_agent_id: String,
+    pub worker_agent_id: String,
+    pub status: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    pub public_key_base64_url: String,
+    pub claim_hash: String,
+    pub signature: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -271,6 +374,8 @@ pub struct CreditSummary {
 pub struct CampaignReportSnapshot {
     pub campaign: ProtocolAuditCampaign,
     pub work_units: Vec<AuditWorkUnit>,
+    #[serde(default)]
+    pub claims: Vec<AuditWorkUnitClaim>,
     pub contributions: Vec<NodeContribution>,
     pub verifications: Vec<VerificationResult>,
     pub credits: Vec<CreditAllocation>,
@@ -350,10 +455,48 @@ pub fn default_work_units(campaign: &ProtocolAuditCampaign) -> Vec<AuditWorkUnit
                     .map(|artifact| (*artifact).to_string())
                     .collect(),
                 status: "open".to_string(),
+                claimed_by_agent_id: None,
+                claim_id: None,
+                claimed_at: None,
                 created_at: now_rfc3339(),
             },
         )
         .collect()
+}
+
+pub fn signed_work_unit_claim(
+    keypair: &identity::Keypair,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
+) -> Result<AuditWorkUnitClaim, String> {
+    validate_campaign(campaign)?;
+    validate_work_unit(work_unit)?;
+    if work_unit.campaign_id != campaign.campaign_id {
+        return Err("work unit does not belong to campaign".to_string());
+    }
+    let worker_agent_id = agent_id(&keypair.public());
+    if worker_agent_id == campaign.requester_agent_id {
+        return Err("requester cannot remotely claim its own campaign work unit".to_string());
+    }
+    let public_key = raw_ed25519_public_key(&keypair.public())?;
+    let mut claim = AuditWorkUnitClaim {
+        profile: WORK_UNIT_CLAIM_PROFILE.to_string(),
+        profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
+        claim_id: format!("claim_{}", Uuid::new_v4().simple()),
+        campaign_id: campaign.campaign_id.clone(),
+        work_unit_id: work_unit.work_unit_id.clone(),
+        requester_agent_id: campaign.requester_agent_id.clone(),
+        worker_agent_id,
+        status: "claimed".to_string(),
+        created_at: now_rfc3339(),
+        expires_at: None,
+        public_key_base64_url: URL_SAFE_NO_PAD.encode(public_key),
+        claim_hash: String::new(),
+        signature: String::new(),
+    };
+    claim.claim_hash = canonical_hash(&claim_signature_value(&claim)?)?;
+    claim.signature = sign_canonical(keypair, &claim_signature_value(&claim)?)?;
+    Ok(claim)
 }
 
 pub fn signed_contribution(
@@ -477,6 +620,25 @@ pub fn verify_signed_verification(verification: &VerificationResult) -> Result<(
         &public_key,
         &verification_signature_value(verification)?,
         &verification.signature,
+    )
+}
+
+pub fn verify_signed_work_unit_claim(claim: &AuditWorkUnitClaim) -> Result<(), String> {
+    validate_work_unit_claim(claim)?;
+    let public_bytes = URL_SAFE_NO_PAD
+        .decode(&claim.public_key_base64_url)
+        .map_err(|_| "claim public key is not valid base64url".to_string())?;
+    let public_key = public_key_from_raw_ed25519(&public_bytes)?;
+    if agent_id(&public_key) != claim.worker_agent_id {
+        return Err("claim key does not match worker identity".to_string());
+    }
+    if claim.claim_hash != canonical_hash(&claim_signature_value(claim)?)? {
+        return Err("claim hash mismatch".to_string());
+    }
+    verify_canonical(
+        &public_key,
+        &claim_signature_value(claim)?,
+        &claim.signature,
     )
 }
 
@@ -641,6 +803,9 @@ pub fn final_report_markdown(snapshot: &CampaignReportSnapshot) -> String {
          | Repository | `{}` |\n\
          | Pinned commit | `{}` |\n\
          | Campaign | `{}` |\n\
+         | Skill pack | `{}` `{}` |\n\
+         | Skill pack hash | `{}` |\n\
+         | Custom SKILL overlay | `{}` |\n\
          | Profile | `cyphes.final-audit-report/0.1` |\n\
          | Evidence rule | Accepted CYPHES receipts only |\n\n\
          ## Executive Summary\n\n\
@@ -650,6 +815,14 @@ pub fn final_report_markdown(snapshot: &CampaignReportSnapshot) -> String {
         snapshot.campaign.repository.full_name,
         snapshot.campaign.repository.commit_sha,
         snapshot.campaign.campaign_id,
+        snapshot.campaign.skill_pack.skill_pack_id,
+        snapshot.campaign.skill_pack.version,
+        snapshot.campaign.skill_pack.hash,
+        snapshot
+            .campaign
+            .custom_skill_hash
+            .as_deref()
+            .unwrap_or("none"),
         snapshot.contributions.len(),
         plural(snapshot.contributions.len()),
         snapshot.campaign.protocol_name,
@@ -680,9 +853,22 @@ pub fn final_report_markdown(snapshot: &CampaignReportSnapshot) -> String {
         report.push_str(brief);
         report.push_str("\n\n");
     }
+    if !snapshot.campaign.attachments.is_empty() {
+        report.push_str("### Requester Attachments\n\n| Label | Media Type | Hash | Bytes |\n| --- | --- | --- | ---: |\n");
+        for attachment in &snapshot.campaign.attachments {
+            report.push_str(&format!(
+                "| {} | `{}` | `{}` | {} |\n",
+                markdown_table_cell(&attachment.label),
+                attachment.media_type,
+                attachment.sha256,
+                attachment.size_bytes
+            ));
+        }
+        report.push('\n');
+    }
 
     report.push_str(
-        "## Methodology\n\nCYPHES v0.4 decomposes repository review into professional audit passes: scope mapping, repository inventory, dependency/config review, exploit-class analysis, finding validation, final report synthesis, and peer verification. Local model output is only accepted into the final report after it is signed and verified.\n\n",
+        "## Methodology\n\nCYPHES v0.5 decomposes repository review into remotely claimable professional audit passes: scope mapping, repository inventory, dependency/config review, exploit-class analysis, finding validation, final report synthesis, and peer verification. Local model output is only accepted into the final report after it is signed and verified.\n\n",
     );
 
     report.push_str("## Audit Pass Matrix\n\n| Pass | Status | Contributions | Accepted | Receipt evidence |\n| --- | --- | ---: | ---: | --- |\n");
@@ -705,14 +891,32 @@ pub fn final_report_markdown(snapshot: &CampaignReportSnapshot) -> String {
                 .collect::<Vec<_>>()
                 .join("<br>")
         };
+        let status = match (unit.status.as_str(), unit.claimed_by_agent_id.as_deref()) {
+            ("claimed", Some(agent)) => format!("claimed by `{}`", agent),
+            _ => unit.status.clone(),
+        };
         report.push_str(&format!(
             "| {} | `{}` | {} | {} | {} |\n",
             markdown_table_cell(&unit.title),
-            unit.status,
+            markdown_table_cell(&status),
             unit_contributions.len(),
             unit_accepted,
             receipts
         ));
+    }
+
+    if !snapshot.claims.is_empty() {
+        report.push_str("\n## Work Unit Claims\n\n| Work Unit | Worker | Claim | Status |\n| --- | --- | --- | --- |\n");
+        for claim in &snapshot.claims {
+            report.push_str(&format!(
+                "| {} | `{}` | `{}` | `{}` |\n",
+                markdown_table_cell(&work_unit_title(snapshot, &claim.work_unit_id)),
+                claim.worker_agent_id,
+                claim.claim_id,
+                claim.status
+            ));
+        }
+        report.push('\n');
     }
 
     report.push_str("\n## Evidence Arbitration\n\n");
@@ -906,7 +1110,55 @@ pub fn validate_campaign(campaign: &ProtocolAuditCampaign) -> Result<(), String>
         return Err("invalid protocol audit campaign profile or identifiers".to_string());
     }
     validate_repository_target(&campaign.repository)?;
+    validate_skill_pack(&campaign.skill_pack)?;
+    for attachment in &campaign.attachments {
+        validate_campaign_attachment(attachment)?;
+    }
+    if let Some(text) = &campaign.custom_skill_text {
+        let hash = campaign
+            .custom_skill_hash
+            .as_deref()
+            .ok_or_else(|| "custom SKILL text requires a custom skill hash".to_string())?;
+        if sha256_ref(text.as_bytes()) != hash {
+            return Err("custom SKILL hash does not match custom SKILL text".to_string());
+        }
+    }
     Ok(())
+}
+
+pub fn validate_work_unit(work_unit: &AuditWorkUnit) -> Result<(), String> {
+    if work_unit.profile != WORK_UNIT_PROFILE
+        || work_unit.profile_version != AUDIT_LABOR_PROFILE_VERSION
+        || work_unit.work_unit_id.trim().is_empty()
+        || work_unit.campaign_id.trim().is_empty()
+        || work_unit.kind.trim().is_empty()
+        || work_unit.title.trim().is_empty()
+        || work_unit.instructions.trim().is_empty()
+        || work_unit.expected_artifacts.is_empty()
+    {
+        return Err("invalid audit work unit".to_string());
+    }
+    Ok(())
+}
+
+pub fn validate_work_unit_claim(claim: &AuditWorkUnitClaim) -> Result<(), String> {
+    if claim.profile != WORK_UNIT_CLAIM_PROFILE
+        || claim.profile_version != AUDIT_LABOR_PROFILE_VERSION
+        || claim.claim_id.trim().is_empty()
+        || claim.campaign_id.trim().is_empty()
+        || claim.work_unit_id.trim().is_empty()
+        || claim.requester_agent_id.trim().is_empty()
+        || claim.worker_agent_id.trim().is_empty()
+        || claim.requester_agent_id == claim.worker_agent_id
+        || claim.claim_hash.trim().is_empty()
+        || claim.signature.trim().is_empty()
+    {
+        return Err("invalid signed work unit claim".to_string());
+    }
+    match claim.status.as_str() {
+        "claimed" | "released" | "expired" => Ok(()),
+        _ => Err("unsupported work unit claim status".to_string()),
+    }
 }
 
 pub fn validate_contribution(contribution: &NodeContribution) -> Result<(), String> {
@@ -981,6 +1233,16 @@ fn verification_signature_value(
     Ok(value)
 }
 
+fn claim_signature_value(claim: &AuditWorkUnitClaim) -> Result<serde_json::Value, String> {
+    let mut value = serde_json::to_value(claim).map_err(|error| error.to_string())?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "claim must serialize as an object".to_string())?;
+    object.remove("claimHash");
+    object.remove("signature");
+    Ok(value)
+}
+
 fn contribution_receipt_hash(contribution: &NodeContribution) -> Result<String, String> {
     canonical_hash(&json!({
         "profile": CONTRIBUTION_PROFILE,
@@ -1000,6 +1262,15 @@ fn canonical_hash<T: Serialize>(value: &T) -> Result<String, String> {
     Ok(sha256_ref(&bytes))
 }
 
+pub fn default_skill_pack_reference() -> SkillPackReference {
+    SkillPackReference {
+        skill_pack_id: DEFAULT_SKILL_PACK_ID.to_string(),
+        version: DEFAULT_SKILL_PACK_VERSION.to_string(),
+        hash: sha256_ref(DEFAULT_AUDIT_SKILL_TEXT.as_bytes()),
+        label: DEFAULT_SKILL_PACK_LABEL.to_string(),
+    }
+}
+
 fn validate_repository_target(repository: &RepositoryTarget) -> Result<(), String> {
     if repository.full_name.split('/').count() != 2
         || repository.url != format!("https://github.com/{}", repository.full_name)
@@ -1009,6 +1280,38 @@ fn validate_repository_target(repository: &RepositoryTarget) -> Result<(), Strin
             "campaign repository must be a public GitHub repository pinned to a commit SHA"
                 .to_string(),
         );
+    }
+    Ok(())
+}
+
+fn validate_skill_pack(skill_pack: &SkillPackReference) -> Result<(), String> {
+    if skill_pack.skill_pack_id.trim().is_empty()
+        || skill_pack.version.trim().is_empty()
+        || skill_pack.label.trim().is_empty()
+        || !is_sha256_ref(&skill_pack.hash)
+    {
+        return Err("skill pack requires id, version, label, and SHA-256 hash".to_string());
+    }
+    Ok(())
+}
+
+fn validate_campaign_attachment(attachment: &CampaignAttachment) -> Result<(), String> {
+    if attachment.attachment_id.trim().is_empty()
+        || attachment.label.trim().is_empty()
+        || attachment.media_type.trim().is_empty()
+        || attachment.size_bytes == 0
+        || !is_sha256_ref(&attachment.sha256)
+    {
+        return Err(
+            "campaign attachment requires id, label, media type, size, and SHA-256".to_string(),
+        );
+    }
+    if let Some(text) = &attachment.text {
+        if text.len() as u64 != attachment.size_bytes
+            || sha256_ref(text.as_bytes()) != attachment.sha256
+        {
+            return Err("campaign attachment text does not match recorded hash".to_string());
+        }
     }
     Ok(())
 }
@@ -1145,6 +1448,9 @@ mod tests {
             vec!["principal theft".to_string()],
             vec!["best practice notes".to_string()],
             Some("brief".to_string()),
+            None,
+            Vec::new(),
+            None,
             requester,
         )
         .unwrap();
@@ -1223,6 +1529,7 @@ mod tests {
         let snapshot = CampaignReportSnapshot {
             campaign: campaign.clone(),
             work_units: default_work_units(&campaign),
+            claims: Vec::new(),
             contributions: vec![accepted.clone(), rejected.clone()],
             verifications: vec![accepted_verification.clone(), rejected_verification],
             credits: allocate_credits(&accepted, &accepted_verification).unwrap(),

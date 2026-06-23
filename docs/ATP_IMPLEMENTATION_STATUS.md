@@ -9,14 +9,15 @@ L2-style signed context leases. It completes and independently verifies one
 zero-value work order, but it is not a full implementation of every ATP
 profile, terminal path, settlement rail, or internet discovery mechanism.
 
-The product layer now also includes a local v0.4 `Run Audit Pipeline`
-audit-labor slice. Protocol audit campaigns can be created from a pinned
-repository and scope, decomposed into professional work units, completed by
-multi-pass signed node contributions, accepted or rejected by signed verifier
-decisions, assigned receipt-backed ATP Credits, and exported as a professional
-markdown report bundle. This is local persistence and receipt accounting, not
-global campaign discovery, token settlement, or autonomous OpenClaw/Hermes
-execution yet.
+The product layer now also includes a v0.5 audit-labor slice. Protocol audit
+campaigns can be created from a pinned repository, scope, audit brief, hashed
+attachments, and optional custom `SKILL.md` overlay. CYPHES decomposes campaigns
+into professional work units, broadcasts campaigns to discovered peers, lets
+remote nodes claim individual work units, accepts signed node contributions,
+records signed verifier decisions, assigns receipt-backed ATP Credits, and
+exports a professional markdown report bundle. This is online peer coordination
+and local receipt accounting, not durable global indexing, token settlement, or
+autonomous OpenClaw/Hermes execution yet.
 
 The verified path is:
 
@@ -82,20 +83,25 @@ an ATP v0.3 wire verb.
 
 | Capability | Status |
 | --- | --- |
-| Protocol audit campaign object | Implemented locally |
+| Protocol audit campaign object | Implemented |
 | Mandatory pinned commit for campaigns | Implemented |
-| Work-unit decomposition | Implemented locally |
-| Signed node contribution object | Implemented locally |
+| Audit brief, attachment hashes, and custom SKILL overlay hash | Implemented |
+| Work-unit decomposition | Implemented |
+| Remote campaign broadcast to online peers | Implemented |
+| Signed first-claim-wins work-unit claims | Implemented |
+| Claimed-worker contribution enforcement | Implemented |
+| Remote claimed work-unit execution and contribution return | Implemented |
+| Signed node contribution object | Implemented |
 | Signed verifier result object | Implemented locally |
 | ATP Credit allocation from accepted receipts | Implemented locally |
 | Rejected/duplicate/non-reportable lead appendix | Implemented locally |
-| v0.4 multi-pass audit pipeline | Implemented locally |
+| v0.5 local/remote audit skill execution | Implemented |
 | Professional markdown report bundle export | Implemented locally |
 | LM Studio local model runtime | Implemented locally |
 | Ollama local model runtime | Implemented locally |
 | Runtime progress and tokens/sec events | Implemented locally |
-| Versioned audit skill hash in contribution runtime | Implemented locally |
-| Network-wide campaign/work discovery | Not implemented |
+| Effective skill hash in contribution runtime | Implemented locally |
+| Durable network-wide campaign/work index | Not implemented |
 | OpenClaw/Hermes runtime adapter | Not implemented |
 | Live bounty intake or payout | Not implemented |
 | ERC-20 or escrow settlement | Intentionally deferred |

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/audit-work-unit-claim.v0.1.schema.json",
+  "title": "CYPHES Audit Work Unit Claim",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "profile",
+    "profileVersion",
+    "claimId",
+    "campaignId",
+    "workUnitId",
+    "requesterAgentId",
+    "workerAgentId",
+    "status",
+    "createdAt",
+    "publicKeyBase64Url",
+    "claimHash",
+    "signature"
+  ],
+  "properties": {
+    "profile": { "const": "cyphes.audit-work-unit-claim/0.1" },
+    "profileVersion": { "const": "0.1" },
+    "claimId": { "type": "string", "minLength": 1 },
+    "campaignId": { "type": "string", "minLength": 1 },
+    "workUnitId": { "type": "string", "minLength": 1 },
+    "requesterAgentId": { "type": "string", "minLength": 1 },
+    "workerAgentId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["claimed", "released", "expired"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+    "publicKeyBase64Url": { "type": "string", "minLength": 1 },
+    "claimHash": { "$ref": "#/$defs/sha256" },
+    "signature": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-fA-F]{64}$"
+    }
+  }
+}

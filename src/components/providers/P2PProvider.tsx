@@ -37,6 +37,21 @@ export function P2PProvider({ children }: P2PProviderProps) {
             void p2p.refreshCreditSummary();
             setNotice(`Remote audit contribution received: ${event.payload.contributionId.slice(0, 22)}...`);
           }),
+          listen<{ campaignId: string; protocolName: string }>("audit:campaign_received", (event) => {
+            void p2p.loadProtocolCampaigns();
+            setNotice(`Remote campaign received: ${event.payload.protocolName || event.payload.campaignId}.`);
+          }),
+          listen<{ campaignId: string }>("audit:campaign_acknowledged", () => {
+            setNotice("Campaign accepted by a discovered CYPHES node.");
+          }),
+          listen<{ claimId: string }>("audit:work_unit_claimed", (event) => {
+            void p2p.loadProtocolCampaigns();
+            setNotice(`Work unit claimed by remote node: ${event.payload.claimId.slice(0, 22)}...`);
+          }),
+          listen<{ claimId: string }>("audit:work_unit_claim_acknowledged", (event) => {
+            void p2p.loadProtocolCampaigns();
+            setNotice(`Requester accepted work-unit claim: ${event.payload.claimId.slice(0, 22)}...`);
+          }),
           listen<{ contributionId: string }>("audit:contribution_acknowledged", (event) => {
             void p2p.loadProtocolCampaigns();
             setNotice(`Requester accepted audit contribution: ${event.payload.contributionId.slice(0, 22)}...`);

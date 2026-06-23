@@ -7,9 +7,10 @@ use crate::{
         agent_id, create_signed_envelope, create_signed_envelope_with_expiry, now_rfc3339, AtpVerb,
     },
     audit_labor::{
-        signed_contribution, signed_verification, AuditFinding, AuditWorkUnit,
-        CampaignReportSnapshot, ContributionArtifact, CoverageItem, CreditSummary,
-        NodeContribution, ProtocolAuditCampaign, RuntimeDescriptor, VerificationEvidence,
+        signed_contribution, signed_verification, signed_work_unit_claim, AuditFinding,
+        AuditWorkUnit, AuditWorkUnitClaim, CampaignAttachment, CampaignReportSnapshot,
+        ContributionArtifact, CoverageItem, CreditSummary, NodeContribution, ProtocolAuditCampaign,
+        RuntimeDescriptor, VerificationEvidence,
     },
     audit_profile::{is_git_commit_sha, AuditContract, ReceiptApproval, RepositoryTarget},
     audit_runtime::{
@@ -62,6 +63,8 @@ pub struct ProtocolCampaignRequest {
     pub impacts_in_scope: Vec<String>,
     pub out_of_scope: Vec<String>,
     pub audit_brief_text: Option<String>,
+    pub attachment_text: Option<String>,
+    pub custom_skill_text: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,7 +197,18 @@ pub async fn create_protocol_campaign(
     if !is_git_commit_sha(&request.repository.commit_sha) {
         return Err("Protocol audit campaigns must pin an exact Git commit SHA".to_string());
     }
-    let (keypair, _) = node_runtime(&state)?;
+    let (keypair, sender) = node_runtime(&state)?;
+    let mut attachments = Vec::new();
+    if let Some(text) = request
+        .attachment_text
+        .as_ref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        attachments.push(CampaignAttachment::from_text(
+            "Requester attachment".to_string(),
+            text.clone(),
+        )?);
+    }
     let campaign = ProtocolAuditCampaign::new(
         request.protocol_name,
         RepositoryTarget {
@@ -207,9 +221,15 @@ pub async fn create_protocol_campaign(
         request.impacts_in_scope,
         request.out_of_scope,
         request.audit_brief_text,
+        None,
+        attachments,
+        request.custom_skill_text,
         agent_id(&keypair.public()),
     )?;
     let campaign = store.create_protocol_campaign(&campaign)?;
+    sender
+        .send(SwarmCommand::SendCampaign(campaign.clone()))
+        .map_err(|error| error.to_string())?;
     let _ = app.emit("audit:labor_changed", ());
     Ok(campaign)
 }
@@ -309,6 +329,105 @@ pub async fn run_campaign_audit_skill(
         output.commands,
     )?;
     let contribution = store.record_contribution(&contribution)?;
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(contribution)
+}
+
+#[tauri::command]
+pub async fn claim_campaign_work_unit(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+    work_unit_id: String,
+) -> Result<AuditWorkUnitClaim, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let worker_agent_id = agent_id(&keypair.public());
+    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    if snapshot.campaign.requester_agent_id == worker_agent_id {
+        return Err(
+            "Requester already owns this campaign; remote claims are for other nodes.".to_string(),
+        );
+    }
+    let work_unit = snapshot
+        .work_units
+        .iter()
+        .find(|unit| unit.work_unit_id == work_unit_id)
+        .cloned()
+        .ok_or_else(|| "Campaign work unit not found".to_string())?;
+    if work_unit.status != "open" {
+        return Err("Only open work units can be claimed.".to_string());
+    }
+    let claim = signed_work_unit_claim(&keypair, &snapshot.campaign, &work_unit)?;
+    let claim = store.record_work_unit_claim(&claim)?;
+    sender
+        .send(SwarmCommand::SendWorkUnitClaim {
+            claim: claim.clone(),
+            audience: snapshot.campaign.requester_agent_id,
+        })
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(claim)
+}
+
+#[tauri::command]
+pub async fn run_claimed_work_unit(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+    work_unit_id: String,
+    provider: String,
+    model: String,
+) -> Result<NodeContribution, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let worker_agent_id = agent_id(&keypair.public());
+    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    let campaign = snapshot.campaign;
+    if campaign.requester_agent_id == worker_agent_id {
+        return Err("Use the requester pipeline for campaigns you created.".to_string());
+    }
+    let claim = snapshot
+        .claims
+        .iter()
+        .find(|claim| {
+            claim.work_unit_id == work_unit_id
+                && claim.worker_agent_id == worker_agent_id
+                && claim.status == "claimed"
+        })
+        .ok_or_else(|| "Claim the work unit before running it.".to_string())?;
+    let work_unit = snapshot
+        .work_units
+        .into_iter()
+        .find(|unit| unit.work_unit_id == claim.work_unit_id)
+        .ok_or_else(|| "Campaign work unit not found".to_string())?;
+    let output = run_local_audit_skill(
+        &app,
+        &campaign,
+        &work_unit,
+        &provider,
+        &model,
+        &snapshot.contributions,
+    )
+    .await?;
+    let contribution = signed_contribution(
+        &keypair,
+        campaign.campaign_id.clone(),
+        work_unit.work_unit_id,
+        output.runtime,
+        output.notes_markdown,
+        output.findings,
+        output.artifacts,
+        output.coverage,
+        output.commands,
+    )?;
+    let contribution = store.record_contribution(&contribution)?;
+    sender
+        .send(SwarmCommand::SendContribution {
+            contribution: contribution.clone(),
+            audience: campaign.requester_agent_id,
+        })
+        .map_err(|error| error.to_string())?;
     let _ = app.emit("audit:labor_changed", ());
     Ok(contribution)
 }
@@ -647,6 +766,9 @@ pub async fn create_audit(
     repository: RepositorySummary,
     compensation: String,
     scope: Vec<String>,
+    audit_brief_text: Option<String>,
+    attachment_text: Option<String>,
+    custom_skill_text: Option<String>,
 ) -> Result<AuditJob, String> {
     if repository.is_private {
         return Err("Private repositories are not supported".to_string());
@@ -685,6 +807,9 @@ pub async fn create_audit(
         compensation,
         currency: "ATP Credits".to_string(),
         scope,
+        audit_brief_text,
+        attachment_text,
+        custom_skill_text,
         requester_agent_id: requester_agent_id.clone(),
         created_at,
     };
@@ -978,6 +1103,9 @@ pub async fn migrate_legacy_jobs(
             compensation: legacy.compensation,
             currency: legacy.currency,
             scope: legacy.scope,
+            audit_brief_text: None,
+            attachment_text: None,
+            custom_skill_text: None,
             requester_agent_id: local_agent_id.clone(),
             created_at: legacy.created_at,
         };

@@ -175,6 +175,9 @@ function AppContent() {
   const p2p = useP2P();
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [compensation, setCompensation] = useState("100");
+  const [auditBrief, setAuditBrief] = useState("");
+  const [attachmentText, setAttachmentText] = useState("");
+  const [customSkillText, setCustomSkillText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [actionJobId, setActionJobId] = useState<string | null>(null);
   const [peerAddress, setPeerAddress] = useState("");
@@ -447,8 +450,14 @@ function AppContent() {
         repository,
         credits.toString(),
         inspected.scope,
+        auditBrief,
+        attachmentText,
+        customSkillText,
       );
       setRepositoryUrl("");
+      setAuditBrief("");
+      setAttachmentText("");
+      setCustomSkillText("");
       setNotice(
         peerCount > 0
           ? `Campaign and ATP request signed, committed, and sent to ${peerCount} ${peerCount === 1 ? "peer" : "peers"}.`
@@ -556,6 +565,52 @@ function AppContent() {
       setNotice(
         `${runtimeModel} produced ${contributions.length} signed v0.4 audit passes.`,
       );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
+  async function handleClaimWorkUnit(campaign: ProtocolAuditCampaign) {
+    setActionJobId(campaign.campaignId);
+    try {
+      const snapshot =
+        campaignSnapshots[campaign.campaignId] ||
+        (await refreshCampaignSnapshot(campaign.campaignId));
+      const unit = snapshot.workUnits.find((item) => item.status === "open");
+      if (!unit) throw new Error("No open work unit is claimable.");
+      const claim = await p2p.claimCampaignWorkUnit(campaign.campaignId, unit.workUnitId);
+      await refreshCampaignSnapshot(campaign.campaignId);
+      setNotice(`Claimed ${unit.title}. Claim ${claim.claimId.slice(0, 22)}... sent to requester.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionJobId(null);
+    }
+  }
+
+  async function handleRunClaimedWorkUnit(campaign: ProtocolAuditCampaign) {
+    setActionJobId(campaign.campaignId);
+    try {
+      if (!runtimeModel) {
+        throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
+      }
+      const snapshot =
+        campaignSnapshots[campaign.campaignId] ||
+        (await refreshCampaignSnapshot(campaign.campaignId));
+      const claim = snapshot.claims.find(
+        (item) => item.workerAgentId === agentId && item.status === "claimed",
+      );
+      if (!claim) throw new Error("Claim a work unit before running it.");
+      const contribution = await p2p.runClaimedWorkUnit(
+        campaign.campaignId,
+        claim.workUnitId,
+        runtimeProvider,
+        runtimeModel,
+      );
+      await refreshCampaignSnapshot(campaign.campaignId);
+      setNotice(`${runtimeModel} produced signed work for ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... sent.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -838,6 +893,40 @@ function AppContent() {
                 <p>Receipt-backed accounting only. No ERC-20, escrow, or bounty payout is represented in this build.</p>
               </div>
 
+              <label htmlFor="audit-brief">Audit brief</label>
+              <div className="input-shell textarea-shell">
+                <textarea
+                  id="audit-brief"
+                  onChange={(event) => setAuditBrief(event.currentTarget.value)}
+                  placeholder="Requester guidance, scope notes, bounty rules, threat model, or concerns."
+                  spellCheck={false}
+                  value={auditBrief}
+                />
+              </div>
+
+              <label htmlFor="attachments">Attachments / protocol docs</label>
+              <div className="input-shell textarea-shell">
+                <textarea
+                  id="attachments"
+                  onChange={(event) => setAttachmentText(event.currentTarget.value)}
+                  placeholder="Paste bounty policy, protocol docs, or PDF excerpts. CYPHES hashes this text into the campaign."
+                  spellCheck={false}
+                  value={attachmentText}
+                />
+              </div>
+
+              <details className="advanced-skill">
+                <summary>Advanced: custom SKILL.md overlay</summary>
+                <div className="input-shell textarea-shell">
+                  <textarea
+                    onChange={(event) => setCustomSkillText(event.currentTarget.value)}
+                    placeholder="Paste an optional SKILL.md overlay. CYPHES keeps the base skill pack and records this hash in receipts."
+                    spellCheck={false}
+                    value={customSkillText}
+                  />
+                </div>
+              </details>
+
               {formError ? <div className="form-error">{formError}</div> : null}
 
               <button
@@ -936,6 +1025,15 @@ function AppContent() {
                 const contributions = snapshot?.contributions.length || 0;
                 const accepted = snapshot?.verifications.filter((item) => item.decision === "accepted").length || 0;
                 const unverified = contributions - (snapshot?.verifications.length || 0);
+                const isMine = campaign.requesterAgentId === agentId;
+                const myClaim = snapshot?.claims.find(
+                  (item) => item.workerAgentId === agentId && item.status === "claimed",
+                );
+                const firstOpenUnit = snapshot?.workUnits.find((unit) => unit.status === "open");
+                const myClaimContribution = myClaim
+                  ? snapshot?.contributions.find((item) => item.workUnitId === myClaim.workUnitId && item.workerAgentId === agentId)
+                  : undefined;
+                const claimedCount = snapshot?.claims.filter((item) => item.status === "claimed").length || 0;
                 return (
                   <article className="campaign-card" key={campaign.campaignId}>
                     <div>
@@ -950,6 +1048,7 @@ function AppContent() {
                       </div>
                       <div className="repo-meta">
                         <span>{snapshot?.workUnits.length || 0} work units</span>
+                        <span>{claimedCount} claimed</span>
                         <span>{contributions} contributions</span>
                         <span>{accepted} accepted</span>
                         <span>
@@ -974,35 +1073,59 @@ function AppContent() {
                       ) : null}
                     </div>
                     <div className="campaign-actions">
-                      <button
-                        disabled={actionJobId === campaign.campaignId || !runtimeModel}
-                        onClick={() => void handleRunAuditPipeline(campaign)}
-                        type="button"
-                      >
-                        Run audit pipeline
-                        <ArrowRight size={14} />
-                      </button>
-                      <button
-                        disabled={actionJobId === campaign.campaignId}
-                        onClick={() => void handleVerifyQueue(campaign)}
-                        type="button"
-                      >
-                        Verify queue
-                        <ShieldCheck size={14} />
-                      </button>
-                      <button
-                        disabled={actionJobId === campaign.campaignId || contributions === 0}
-                        onClick={() => void handleExportCampaign(campaign)}
-                        type="button"
-                        title={
-                          contributions === 0
-                            ? "Run Audit Pipeline before exporting a report bundle."
-                            : undefined
-                        }
-                      >
-                        Export report
-                        <FileArchive size={14} />
-                      </button>
+                      {isMine ? (
+                        <>
+                          <button
+                            disabled={actionJobId === campaign.campaignId || !runtimeModel}
+                            onClick={() => void handleRunAuditPipeline(campaign)}
+                            type="button"
+                          >
+                            Run local pipeline
+                            <ArrowRight size={14} />
+                          </button>
+                          <button
+                            disabled={actionJobId === campaign.campaignId}
+                            onClick={() => void handleVerifyQueue(campaign)}
+                            type="button"
+                          >
+                            Verify queue
+                            <ShieldCheck size={14} />
+                          </button>
+                          <button
+                            disabled={actionJobId === campaign.campaignId || contributions === 0}
+                            onClick={() => void handleExportCampaign(campaign)}
+                            type="button"
+                            title={
+                              contributions === 0
+                                ? "Run or receive signed work before exporting a report bundle."
+                                : undefined
+                            }
+                          >
+                            Export report
+                            <FileArchive size={14} />
+                          </button>
+                        </>
+                      ) : myClaimContribution ? (
+                        <div className="job-outcome">Contribution sent: {myClaimContribution.receiptHash.slice(0, 19)}...</div>
+                      ) : myClaim ? (
+                        <button
+                          disabled={actionJobId === campaign.campaignId || !runtimeModel}
+                          onClick={() => void handleRunClaimedWorkUnit(campaign)}
+                          type="button"
+                        >
+                          {runtimeModel ? "Run claimed unit" : "Select local model"}
+                          <ArrowRight size={14} />
+                        </button>
+                      ) : (
+                        <button
+                          disabled={actionJobId === campaign.campaignId || !firstOpenUnit}
+                          onClick={() => void handleClaimWorkUnit(campaign)}
+                          type="button"
+                        >
+                          {firstOpenUnit ? "Claim work unit" : "No open units"}
+                          <ArrowRight size={14} />
+                        </button>
+                      )}
                     </div>
                   </article>
                 );
