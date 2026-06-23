@@ -14,8 +14,8 @@ use commands::{
     export_campaign_report, get_campaign_snapshot, get_credit_summary, get_network_info, get_peers,
     list_audits, list_local_model_models, list_local_model_providers, list_protocol_campaigns,
     migrate_legacy_jobs, offer_audit, record_campaign_contribution, route_audit,
-    run_accepted_audit_skill, run_audit, run_campaign_audit_skill, start_node,
-    verify_campaign_contribution,
+    run_accepted_audit_pipeline, run_accepted_audit_skill, run_audit, run_campaign_audit_pipeline,
+    run_campaign_audit_skill, start_node, verify_campaign_contribution,
 };
 use state::P2pState;
 use store::AtpStore;
@@ -96,7 +96,9 @@ pub fn run() {
             create_protocol_campaign,
             record_campaign_contribution,
             run_campaign_audit_skill,
+            run_campaign_audit_pipeline,
             run_accepted_audit_skill,
+            run_accepted_audit_pipeline,
             verify_campaign_contribution,
             export_campaign_report,
             get_credit_summary,

@@ -8,16 +8,17 @@ use tauri::{AppHandle, Emitter};
 use crate::{
     audit_labor::{
         sha256_ref, AuditFinding, AuditWorkUnit, ContributionArtifact, CoverageItem,
-        ProtocolAuditCampaign, RuntimeDescriptor,
+        NodeContribution, ProtocolAuditCampaign, RuntimeDescriptor,
     },
     audit_profile::RepositoryTarget,
 };
 
-const AUDIT_SKILL_TEXT: &str = include_str!("../../protocol/skills/cyphes-audit-skill.v0.1.md");
+const AUDIT_SKILL_TEXT: &str = include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
 const MAX_TREE_FILES: usize = 20_000;
 const MAX_SELECTED_FILES: usize = 16;
 const MAX_FILE_BYTES: usize = 28_000;
 const MAX_CONTEXT_BYTES: usize = 180_000;
+const MAX_MODEL_OUTPUT_TOKENS: u32 = 6_500;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,6 +196,7 @@ pub async fn run_local_audit_skill(
     work_unit: &AuditWorkUnit,
     provider: &str,
     model: &str,
+    prior_contributions: &[NodeContribution],
 ) -> Result<LocalAuditSkillRun, String> {
     let provider = normalize_provider(provider);
     if model.trim().is_empty() {
@@ -215,7 +217,7 @@ pub async fn run_local_audit_skill(
     let context = repository_context(&client, campaign).await?;
 
     emit_progress(app, campaign, work_unit, "Building model prompt", 32, None);
-    let prompt = build_prompt(campaign, work_unit, &context);
+    let prompt = build_prompt(campaign, work_unit, &context, prior_contributions);
     let input_hash = sha256_ref(prompt.as_bytes());
     let skill_hash = sha256_ref(AUDIT_SKILL_TEXT.as_bytes());
 
@@ -261,7 +263,8 @@ pub async fn run_local_audit_skill(
         "repository": campaign.repository,
         "workUnitId": work_unit.work_unit_id,
         "selectedFiles": context.selected_files.iter().map(|file| &file.path).collect::<Vec<_>>(),
-        "treeTruncated": context.truncated,
+            "treeTruncated": context.truncated,
+            "priorContributionCount": prior_contributions.len(),
     }))
     .map_err(|error| error.to_string())?;
     let findings_json =
@@ -393,7 +396,7 @@ async fn run_openai_compatible_chat(
         .json(&json!({
             "model": model,
             "temperature": 0.2,
-            "max_tokens": 2200,
+            "max_tokens": MAX_MODEL_OUTPUT_TOKENS,
             "messages": [
                 {
                     "role": "system",
@@ -443,7 +446,10 @@ async fn run_ollama_chat(
         .json(&json!({
             "model": model,
             "stream": false,
-            "options": {"temperature": 0.2},
+            "options": {
+                "temperature": 0.2,
+                "num_predict": MAX_MODEL_OUTPUT_TOKENS
+            },
             "messages": [
                 {
                     "role": "system",
@@ -496,7 +502,7 @@ async fn repository_context(
     );
     let response = client
         .get(tree_url)
-        .header(USER_AGENT, "CYPHES/0.2.4-dev")
+        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
         .header(ACCEPT, "application/vnd.github+json")
         .send()
         .await
@@ -696,7 +702,7 @@ async fn fetch_raw_file(
     );
     let response = client
         .get(url)
-        .header(USER_AGENT, "CYPHES/0.2.4-dev")
+        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -710,6 +716,7 @@ fn build_prompt(
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
     context: &RepositoryContext,
+    prior_contributions: &[NodeContribution],
 ) -> String {
     let mut prompt = format!(
         "{}\n\n\
@@ -726,6 +733,7 @@ fn build_prompt(
          # Repository Inventory\n\
          Tree truncated by GitHub: {}\n\
          Files inventoried: {}\n{}\n\n\
+         # Prior Accepted Or Submitted CYPHES Passes\n{}\n\n\
          # Selected File Context\n",
         AUDIT_SKILL_TEXT,
         campaign.protocol_name,
@@ -753,7 +761,8 @@ fn build_prompt(
             .take(250)
             .map(|path| format!("- {path}"))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n"),
+        prior_contribution_digest(prior_contributions)
     );
 
     for file in &context.selected_files {
@@ -763,6 +772,53 @@ fn build_prompt(
         ));
     }
     prompt
+}
+
+fn prior_contribution_digest(contributions: &[NodeContribution]) -> String {
+    if contributions.is_empty() {
+        return "No prior passes supplied for this campaign run.".to_string();
+    }
+    contributions
+        .iter()
+        .take(8)
+        .map(|contribution| {
+            let findings = if contribution.findings.is_empty() {
+                "no findings recorded".to_string()
+            } else {
+                contribution
+                    .findings
+                    .iter()
+                    .take(6)
+                    .map(|finding| {
+                        format!(
+                            "{} [{} / {}]: {}",
+                            finding.id, finding.severity, finding.status, finding.title
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            };
+            let coverage = contribution
+                .coverage
+                .iter()
+                .take(6)
+                .map(|item| format!("{}={}", item.area, item.status))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!(
+                "## Prior pass: {}\nWork unit: {}\nReceipt: {}\nModel: {} / {}\nCoverage: {}\nFindings/leads: {}\nNotes:\n{}\n",
+                contribution.contribution_id,
+                contribution.work_unit_id,
+                contribution.receipt_hash,
+                contribution.runtime.adapter,
+                contribution.runtime.model,
+                if coverage.is_empty() { "none declared" } else { &coverage },
+                findings,
+                truncate_bytes(&contribution.notes_markdown, 6_000)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Debug)]

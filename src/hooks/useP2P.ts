@@ -218,6 +218,20 @@ export function useP2P() {
     return contribution;
   }
 
+  async function runCampaignAuditPipeline(
+    campaignId: string,
+    provider: string,
+    model: string,
+  ) {
+    const contributions = await invoke<NodeContribution[]>("run_campaign_audit_pipeline", {
+      campaignId,
+      provider,
+      model,
+    });
+    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    return contributions;
+  }
+
   async function runAcceptedAuditSkill(
     jobId: string,
     provider: string,
@@ -230,6 +244,20 @@ export function useP2P() {
     });
     await Promise.all([loadAudits(), loadProtocolCampaigns(), refreshCreditSummary()]);
     return contribution;
+  }
+
+  async function runAcceptedAuditPipeline(
+    jobId: string,
+    provider: string,
+    model: string,
+  ) {
+    const contributions = await invoke<NodeContribution[]>("run_accepted_audit_pipeline", {
+      jobId,
+      provider,
+      model,
+    });
+    await Promise.all([loadAudits(), loadProtocolCampaigns(), refreshCreditSummary()]);
+    return contributions;
   }
 
   async function verifyCampaignContribution(
@@ -304,7 +332,9 @@ export function useP2P() {
     createProtocolCampaign,
     recordCampaignContribution,
     runCampaignAuditSkill,
+    runCampaignAuditPipeline,
     runAcceptedAuditSkill,
+    runAcceptedAuditPipeline,
     verifyCampaignContribution,
     exportCampaignReport,
     offerAudit,

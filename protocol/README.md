@@ -5,8 +5,9 @@ currently contains the original repository-audit transaction profile and the
 first protocol audit labor network objects.
 
 - `schemas/` contains JSON Schema 2020-12 profile definitions.
-- `skills/` contains the versioned CYPHES audit skill prompt and manifest used
-  by local model runtime receipts.
+- `skills/` contains versioned CYPHES audit skill prompts and manifests used
+  by local model runtime receipts. v0.4 is the current professional multi-pass
+  audit pipeline skill.
 - `fixtures/repository-audit-*.json` contains canonical structural examples.
 - `fixtures/atp-l1-repository-audit.valid/` is a real complete transaction
   bundle produced by CYPHES Node and accepted by Artifact Two.

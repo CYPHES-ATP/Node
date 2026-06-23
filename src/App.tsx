@@ -171,17 +171,6 @@ function shortCommit(commitSha: string) {
   return commitSha ? commitSha.slice(0, 7).toUpperCase() : "UNPINNED";
 }
 
-function preferredWorkUnit(snapshot: CampaignReportSnapshot) {
-  const preferredKind = snapshot.campaign.scopeText.toLowerCase().includes(".sol")
-    ? "defi-exploit-class-pass"
-    : "dependency-config-review";
-  return (
-    snapshot.workUnits.find((item) => item.status === "open" && item.kind === preferredKind) ||
-    snapshot.workUnits.find((item) => item.status === "open") ||
-    snapshot.workUnits[0]
-  );
-}
-
 function AppContent() {
   const p2p = useP2P();
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -530,13 +519,14 @@ function AppContent() {
       if (!runtimeModel) {
         throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
       }
-      const contribution = await p2p.runAcceptedAuditSkill(
+      const contributions = await p2p.runAcceptedAuditPipeline(
         job.id,
         runtimeProvider,
         runtimeModel,
       );
+      const lastContribution = contributions[contributions.length - 1];
       setNotice(
-        `${automatic ? "Accepted work started automatically. " : ""}${contribution.runtime?.model || runtimeModel} signed audit contribution ${contribution.receiptHash.slice(0, 19)}...`,
+        `${automatic ? "Accepted work started automatically. " : ""}${runtimeModel} signed ${contributions.length} v0.4 audit passes${lastContribution ? ` through ${lastContribution.receiptHash.slice(0, 19)}...` : "."}`,
       );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -551,24 +541,20 @@ function AppContent() {
     return snapshot;
   }
 
-  async function handleRunAuditSkill(campaign: ProtocolAuditCampaign) {
+  async function handleRunAuditPipeline(campaign: ProtocolAuditCampaign) {
     setActionJobId(campaign.campaignId);
     try {
       if (!runtimeModel) {
         throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
       }
-      const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
-      const unit = preferredWorkUnit(snapshot);
-      if (!unit) throw new Error("Campaign has no work units.");
-      const contribution = await p2p.runCampaignAuditSkill(
+      const contributions = await p2p.runCampaignAuditPipeline(
         campaign.campaignId,
-        unit.workUnitId,
         runtimeProvider,
         runtimeModel,
       );
       await refreshCampaignSnapshot(campaign.campaignId);
       setNotice(
-        `${contribution.runtime?.model || runtimeModel} produced signed contribution ${contribution.receiptHash.slice(0, 19)}...`,
+        `${runtimeModel} produced ${contributions.length} signed v0.4 audit passes.`,
       );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -577,19 +563,22 @@ function AppContent() {
     }
   }
 
-  async function handleVerifyLatest(campaign: ProtocolAuditCampaign) {
+  async function handleVerifyQueue(campaign: ProtocolAuditCampaign) {
     setActionJobId(campaign.campaignId);
     try {
       const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
       const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
-      const contribution = snapshot.contributions.find(
+      const pending = snapshot.contributions.filter(
         (item) => !verifiedIds.has(item.contributionId),
       );
-      if (!contribution) throw new Error("No unverified contribution is available.");
-      const credits = await p2p.verifyCampaignContribution(contribution.contributionId);
+      if (pending.length === 0) throw new Error("No unverified contribution is available.");
+      const issued = [];
+      for (const contribution of pending) {
+        issued.push(...(await p2p.verifyCampaignContribution(contribution.contributionId)));
+      }
       await refreshCampaignSnapshot(campaign.campaignId);
-      const total = credits.reduce((sum, item) => sum + item.total, 0);
-      setNotice(`Contribution accepted; ${total} ATP Credits issued from signed receipts.`);
+      const total = issued.reduce((sum, item) => sum + item.total, 0);
+      setNotice(`${pending.length} contribution${pending.length === 1 ? "" : "s"} accepted; ${total} ATP Credits issued from signed receipts.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -668,7 +657,7 @@ function AppContent() {
           onClick={() => void handleRunAcceptedAuditSkill(job)}
           type="button"
         >
-          {actionJobId === job.id ? "Running model" : runtimeModel ? "Run model audit" : "Select local model"}
+          {actionJobId === job.id ? "Running pipeline" : runtimeModel ? "Run audit pipeline" : "Select local model"}
           <ArrowRight size={14} />
         </button>
       );
@@ -987,18 +976,18 @@ function AppContent() {
                     <div className="campaign-actions">
                       <button
                         disabled={actionJobId === campaign.campaignId || !runtimeModel}
-                        onClick={() => void handleRunAuditSkill(campaign)}
+                        onClick={() => void handleRunAuditPipeline(campaign)}
                         type="button"
                       >
-                        Run Audit Skill
+                        Run audit pipeline
                         <ArrowRight size={14} />
                       </button>
                       <button
                         disabled={actionJobId === campaign.campaignId}
-                        onClick={() => void handleVerifyLatest(campaign)}
+                        onClick={() => void handleVerifyQueue(campaign)}
                         type="button"
                       >
-                        Verify latest
+                        Verify queue
                         <ShieldCheck size={14} />
                       </button>
                       <button
@@ -1007,7 +996,7 @@ function AppContent() {
                         type="button"
                         title={
                           contributions === 0
-                            ? "Run Audit Skill before exporting a report bundle."
+                            ? "Run Audit Pipeline before exporting a report bundle."
                             : undefined
                         }
                       >

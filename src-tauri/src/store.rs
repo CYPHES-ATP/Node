@@ -403,18 +403,12 @@ impl AtpStore {
                 ],
             )
             .map_err(|error| error.to_string())?;
-        connection
-            .execute(
-                "UPDATE audit_work_units
-                 SET status = 'submitted', updated_at = ?3
-                 WHERE campaign_id = ?1 AND work_unit_id = ?2",
-                params![
-                    contribution.campaign_id,
-                    contribution.work_unit_id,
-                    now_millis() as i64,
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+        update_work_unit_status(
+            &connection,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            "submitted",
+        )?;
         Ok(contribution.clone())
     }
 
@@ -465,6 +459,12 @@ impl AtpStore {
                 params![verification.target_contribution_id, contribution_status],
             )
             .map_err(|error| error.to_string())?;
+        update_work_unit_status(
+            &transaction,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            contribution_status,
+        )?;
         for allocation in &allocations {
             transaction
                 .execute(
@@ -1767,6 +1767,40 @@ fn insert_work_unit(
     Ok(())
 }
 
+fn update_work_unit_status(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+    status: &str,
+) -> Result<(), String> {
+    let json = connection
+        .query_row(
+            "SELECT work_unit_json FROM audit_work_units
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![campaign_id, work_unit_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let mut work_unit: AuditWorkUnit =
+        serde_json::from_str(&json).map_err(|error| error.to_string())?;
+    work_unit.status = status.to_string();
+    connection
+        .execute(
+            "UPDATE audit_work_units
+             SET status = ?3, work_unit_json = ?4, updated_at = ?5
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![
+                campaign_id,
+                work_unit_id,
+                status,
+                serde_json::to_string(&work_unit).map_err(|error| error.to_string())?,
+                now_millis() as i64,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn campaign_in_connection(
     connection: &Connection,
     campaign_id: &str,
@@ -2176,6 +2210,15 @@ mod tests {
         )
         .unwrap();
         store.record_contribution(&accepted_contribution).unwrap();
+        let submitted_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        assert_eq!(
+            submitted_units
+                .iter()
+                .find(|unit| unit.work_unit_id == accepted_contribution.work_unit_id)
+                .unwrap()
+                .status,
+            "submitted"
+        );
         let accepted_verification = signed_verification(
             &verifier,
             campaign.campaign_id.clone(),
@@ -2192,6 +2235,15 @@ mod tests {
         .unwrap();
         let allocations = store.record_verification(&accepted_verification).unwrap();
         assert_eq!(allocations.len(), 2);
+        let accepted_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        assert_eq!(
+            accepted_units
+                .iter()
+                .find(|unit| unit.work_unit_id == accepted_contribution.work_unit_id)
+                .unwrap()
+                .status,
+            "accepted"
+        );
         assert!(allocations
             .iter()
             .all(|allocation| allocation.contribution_receipt_hash
@@ -2237,6 +2289,15 @@ mod tests {
             .record_verification(&rejected_verification)
             .unwrap()
             .is_empty());
+        let rejected_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        assert_eq!(
+            rejected_units
+                .iter()
+                .find(|unit| unit.work_unit_id == rejected_contribution.work_unit_id)
+                .unwrap()
+                .status,
+            "rejected"
+        );
 
         let snapshot = store
             .campaign_report_snapshot(&campaign.campaign_id)
@@ -2252,9 +2313,13 @@ mod tests {
         assert!(bundle.join("receipts/README.md").is_file());
         let report = fs::read_to_string(bundle.join("report.md")).unwrap();
         let findings_section = report
-            .split("## Rejected / Duplicate / Non-reportable Leads")
+            .split("## Non-reportable, Rejected, Or Duplicate Leads")
             .next()
             .unwrap();
+        assert!(report.contains("## Document Control"));
+        assert!(report.contains("## Audit Pass Matrix"));
+        assert!(report.contains("## Evidence Arbitration"));
+        assert!(report.contains("## Runtime And Receipt Appendix"));
         assert!(!findings_section.contains("Duplicate lead"));
         assert!(report.contains("Duplicate lead"));
     }

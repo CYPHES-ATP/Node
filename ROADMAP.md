@@ -22,9 +22,16 @@ signed ATP envelopes or portable artifacts.
 - Local protocol audit campaigns with pinned commits, scoped work units,
   signed contributions, signed verifier decisions, ATP Credit allocation, and
   final report bundle export.
-- Local-model `Run Audit Skill` runtime for LM Studio and Ollama, including
-  model discovery, progress, tokens/sec, skill hash, input hash, output hash,
-  and signed contribution artifacts.
+- Local-model v0.4 `Run Audit Pipeline` runtime for LM Studio and Ollama,
+  including model discovery, progress, tokens/sec, v0.4 skill hash, input hash,
+  output hash, and signed contribution artifacts for each audit pass.
+- Professional audit passes for scope mapping, repository inventory,
+  dependency/config review, smart-contract exploit-class review, finding
+  validation, and final report synthesis.
+- Professional markdown report export with document control, audit pass matrix,
+  evidence arbitration, findings register, coverage and negative findings,
+  non-reportable/rejected lead appendix, runtime/receipt appendix, and ATP
+  Credit allocation summary.
 - Independent Artifact Two verification of the committed real fixture.
 - TCP, WebSocket, QUIC, mDNS, Identify, Ping, Relay v2, Rendezvous, and DCUtR.
 - Docker-ready relay/rendezvous service with reservation and automatic
@@ -38,14 +45,16 @@ Status: **Partial**
 
 - Wire protocol campaigns and work units into network discovery so remote
   nodes automatically see available audit labor.
+- Split remote worker fulfillment across claimable professional work units so
+  several specialized nodes can contribute to one campaign.
 - Add OpenClaw/Hermes runtime adapters for nodes that want advanced tool
   orchestration beyond the built-in LM Studio/Ollama local model path.
 - Store audit skill hashes, runtime descriptors, model identifiers, tool-access
   logs, output hashes, and evidence references in contribution receipts.
 - Add verifier-node queues, challenge windows, revision requests, and duplicate
   finding resolution.
-- Improve protocol/requester UX for campaign creation, scope templates, and
-  final report review.
+- Improve protocol/requester UX for campaign creation, audit briefs,
+  attachment/skill-pack import, scope templates, and final report review.
 - Keep bounty allocation as a signed placeholder until settlement is designed.
 
 ## 2. Staging Network
@@ -114,8 +123,8 @@ Status: **Partial**
 ## Best Contributions Now
 
 - Reproduce the relay-backed two-node transaction on Linux or Windows.
-- Improve local model context selection, output validation, and verifier review
-  before adding more runtime providers.
+- Improve local model context selection, output validation, multi-pass synthesis,
+  and verifier review before adding more runtime providers.
 - Connect OpenClaw/Hermes as an advanced adapter while preserving the signed
   contribution and verification receipt shape.
 - Add campaign/work-unit discovery over rendezvous instead of local-only
