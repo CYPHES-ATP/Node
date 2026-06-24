@@ -1488,6 +1488,41 @@ footer {
   background: rgba(0, 246, 255, 0.15);
 }
 
+.campaign-export-path {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid rgba(199, 255, 71, 0.28);
+  background:
+    linear-gradient(90deg, rgba(199, 255, 71, 0.075), transparent 58%),
+    rgba(0, 0, 0, 0.28);
+}
+
+.campaign-export-path strong,
+.report-notice strong {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.campaign-export-path code,
+.campaign-export-path span,
+.report-notice code {
+  overflow: hidden;
+  color: var(--cyan-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-notice {
+  display: grid;
+  gap: 6px;
+}
+
 .developer-event-table > div {
   grid-template-columns: minmax(0, 1fr) 120px 120px 140px;
 }
