@@ -1040,11 +1040,34 @@ function AppContent() {
                 const unverified = contributions - (snapshot?.verifications.length || 0);
                 const isMine = campaign.requesterAgentId === agentId;
                 const claimedCount = snapshot?.claims.filter((item) => item.status === "claimed").length || 0;
+                const contributionWorkUnitById = new Map(
+                  (snapshot?.contributions || []).map((item) => [item.contributionId, item.workUnitId]),
+                );
+                const latestVerificationDecisionByWorkUnit = new Map<string, string>();
+                (snapshot?.verifications || []).forEach((item) => {
+                  const workUnitId = contributionWorkUnitById.get(item.targetContributionId);
+                  if (workUnitId) {
+                    latestVerificationDecisionByWorkUnit.set(workUnitId, item.decision);
+                  }
+                });
+                const isUnitCompleted = (workUnitId: string, status: string) =>
+                  status === "accepted" ||
+                  latestVerificationDecisionByWorkUnit.get(workUnitId) === "accepted";
                 const openUnitCount = workUnits.filter((unit) => unit.status === "open").length;
-                const activeUnitCount = workUnits.filter((unit) => unit.status !== "open").length;
+                const completedUnitCount = workUnits.filter((unit) =>
+                  isUnitCompleted(unit.workUnitId, unit.status),
+                ).length;
+                const activeUnitCount = workUnits.filter(
+                  (unit) => unit.status !== "open" && !isUnitCompleted(unit.workUnitId, unit.status),
+                ).length;
+                const workUnitSummary = [
+                  `${openUnitCount} open`,
+                  activeUnitCount > 0 ? `${activeUnitCount} active` : null,
+                  completedUnitCount > 0 ? `${completedUnitCount} completed` : null,
+                ].filter(Boolean).join(" / ");
                 return (
                   <article className="campaign-card" key={campaign.campaignId}>
-                    <div>
+                    <div className="campaign-main">
                       <div className="job-topline">
                         <span className="job-status routed">{campaign.status}</span>
                         <span>{campaign.repository.fullName}</span>
@@ -1079,103 +1102,6 @@ function AppContent() {
                           <small>{progress.tokensPerSecond ? `${progress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
                         </div>
                       ) : null}
-                      <details className="work-unit-dropdown">
-                        <summary>
-                          <span>Select work unit</span>
-                          <strong>
-                            {isMine && unverified > 0
-                              ? `${unverified} needs verification`
-                              : `${openUnitCount} open / ${activeUnitCount} active`}
-                          </strong>
-                        </summary>
-                        <div className="work-unit-list">
-                        {workUnits.map((unit) => {
-                          const unitContributions = snapshot?.contributions.filter(
-                            (item) => item.workUnitId === unit.workUnitId,
-                          ) || [];
-                          const contributionIds = new Set(
-                            unitContributions.map((item) => item.contributionId),
-                          );
-                          const unitVerifications = snapshot?.verifications.filter((item) =>
-                            contributionIds.has(item.targetContributionId),
-                          ) || [];
-                          const myClaim = snapshot?.claims.find(
-                            (item) =>
-                              item.workUnitId === unit.workUnitId &&
-                              item.workerAgentId === agentId &&
-                              item.status === "claimed",
-                          );
-                          const myContribution = unitContributions.find(
-                            (item) => item.workerAgentId === agentId,
-                          );
-                          const latestVerification = unitVerifications[unitVerifications.length - 1];
-                          const verifierState = latestVerification?.decision ||
-                            (unitContributions.length > 0 ? "awaiting verifier" : unit.status);
-                          const claimedBy = unit.claimedByAgentId
-                            ? truncatePeerId(unit.claimedByAgentId)
-                            : "open";
-                          const actionId = `${campaign.campaignId}:${unit.workUnitId}`;
-                          return (
-                            <div className="work-unit-row" key={unit.workUnitId}>
-                              <div className="work-unit-main">
-                                <strong>{unit.title}</strong>
-                                <span>{unit.kind}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Status</small>
-                                <span className={`unit-pill ${unit.status}`}>{unit.status}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Claimed by</small>
-                                <span>{claimedBy}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Contrib</small>
-                                <span>{unitContributions.length}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Verifier</small>
-                                <span>{verifierState}</span>
-                              </div>
-                              <div className="work-unit-action">
-                                {isMine ? unitContributions.length > unitVerifications.length ? (
-                                  <button
-                                    className="needs-action-button"
-                                    disabled={actionJobId === campaign.campaignId}
-                                    onClick={() => void handleVerifyQueue(campaign)}
-                                    type="button"
-                                  >
-                                    Verify
-                                  </button>
-                                ) : (
-                                  <span>{unitContributions.length > 0 ? "verified" : "awaiting node"}</span>
-                                ) : unit.status === "open" ? (
-                                  <button
-                                    disabled={actionJobId === actionId}
-                                    onClick={() => void handleClaimWorkUnit(campaign, unit.workUnitId)}
-                                    type="button"
-                                  >
-                                    Claim
-                                  </button>
-                                ) : myContribution ? (
-                                  <span>{latestVerification ? latestVerification.decision : "submitted"}</span>
-                                ) : myClaim ? (
-                                  <button
-                                    disabled={actionJobId === actionId || !runtimeModel}
-                                    onClick={() => void handleRunClaimedWorkUnit(campaign, unit.workUnitId)}
-                                    type="button"
-                                  >
-                                    {runtimeModel ? "Run" : "Model"}
-                                  </button>
-                                ) : (
-                                  <span>{unit.claimedByAgentId ? "claimed" : "locked"}</span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        </div>
-                      </details>
                     </div>
                     <div className="campaign-actions">
                       {isMine ? (
@@ -1214,6 +1140,111 @@ function AppContent() {
                         <div className="job-outcome">Claim and run individual work units.</div>
                       )}
                     </div>
+                    <details className="work-unit-dropdown">
+                        <summary>
+                          <span>Select work unit</span>
+                          <strong>
+                            {isMine && unverified > 0
+                              ? `${unverified} needs verification`
+                              : workUnitSummary}
+                          </strong>
+                        </summary>
+                        <div className="work-unit-list">
+                        {workUnits.map((unit) => {
+                          const unitContributions = snapshot?.contributions.filter(
+                            (item) => item.workUnitId === unit.workUnitId,
+                          ) || [];
+                          const contributionIds = new Set(
+                            unitContributions.map((item) => item.contributionId),
+                          );
+                          const unitVerifications = snapshot?.verifications.filter((item) =>
+                            contributionIds.has(item.targetContributionId),
+                          ) || [];
+                          const myClaim = snapshot?.claims.find(
+                            (item) =>
+                              item.workUnitId === unit.workUnitId &&
+                              item.workerAgentId === agentId &&
+                              item.status === "claimed",
+                          );
+                          const myContribution = unitContributions.find(
+                            (item) => item.workerAgentId === agentId,
+                          );
+                          const latestVerification = unitVerifications[unitVerifications.length - 1];
+                          const unitStatusLabel = isUnitCompleted(unit.workUnitId, unit.status)
+                            ? "completed"
+                            : unit.status;
+                          const verifierState = latestVerification?.decision
+                            ? latestVerification.decision === "accepted"
+                              ? "completed"
+                              : latestVerification.decision
+                            : unitContributions.length > 0
+                              ? "awaiting verifier"
+                              : unit.status;
+                          const claimedBy = unit.claimedByAgentId
+                            ? truncatePeerId(unit.claimedByAgentId)
+                            : "open";
+                          const actionId = `${campaign.campaignId}:${unit.workUnitId}`;
+                          return (
+                            <div className="work-unit-row" key={unit.workUnitId}>
+                              <div className="work-unit-main">
+                                <strong>{unit.title}</strong>
+                                <span>{unit.kind}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Status</small>
+                                <span className={`unit-pill ${unit.status}`}>{unitStatusLabel}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Claimed by</small>
+                                <span>{claimedBy}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Contrib</small>
+                                <span>{unitContributions.length}</span>
+                              </div>
+                              <div className="work-unit-cell">
+                                <small>Verifier</small>
+                                <span>{verifierState}</span>
+                              </div>
+                              <div className="work-unit-action">
+                                {isMine ? unitContributions.length > unitVerifications.length ? (
+                                  <button
+                                    className="needs-action-button"
+                                    disabled={actionJobId === campaign.campaignId}
+                                    onClick={() => void handleVerifyQueue(campaign)}
+                                    type="button"
+                                  >
+                                    Verify
+                                  </button>
+                                ) : (
+                                  <span>{unitContributions.length > 0 ? "completed" : "awaiting node"}</span>
+                                ) : unit.status === "open" ? (
+                                  <button
+                                    disabled={actionJobId === actionId}
+                                    onClick={() => void handleClaimWorkUnit(campaign, unit.workUnitId)}
+                                    type="button"
+                                  >
+                                    Claim
+                                  </button>
+                                ) : myContribution ? (
+                                  <span>{latestVerification ? verifierState : "submitted"}</span>
+                                ) : myClaim ? (
+                                  <button
+                                    disabled={actionJobId === actionId || !runtimeModel}
+                                    onClick={() => void handleRunClaimedWorkUnit(campaign, unit.workUnitId)}
+                                    type="button"
+                                  >
+                                    {runtimeModel ? "Run" : "Model"}
+                                  </button>
+                                ) : (
+                                  <span>{unit.claimedByAgentId ? "claimed" : "locked"}</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        </div>
+                      </details>
                   </article>
                 );
               })

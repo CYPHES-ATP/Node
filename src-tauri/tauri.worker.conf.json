@@ -1,0 +1,26 @@
+{
+  "productName": "CYPHES Worker",
+  "identifier": "com.cyphes-atp.worker",
+  "app": {
+    "windows": [
+      {
+        "title": "CYPHES Worker",
+        "url": "index.html",
+        "width": 1240,
+        "height": 860,
+        "minWidth": 860,
+        "minHeight": 680,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 18
+        },
+        "shadow": true,
+        "transparent": false,
+        "resizable": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "productName": "CYPHES Requester",
+  "identifier": "com.cyphes-atp.requester",
+  "app": {
+    "windows": [
+      {
+        "title": "CYPHES Requester",
+        "url": "campaign.html",
+        "width": 1240,
+        "height": 860,
+        "minWidth": 860,
+        "minHeight": 680,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 18
+        },
+        "shadow": true,
+        "transparent": false,
+        "resizable": true
+      }
+    ]
+  }
+}
