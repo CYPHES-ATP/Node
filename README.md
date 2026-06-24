@@ -18,7 +18,7 @@
 ## Download
 
 The current developer release is **CYPHES v0.5.0**. It adds remotely claimable
-audit work units on top of the professional local-model audit pipeline.
+work units on top of the professional local AI models.
 
 Apple Silicon downloads:
 
