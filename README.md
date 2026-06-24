@@ -5,28 +5,33 @@
   <p>Protocols submit scoped work. Nodes produce signed audit artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP: v0.3" src="https://img.shields.io/badge/ATP-v0.3-c7ff47"></a>
+    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.0"><img alt="CYPHES: v0.5.0" src="https://img.shields.io/badge/CYPHES-v0.5.0-c7ff47"></a>
+    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES desktop node" src="docs/images/cyphes-desktop.png" width="100%">
+  <img alt="CYPHES v0.5.0 desktop node" src="docs/images/CYPHES%20v0.5.0.png" width="100%">
 </p>
 
 ## Download
 
-The current source preview is **CYPHES v0.5.0-dev**. It adds remotely
-claimable audit work units on top of the professional local-model audit
-pipeline. A packaged v0.5 DMG should be cut after two-node QA.
+The current developer release is **CYPHES v0.5.0**. It adds remotely claimable
+audit work units on top of the professional local-model audit pipeline.
 
-The latest downloadable Apple Silicon developer preview is:
+Apple Silicon downloads:
 
-- [Download CYPHES v0.2.5-dev](https://github.com/CYPHES-ATP/Node/releases/tag/v0.2.5-dev)
+- [Download CYPHES Requester v0.5.0](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.0/CYPHES-Requester-v0.5.0-aarch64.dmg)
+- [Download CYPHES Worker v0.5.0](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.0/CYPHES-Worker-v0.5.0-aarch64.dmg)
 
-This developer build is not Apple-notarized yet. After dragging `CYPHES` to
-Applications, Control-click the app, select **Open**, then confirm **Open**.
-Windows and Linux users should run from source for now.
+These developer builds are ad hoc signed but not Apple-notarized yet. After
+dragging the app to Applications, Control-click the app, select **Open**, then
+confirm **Open**. Windows and Linux users should run from source for now.
+
+Use **CYPHES Requester** to create campaigns, verify submitted work, and export
+reports. Use **CYPHES Worker** to discover campaigns, claim individual work
+units, run local-model audit passes, and receive receipt-backed ATP Credits.
 
 The developer preview completes one ATP-L1 repository-audit transaction:
 
