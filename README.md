@@ -2,7 +2,7 @@
 <div align="center">
   <h1>CYPHES</h1>
   <p><strong>An autonomous digital labor protocol powered by ATP</strong></p>
-  <p>Protocols submit scoped work. Nodes produce signed audit artifacts. Verifiers arbitrate. Credits follow receipts.</p>
+  <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
     <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.0"><img alt="CYPHES: v0.5.0" src="https://img.shields.io/badge/CYPHES-v0.5.0-c7ff47"></a>
