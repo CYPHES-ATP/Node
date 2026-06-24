@@ -5,26 +5,26 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.2"><img alt="CYPHES: v0.5.2" src="https://img.shields.io/badge/CYPHES-v0.5.2-c7ff47"></a>
+    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.3"><img alt="CYPHES: v0.5.3" src="https://img.shields.io/badge/CYPHES-v0.5.3-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES v0.5.2 desktop node" src="docs/images/CYPHES%20v0.5.2.png" width="100%">
+  <img alt="CYPHES v0.5.3 desktop node" src="docs/images/CYPHES%20v0.5.3.png" width="100%">
 </p>
 
 ## Download
 
-The current developer release is **CYPHES v0.5.2**. It adds a live cockpit
-runtime display for local AI work, remotely claimable work units, and
-offline-submitted work replay when peers reconnect.
+The current developer release is **CYPHES v0.5.3**. It adds real-time local
+model streaming telemetry, a leaner cockpit header, remotely claimable work
+units, and offline-submitted work replay when peers reconnect.
 
 Apple Silicon downloads:
 
-- [Download CYPHES v0.5.2](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.2/CYPHES-v0.5.2-aarch64.dmg)
-- [Download CYPHES Requester v0.5.2](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.2/CYPHES-Requester-v0.5.2-aarch64.dmg)
+- [Download CYPHES v0.5.3](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.3/CYPHES-v0.5.3-aarch64.dmg)
+- [Download CYPHES Requester v0.5.3](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.3/CYPHES-Requester-v0.5.3-aarch64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then

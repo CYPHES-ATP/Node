@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use futures::StreamExt;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -100,19 +101,20 @@ struct OllamaModel {
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenAiChatResponse {
-    choices: Vec<OpenAiChoice>,
+struct OpenAiStreamChunk {
+    #[serde(default)]
+    choices: Vec<OpenAiStreamChoice>,
     usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenAiChoice {
-    message: OpenAiMessage,
+struct OpenAiStreamChoice {
+    delta: Option<OpenAiDelta>,
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenAiMessage {
-    content: String,
+struct OpenAiDelta {
+    content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,17 +126,20 @@ struct OpenAiUsage {
 }
 
 #[derive(Debug, Deserialize)]
-struct OllamaChatResponse {
-    message: OllamaMessage,
+struct OllamaMessage {
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaStreamChunk {
+    #[serde(default)]
+    message: Option<OllamaMessage>,
+    #[serde(default)]
+    done: bool,
     #[serde(default)]
     eval_count: Option<u64>,
     #[serde(default)]
     eval_duration: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaMessage {
-    content: String,
 }
 
 pub fn local_model_providers() -> Vec<LocalModelList> {
@@ -225,9 +230,29 @@ pub async fn run_local_audit_skill(
     let started = Instant::now();
     let model_output = match provider {
         "lmstudio" => {
-            run_openai_compatible_chat(&client, lmstudio_endpoint(), model, &prompt).await?
+            run_openai_compatible_chat(
+                app,
+                campaign,
+                work_unit,
+                &client,
+                lmstudio_endpoint(),
+                model,
+                &prompt,
+            )
+            .await?
         }
-        "ollama" => run_ollama_chat(&client, ollama_endpoint(), model, &prompt).await?,
+        "ollama" => {
+            run_ollama_chat(
+                app,
+                campaign,
+                work_unit,
+                &client,
+                ollama_endpoint(),
+                model,
+                &prompt,
+            )
+            .await?
+        }
         _ => return Err("unsupported local model provider".to_string()),
     };
     let elapsed = started.elapsed();
@@ -386,6 +411,9 @@ async fn list_ollama_models(endpoint: &str) -> Result<Vec<String>, String> {
 }
 
 async fn run_openai_compatible_chat(
+    app: &AppHandle,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
     client: &reqwest::Client,
     endpoint: &str,
     model: &str,
@@ -397,6 +425,10 @@ async fn run_openai_compatible_chat(
             "model": model,
             "temperature": 0.2,
             "max_tokens": MAX_MODEL_OUTPUT_TOKENS,
+            "stream": true,
+            "stream_options": {
+                "include_usage": true
+            },
             "messages": [
                 {
                     "role": "system",
@@ -414,28 +446,76 @@ async fn run_openai_compatible_chat(
     if !response.status().is_success() {
         return Err(format!("Local model returned {}", response.status()));
     }
-    let body = response
-        .json::<OpenAiChatResponse>()
-        .await
-        .map_err(|error| format!("Local model response was not OpenAI-compatible JSON. {error}"))?;
-    let content = body
-        .choices
-        .into_iter()
-        .next()
-        .map(|choice| choice.message.content)
-        .filter(|content| !content.trim().is_empty())
-        .ok_or_else(|| "Local model returned an empty response".to_string())?;
-    let tokens = body
-        .usage
-        .and_then(|usage| usage.completion_tokens.or(usage.total_tokens));
+    let started = Instant::now();
+    let mut last_emit = Instant::now() - Duration::from_millis(250);
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut content = String::new();
+    let mut tokens = None;
+    let mut tokens_per_second = None;
+    let mut done = false;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("Local model stream failed: {error}"))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(index) = buffer.find('\n') {
+            let line = buffer.drain(..=index).collect::<String>();
+            let before = content.len();
+            if handle_openai_stream_line(&line, &mut content, &mut tokens)? {
+                done = true;
+                break;
+            }
+            if content.len() != before {
+                tokens_per_second = maybe_emit_stream_progress(
+                    app,
+                    campaign,
+                    work_unit,
+                    &content,
+                    started,
+                    &mut last_emit,
+                    false,
+                );
+            }
+        }
+        if done {
+            break;
+        }
+    }
+    if !done && !buffer.trim().is_empty() {
+        let before = content.len();
+        let _ = handle_openai_stream_line(&buffer, &mut content, &mut tokens)?;
+        if content.len() != before {
+            tokens_per_second = maybe_emit_stream_progress(
+                app,
+                campaign,
+                work_unit,
+                &content,
+                started,
+                &mut last_emit,
+                true,
+            );
+        }
+    }
+    if content.trim().is_empty() {
+        return Err("Local model returned an empty streamed response".to_string());
+    }
+    tokens_per_second = tokens
+        .and_then(|tokens| {
+            let seconds = started.elapsed().as_secs_f64();
+            (seconds > 0.0).then_some(tokens as f64 / seconds)
+        })
+        .or_else(|| stream_tokens_per_second(&content, started))
+        .or(tokens_per_second);
     Ok(ModelOutput {
         content,
         generated_tokens: tokens,
-        tokens_per_second: None,
+        tokens_per_second,
     })
 }
 
 async fn run_ollama_chat(
+    app: &AppHandle,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
     client: &reqwest::Client,
     endpoint: &str,
     model: &str,
@@ -445,7 +525,7 @@ async fn run_ollama_chat(
         .post(format!("{endpoint}/api/chat"))
         .json(&json!({
             "model": model,
-            "stream": false,
+            "stream": true,
             "options": {
                 "temperature": 0.2,
                 "num_predict": MAX_MODEL_OUTPUT_TOKENS
@@ -467,21 +547,167 @@ async fn run_ollama_chat(
     if !response.status().is_success() {
         return Err(format!("Ollama returned {}", response.status()));
     }
-    let body = response
-        .json::<OllamaChatResponse>()
-        .await
-        .map_err(|error| format!("Ollama response was not valid JSON. {error}"))?;
-    let tokens_per_second = match (body.eval_count, body.eval_duration) {
+    let started = Instant::now();
+    let mut last_emit = Instant::now() - Duration::from_millis(250);
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut content = String::new();
+    let mut eval_count = None;
+    let mut eval_duration = None;
+    let mut tokens_per_second = None;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("Ollama stream failed: {error}"))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(index) = buffer.find('\n') {
+            let line = buffer.drain(..=index).collect::<String>();
+            let before = content.len();
+            let chunk_done = handle_ollama_stream_line(
+                &line,
+                &mut content,
+                &mut eval_count,
+                &mut eval_duration,
+            )?;
+            if content.len() != before {
+                tokens_per_second = maybe_emit_stream_progress(
+                    app,
+                    campaign,
+                    work_unit,
+                    &content,
+                    started,
+                    &mut last_emit,
+                    false,
+                );
+            }
+            if chunk_done {
+                break;
+            }
+        }
+    }
+    if !buffer.trim().is_empty() {
+        let before = content.len();
+        let _ =
+            handle_ollama_stream_line(&buffer, &mut content, &mut eval_count, &mut eval_duration)?;
+        if content.len() != before {
+            tokens_per_second = maybe_emit_stream_progress(
+                app,
+                campaign,
+                work_unit,
+                &content,
+                started,
+                &mut last_emit,
+                true,
+            );
+        }
+    }
+    if content.trim().is_empty() {
+        return Err("Ollama returned an empty streamed response".to_string());
+    }
+    let tokens_per_second = match (eval_count, eval_duration) {
         (Some(count), Some(duration)) if duration > 0 => {
             Some((count as f64) / ((duration as f64) / 1_000_000_000.0))
         }
-        _ => None,
+        _ => tokens_per_second,
     };
     Ok(ModelOutput {
-        content: body.message.content,
-        generated_tokens: body.eval_count,
+        content,
+        generated_tokens: eval_count,
         tokens_per_second,
     })
+}
+
+fn handle_openai_stream_line(
+    line: &str,
+    content: &mut String,
+    tokens: &mut Option<u64>,
+) -> Result<bool, String> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with(':') {
+        return Ok(false);
+    }
+    let data = if let Some(data) = line.strip_prefix("data:") {
+        data.trim()
+    } else if line.starts_with('{') {
+        line
+    } else {
+        return Ok(false);
+    };
+    if data == "[DONE]" {
+        return Ok(true);
+    }
+    let chunk = serde_json::from_str::<OpenAiStreamChunk>(data)
+        .map_err(|error| format!("Local model stream was not OpenAI-compatible JSON. {error}"))?;
+    if let Some(usage) = chunk.usage {
+        *tokens = usage.completion_tokens.or(usage.total_tokens).or(*tokens);
+    }
+    for choice in chunk.choices {
+        if let Some(part) = choice.delta.and_then(|delta| delta.content) {
+            content.push_str(&part);
+        }
+    }
+    Ok(false)
+}
+
+fn handle_ollama_stream_line(
+    line: &str,
+    content: &mut String,
+    eval_count: &mut Option<u64>,
+    eval_duration: &mut Option<u64>,
+) -> Result<bool, String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return Ok(false);
+    }
+    let chunk = serde_json::from_str::<OllamaStreamChunk>(line)
+        .map_err(|error| format!("Ollama stream line was not valid JSON. {error}"))?;
+    if let Some(message) = chunk.message {
+        content.push_str(&message.content);
+    }
+    if chunk.eval_count.is_some() {
+        *eval_count = chunk.eval_count;
+    }
+    if chunk.eval_duration.is_some() {
+        *eval_duration = chunk.eval_duration;
+    }
+    Ok(chunk.done)
+}
+
+fn maybe_emit_stream_progress(
+    app: &AppHandle,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
+    content: &str,
+    started: Instant,
+    last_emit: &mut Instant,
+    force: bool,
+) -> Option<f64> {
+    let tokens_per_second = stream_tokens_per_second(content, started);
+    if force || last_emit.elapsed() >= Duration::from_millis(200) {
+        emit_progress(
+            app,
+            campaign,
+            work_unit,
+            "Streaming local model output",
+            stream_progress(started, content),
+            tokens_per_second,
+        );
+        *last_emit = Instant::now();
+    }
+    tokens_per_second
+}
+
+fn stream_progress(started: Instant, content: &str) -> u8 {
+    let elapsed_motion = started.elapsed().as_secs_f64() * 1.8;
+    let token_motion = estimated_token_count(content) / 80.0;
+    44 + ((elapsed_motion + token_motion).floor() as u8).min(30)
+}
+
+fn stream_tokens_per_second(content: &str, started: Instant) -> Option<f64> {
+    let elapsed = started.elapsed();
+    let seconds = elapsed.as_secs_f64();
+    if seconds <= 0.0 {
+        return None;
+    }
+    Some(estimated_token_count(content) / seconds)
 }
 
 #[derive(Debug)]
@@ -1111,8 +1337,16 @@ fn estimated_tokens_per_second(content: &str, elapsed: Duration) -> Option<f64> 
     if seconds <= 0.0 {
         return None;
     }
-    let estimated_tokens = content.split_whitespace().count() as f64 * 1.3;
-    Some(estimated_tokens / seconds)
+    Some(estimated_token_count(content) / seconds)
+}
+
+fn estimated_token_count(content: &str) -> f64 {
+    let words = content.split_whitespace().count() as f64;
+    if words == 0.0 && !content.is_empty() {
+        1.0
+    } else {
+        words * 1.3
+    }
 }
 
 fn truncate_bytes(value: &str, max_bytes: usize) -> String {
@@ -1150,6 +1384,55 @@ mod tests {
         let output = parse_model_output("I looked around and it seems okay.");
         assert!(output.findings.is_empty());
         assert_eq!(output.coverage[0].status, "needs_review");
+    }
+
+    #[test]
+    fn parses_openai_compatible_stream_chunks() {
+        let mut content = String::new();
+        let mut tokens = None;
+        let done = handle_openai_stream_line(
+            r#"data: {"choices":[{"delta":{"content":"{\"summaryMarkdown\":\""}}]}"#,
+            &mut content,
+            &mut tokens,
+        )
+        .unwrap();
+        assert!(!done);
+        let done = handle_openai_stream_line(
+            r#"data: {"choices":[{"delta":{"content":"streamed\"}"}}],"usage":{"completion_tokens":42}}"#,
+            &mut content,
+            &mut tokens,
+        )
+        .unwrap();
+        assert!(!done);
+        assert_eq!(tokens, Some(42));
+        assert_eq!(content, r#"{"summaryMarkdown":"streamed"}"#);
+        assert!(handle_openai_stream_line("data: [DONE]", &mut content, &mut tokens).unwrap());
+    }
+
+    #[test]
+    fn parses_ollama_stream_chunks() {
+        let mut content = String::new();
+        let mut eval_count = None;
+        let mut eval_duration = None;
+        let done = handle_ollama_stream_line(
+            r#"{"message":{"content":"{\"summaryMarkdown\":\""},"done":false}"#,
+            &mut content,
+            &mut eval_count,
+            &mut eval_duration,
+        )
+        .unwrap();
+        assert!(!done);
+        let done = handle_ollama_stream_line(
+            r#"{"message":{"content":"streamed\"}"},"done":true,"eval_count":24,"eval_duration":1200000000}"#,
+            &mut content,
+            &mut eval_count,
+            &mut eval_duration,
+        )
+        .unwrap();
+        assert!(done);
+        assert_eq!(eval_count, Some(24));
+        assert_eq!(eval_duration, Some(1_200_000_000));
+        assert_eq!(content, r#"{"summaryMarkdown":"streamed"}"#);
     }
 
     #[test]
