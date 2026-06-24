@@ -1,10 +1,10 @@
 {
-  "productName": "CYPHES Worker",
+  "productName": "CYPHES",
   "identifier": "com.cyphes-atp.worker",
   "app": {
     "windows": [
       {
-        "title": "CYPHES Worker",
+        "title": "CYPHES",
         "url": "index.html",
         "width": 1240,
         "height": 860,
