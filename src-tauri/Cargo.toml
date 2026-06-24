@@ -1,6 +1,6 @@
 [package]
 name = "cyphes-desktop"
-version = "0.5.2"
+version = "0.5.3"
 description = "Native ATP node for verifiable repository audit work orders"
 authors = ["CYPHES-ATP"]
 edition = "2021"
@@ -25,7 +25,7 @@ dirs = "5"
 flate2 = "1"
 futures = "0.3"
 libp2p = { version = "0.56", features = ["dcutr", "dns", "identify", "json", "macros", "mdns", "noise", "ping", "quic", "relay", "rendezvous", "request-response", "tcp", "tokio", "websocket", "yamux"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.2"

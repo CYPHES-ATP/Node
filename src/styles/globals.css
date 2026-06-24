@@ -332,8 +332,8 @@ main {
 .runtime-terminal {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(260px, 0.54fr) minmax(0, 1.46fr);
-  min-height: 312px;
+  grid-template-columns: minmax(250px, 0.42fr) minmax(0, 1.58fr);
+  min-height: 214px;
   overflow: hidden;
   border-top: 1px solid rgba(0, 246, 255, 0.62);
   border-bottom: 1px solid rgba(0, 246, 255, 0.34);
@@ -377,16 +377,66 @@ main {
 
 .terminal-controls {
   display: grid;
-  grid-template-rows: 1fr 1fr;
+  grid-template-rows: auto auto auto;
   border-left: 1px solid rgba(0, 246, 255, 0.26);
   border-right: 1px solid rgba(0, 246, 255, 0.2);
+}
+
+.terminal-compact-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid rgba(0, 246, 255, 0.18);
+}
+
+.terminal-compact-status div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.terminal-compact-status span {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.2em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.terminal-compact-status strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: clamp(12px, 1.25vw, 18px);
+  font-weight: 780;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.terminal-compact-status code {
+  padding: 5px 7px;
+  border: 1px solid rgba(199, 255, 71, 0.28);
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-shadow: 0 0 12px rgba(199, 255, 71, 0.25);
 }
 
 .terminal-controls label {
   display: grid;
   align-content: center;
   min-width: 0;
-  padding: 22px 24px;
+  padding: 13px 18px 14px;
   border-bottom: 1px solid rgba(0, 246, 255, 0.18);
 }
 
@@ -409,8 +459,8 @@ main {
 .terminal-controls select {
   width: 100%;
   min-width: 0;
-  margin-top: 10px;
-  padding: 0 0 7px;
+  margin-top: 8px;
+  padding: 0 0 6px;
   border: 0;
   border-bottom: 1px solid rgba(0, 246, 255, 0.36);
   border-radius: 0;
@@ -418,7 +468,7 @@ main {
   background: transparent;
   color: var(--ink);
   font-family: var(--mono);
-  font-size: clamp(25px, 3vw, 42px);
+  font-size: clamp(18px, 2.2vw, 30px);
   font-weight: 760;
   letter-spacing: -0.08em;
   line-height: 0.95;
@@ -436,59 +486,8 @@ main {
 
 .cockpit-display {
   display: grid;
-  grid-template-rows: auto minmax(128px, auto) auto minmax(88px, auto);
+  grid-template-rows: minmax(106px, auto) auto minmax(54px, auto);
   min-width: 0;
-}
-
-.terminal-status {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 18px;
-  min-width: 0;
-  padding: 24px 28px 18px;
-  border-bottom: 1px solid rgba(0, 246, 255, 0.18);
-}
-
-.terminal-status > div {
-  display: grid;
-  min-width: 0;
-  gap: 6px;
-}
-
-.terminal-status span {
-  color: var(--green);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 760;
-  letter-spacing: 0.22em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.terminal-status strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: clamp(27px, 3.6vw, 54px);
-  font-weight: 820;
-  letter-spacing: -0.09em;
-  line-height: 0.92;
-  text-overflow: ellipsis;
-  text-shadow: 0 0 34px rgba(0, 246, 255, 0.18);
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.terminal-status code {
-  padding: 7px 10px;
-  border: 1px solid rgba(199, 255, 71, 0.28);
-  color: var(--green);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-shadow: 0 0 14px rgba(199, 255, 71, 0.28);
 }
 
 .terminal-metrics {
@@ -503,8 +502,8 @@ main {
   display: grid;
   align-content: start;
   min-width: 0;
-  min-height: 128px;
-  padding: 18px 18px 16px;
+  min-height: 106px;
+  padding: 14px 16px 13px;
   border-left: 1px solid rgba(0, 246, 255, 0.12);
   background:
     linear-gradient(135deg, rgba(0, 246, 255, 0.08), transparent 45%),
@@ -531,17 +530,17 @@ main {
 }
 
 .terminal-metrics svg {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--cyan);
 }
 
 .terminal-metrics strong {
   display: block;
   min-width: 0;
-  margin-top: 11px;
+  margin-top: 8px;
   overflow: hidden;
   color: var(--green);
-  font-size: clamp(33px, 4vw, 64px);
+  font-size: clamp(31px, 3.7vw, 58px);
   font-weight: 860;
   letter-spacing: -0.1em;
   line-height: 0.84;
@@ -552,7 +551,7 @@ main {
 
 .terminal-metrics small {
   display: block;
-  margin-top: 10px;
+  margin-top: 8px;
   overflow: hidden;
   color: var(--faint);
   font-family: var(--mono);
@@ -564,7 +563,7 @@ main {
 }
 
 .terminal-progress {
-  height: 8px;
+  height: 6px;
   background: rgba(245, 251, 250, 0.08);
   overflow: hidden;
 }
@@ -582,7 +581,7 @@ main {
   display: grid;
   align-content: start;
   gap: 4px;
-  padding: 12px 16px 14px;
+  padding: 9px 14px 10px;
   background:
     linear-gradient(90deg, rgba(0, 246, 255, 0.045), transparent 54%),
     rgba(0, 0, 0, 0.24);
@@ -594,10 +593,10 @@ main {
   grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  min-height: 20px;
+  min-height: 17px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1685,7 +1684,6 @@ footer {
   }
 
   .terminal-controls,
-  .terminal-status,
   .terminal-metrics {
     border-right: 1px solid rgba(0, 246, 255, 0.2);
   }
@@ -1698,7 +1696,7 @@ footer {
     grid-column: 1 / -1;
   }
 
-  .terminal-status strong {
+  .terminal-compact-status strong {
     white-space: normal;
   }
 

@@ -254,22 +254,9 @@ function AppContent() {
     latestRuntimeProgress?.progress === 100 && telemetryTick - latestRuntimeEventAt < 8 * 60_000,
   );
   const elapsedRuntimeMs = runtimeStartedAt ? telemetryTick - runtimeStartedAt : 0;
-  const progressDrift = runtimeActive
-    ? Math.min(7, Math.floor((telemetryTick - latestRuntimeEventAt) / 850))
-    : 0;
-  const currentProgress = latestRuntimeProgress
-    ? Math.min(100, latestRuntimeProgress.progress + progressDrift)
-    : 0;
+  const currentProgress = latestRuntimeProgress?.progress || 0;
   const measuredTokensPerSecond = latestRuntimeProgress?.tokensPerSecond || 0;
-  const samplingPulse = runtimeActive
-    ? 0.7 + ((telemetryTick / 200) % 6) * 0.16
-    : 0;
-  const currentTokensPerSecond =
-    measuredTokensPerSecond > 0
-      ? measuredTokensPerSecond + (runtimeActive ? samplingPulse : 0)
-      : runtimeActive
-        ? samplingPulse
-        : 0;
+  const currentTokensPerSecond = measuredTokensPerSecond;
   const hasPendingCredit = runtimeActive || runtimeRecentlyFinished;
   const pendingReceiptMeter = hasPendingCredit ? Math.min(35, Math.max(1, Math.round(currentProgress * 0.35))) : 0;
   const runtimePhase =
@@ -285,6 +272,13 @@ function AppContent() {
         : "OFFLINE";
   const creditLabel = hasPendingCredit ? "Pending ATP" : "ATP earned";
   const creditValue = hasPendingCredit ? `+${pendingReceiptMeter}` : creditSummary.total.toString();
+  const cockpitCode = runtimeActive
+    ? "LIVE"
+    : runtimeRecentlyFinished
+      ? "AWAITING VERIFIER"
+      : runtimeModel
+        ? "READY"
+        : "NO MODEL";
 
   function pushCockpitEvent(label: string, tone: CockpitEvent["tone"] = "info") {
     setCockpitEvents((current) => [
@@ -892,6 +886,13 @@ function AppContent() {
       <main>
         <section className="runtime-terminal" aria-label="Runtime terminal">
           <div className="terminal-controls">
+            <div className="terminal-compact-status">
+              <div>
+                <span>{cockpitStatus}</span>
+                <strong>{runtimePhase}</strong>
+              </div>
+              <code>{cockpitCode}</code>
+            </div>
             <label>
               <span>Provider</span>
               <select
@@ -921,20 +922,12 @@ function AppContent() {
           </div>
 
           <div className="cockpit-display">
-            <div className="terminal-status">
-              <div>
-                <span>{cockpitStatus}</span>
-                <strong>{runtimePhase}</strong>
-              </div>
-              <code>{runtimeActive ? "LIVE" : runtimeRecentlyFinished ? "AWAITING VERIFIER" : runtimeModel ? "READY" : "NO MODEL"}</code>
-            </div>
-
             <div className="terminal-metrics">
               <div className="metric-card metric-card-wide">
                 <Gauge size={17} />
                 <span>Tokens/sec</span>
                 <strong>{currentTokensPerSecond.toFixed(1)}</strong>
-                <small>{runtimeActive ? "200ms live cockpit sample" : measuredTokensPerSecond ? "last measured run" : "waiting for model"}</small>
+                <small>{runtimeActive ? "streaming local model" : measuredTokensPerSecond ? "last streamed run" : "waiting for model"}</small>
               </div>
               <div className="metric-card">
                 <Trophy size={17} />
