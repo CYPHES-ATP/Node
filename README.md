@@ -119,7 +119,8 @@ Artifact Two independently returns:
   claim/run controls.
 - `campaign.html` provides a separate protocol/admin console for creating
   signed campaigns, viewing network state, ATP proof logs, receipt trails,
-  protocol events, and developer-facing ATP envelope metadata.
+  protocol events, work-unit status, requester verification/export actions,
+  and developer-facing ATP envelope metadata.
 - Local-model `Run Audit Pipeline` execution through LM Studio or Ollama with
   hidden local endpoints, model discovery, progress events, tokens/sec
   measurement, effective skill hash, input hash, output hash, and signed

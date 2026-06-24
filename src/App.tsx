@@ -1040,6 +1040,8 @@ function AppContent() {
                 const unverified = contributions - (snapshot?.verifications.length || 0);
                 const isMine = campaign.requesterAgentId === agentId;
                 const claimedCount = snapshot?.claims.filter((item) => item.status === "claimed").length || 0;
+                const openUnitCount = workUnits.filter((unit) => unit.status === "open").length;
+                const activeUnitCount = workUnits.filter((unit) => unit.status !== "open").length;
                 return (
                   <article className="campaign-card" key={campaign.campaignId}>
                     <div>
@@ -1077,7 +1079,16 @@ function AppContent() {
                           <small>{progress.tokensPerSecond ? `${progress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
                         </div>
                       ) : null}
-                      <div className="work-unit-list">
+                      <details className="work-unit-dropdown">
+                        <summary>
+                          <span>Select work unit</span>
+                          <strong>
+                            {isMine && unverified > 0
+                              ? `${unverified} needs verification`
+                              : `${openUnitCount} open / ${activeUnitCount} active`}
+                          </strong>
+                        </summary>
+                        <div className="work-unit-list">
                         {workUnits.map((unit) => {
                           const unitContributions = snapshot?.contributions.filter(
                             (item) => item.workUnitId === unit.workUnitId,
@@ -1127,8 +1138,17 @@ function AppContent() {
                                 <span>{verifierState}</span>
                               </div>
                               <div className="work-unit-action">
-                                {isMine ? (
-                                  <span>{unitContributions.length > 0 ? "reviewable" : "awaiting node"}</span>
+                                {isMine ? unitContributions.length > unitVerifications.length ? (
+                                  <button
+                                    className="needs-action-button"
+                                    disabled={actionJobId === campaign.campaignId}
+                                    onClick={() => void handleVerifyQueue(campaign)}
+                                    type="button"
+                                  >
+                                    Verify
+                                  </button>
+                                ) : (
+                                  <span>{unitContributions.length > 0 ? "verified" : "awaiting node"}</span>
                                 ) : unit.status === "open" ? (
                                   <button
                                     disabled={actionJobId === actionId}
@@ -1154,7 +1174,8 @@ function AppContent() {
                             </div>
                           );
                         })}
-                      </div>
+                        </div>
+                      </details>
                     </div>
                     <div className="campaign-actions">
                       {isMine ? (
@@ -1172,7 +1193,7 @@ function AppContent() {
                             onClick={() => void handleVerifyQueue(campaign)}
                             type="button"
                           >
-                            Verify queue
+                            {unverified > 0 ? `Verify ${unverified}` : "Verify queue"}
                             <ShieldCheck size={14} />
                           </button>
                           <button
