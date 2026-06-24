@@ -5,7 +5,7 @@
   <p>Protocols submit scoped work. Nodes produce signed audit artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.0"><img alt="CYPHES: v0.5.0" src="https://img.shields.io/badge/CYPHES-v0.5.0-c7ff47"></a>
+    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.1"><img alt="CYPHES: v0.5.1" src="https://img.shields.io/badge/CYPHES-v0.5.1-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,13 +17,14 @@
 
 ## Download
 
-The current developer release is **CYPHES v0.5.0**. It adds remotely claimable
-audit work units on top of the professional local-model audit pipeline.
+The current developer release is **CYPHES v0.5.1**. It adds remotely claimable
+audit work units on top of the professional local-model audit pipeline and
+replays offline-submitted work when peers reconnect.
 
 Apple Silicon downloads:
 
-- [Download CYPHES Requester v0.5.0](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.0/CYPHES-Requester-v0.5.0-aarch64.dmg)
-- [Download CYPHES Worker v0.5.0](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.0/CYPHES-Worker-v0.5.0-aarch64.dmg)
+- [Download CYPHES Requester v0.5.1](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.1/CYPHES-Requester-v0.5.1-aarch64.dmg)
+- [Download CYPHES Worker v0.5.1](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.1/CYPHES-Worker-v0.5.1-aarch64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then

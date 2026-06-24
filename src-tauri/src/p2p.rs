@@ -1301,6 +1301,38 @@ fn on_peer_connected(
             outbound.insert(request_id, PendingOutbound::Campaign(campaign_id));
         }
     }
+    if let Ok(claims) = store.work_unit_claims_for_requester(&peer_agent_id) {
+        for claim in claims {
+            let request_id = swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
+            outbound.insert(
+                request_id,
+                PendingOutbound::WorkUnitClaim {
+                    campaign_id: claim.campaign_id,
+                    work_unit_id: claim.work_unit_id,
+                    claim_id: claim.claim_id,
+                },
+            );
+        }
+    }
+    if let Ok(contributions) = store.contributions_for_requester(&peer_agent_id) {
+        for contribution in contributions {
+            let request_id = swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
+            outbound.insert(
+                request_id,
+                PendingOutbound::Contribution {
+                    campaign_id: contribution.campaign_id,
+                    contribution_id: contribution.contribution_id,
+                    receipt_hash: contribution.receipt_hash,
+                },
+            );
+        }
+    }
     if let Ok(bundles) = store.verification_bundles_for_worker(&peer_agent_id) {
         for (verification, allocations) in bundles {
             let credit_total = allocations
