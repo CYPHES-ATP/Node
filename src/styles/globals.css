@@ -794,7 +794,7 @@ form > label,
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
   padding: 18px;
-  min-height: 220px;
+  min-height: 168px;
   border: 1px solid rgba(0, 246, 255, 0.16);
   border-radius: 0;
   background:
@@ -911,10 +911,72 @@ form > label,
   font-size: 10px;
 }
 
+.work-unit-dropdown {
+  margin-top: 16px;
+  border: 1px solid rgba(0, 246, 255, 0.15);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.work-unit-dropdown summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.work-unit-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.work-unit-dropdown summary::before {
+  content: "+";
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 13px;
+  justify-self: start;
+  position: absolute;
+  transform: translateX(-2px);
+}
+
+.work-unit-dropdown[open] summary::before {
+  content: "-";
+}
+
+.work-unit-dropdown summary span {
+  padding-left: 18px;
+  color: var(--cyan-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.work-unit-dropdown summary strong {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.work-unit-dropdown[open] summary {
+  border-bottom: 1px solid rgba(0, 246, 255, 0.14);
+}
+
 .work-unit-list {
   display: grid;
   gap: 8px;
-  margin-top: 16px;
+  max-height: 310px;
+  padding: 10px;
+  overflow: auto;
+  scrollbar-color: var(--cyan) rgba(245, 251, 250, 0.06);
+  scrollbar-width: thin;
 }
 
 .work-unit-row {
@@ -1018,6 +1080,12 @@ form > label,
 .work-unit-action button:hover:not(:disabled) {
   border-color: var(--green);
   background: rgba(199, 255, 71, 0.14);
+}
+
+.work-unit-action .needs-action-button {
+  border-color: rgba(255, 198, 77, 0.5);
+  background: rgba(255, 198, 77, 0.1);
+  color: #ffd272;
 }
 
 .empty-state.compact {
@@ -1342,6 +1410,117 @@ footer {
 
 .campaign-admin-list article {
   grid-template-columns: minmax(0, 1fr) 160px 100px 180px;
+}
+
+.campaign-admin-list .campaign-admin-event {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding: 14px;
+}
+
+.campaign-admin-event-main,
+.campaign-admin-metrics,
+.campaign-admin-work-units > div,
+.campaign-admin-actions {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+}
+
+.campaign-admin-event-main {
+  grid-template-columns: minmax(0, 1fr) 160px 100px 180px;
+}
+
+.campaign-admin-event-main > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.campaign-admin-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.campaign-admin-metrics span,
+.campaign-admin-work-units span {
+  padding: 5px 7px;
+  border: 1px solid rgba(245, 251, 250, 0.08);
+  color: var(--faint);
+}
+
+.campaign-admin-metrics .needs-action {
+  border-color: rgba(255, 198, 77, 0.34);
+  color: #ffd272;
+}
+
+.campaign-admin-work-units {
+  display: grid;
+  gap: 6px;
+}
+
+.campaign-admin-work-units > div {
+  grid-template-columns: minmax(0, 1fr) 110px 100px 150px;
+  padding: 8px;
+  border: 1px solid rgba(0, 246, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.campaign-admin-actions {
+  grid-template-columns: repeat(2, minmax(140px, 180px));
+  justify-content: end;
+}
+
+.campaign-admin-actions button {
+  min-height: 38px;
+  border: 1px solid rgba(0, 246, 255, 0.34);
+  border-radius: 0;
+  background: rgba(0, 246, 255, 0.08);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.campaign-admin-actions button:hover:not(:disabled) {
+  border-color: var(--cyan);
+  background: rgba(0, 246, 255, 0.15);
+}
+
+.campaign-export-path {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid rgba(199, 255, 71, 0.28);
+  background:
+    linear-gradient(90deg, rgba(199, 255, 71, 0.075), transparent 58%),
+    rgba(0, 0, 0, 0.28);
+}
+
+.campaign-export-path strong,
+.report-notice strong {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.campaign-export-path code,
+.campaign-export-path span,
+.report-notice code {
+  overflow: hidden;
+  color: var(--cyan-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-notice {
+  display: grid;
+  gap: 6px;
 }
 
 .developer-event-table > div {
