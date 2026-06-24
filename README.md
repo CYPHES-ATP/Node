@@ -12,7 +12,7 @@
 </div>
 
 <p align="center">
-  <img alt="CYPHES v0.5.0 desktop node" src="docs/images/CYPHES%20v0.5.0.png" width="100%">
+  <img alt="CYPHES v0.5.1 desktop node" src="docs/images/CYPHES%20v0.5.1.png" width="100%">
 </p>
 
 ## Download
