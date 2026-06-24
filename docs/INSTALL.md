@@ -2,10 +2,10 @@
 
 ## Download The macOS Preview
 
-Apple Silicon users can download the current v0.5.1 developer DMGs from:
+Apple Silicon users can download the current v0.5.2 developer DMGs from:
 
-- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.1/CYPHES-Requester-v0.5.1-aarch64.dmg
-- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.1/CYPHES-Worker-v0.5.1-aarch64.dmg
+- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.2/CYPHES-v0.5.2-aarch64.dmg
+- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.2/CYPHES-Requester-v0.5.2-aarch64.dmg
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
@@ -14,8 +14,8 @@ available yet.
 
 - **CYPHES Requester** creates campaigns, verifies submitted work, and exports
   final report bundles.
-- **CYPHES Worker** discovers campaigns, claims work units, runs local-model
-  audit passes, and receives receipt-backed ATP Credits.
+- **CYPHES** discovers campaigns, claims work units, runs local AI audit
+  passes, and receives receipt-backed ATP Credits.
 
 ## Native Development
 

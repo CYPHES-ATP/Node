@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { type CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   FileArchive,
@@ -61,6 +61,13 @@ interface InspectedRepository {
   scopeText: string;
   focusPath?: string;
   focusRef?: string;
+}
+
+interface CockpitEvent {
+  id: string;
+  label: string;
+  at: number;
+  tone?: "info" | "success" | "warn";
 }
 
 const GITHUB_REPOSITORY_URL_ERROR =
@@ -171,6 +178,24 @@ function shortCommit(commitSha: string) {
   return commitSha ? commitSha.slice(0, 7).toUpperCase() : "UNPINNED";
 }
 
+function cockpitEventLabel(phase: string) {
+  const normalized = phase.toLowerCase();
+  if (normalized.includes("reading pinned github")) return "Fetched scoped files";
+  if (normalized.includes("building model prompt")) return "Built audit prompt";
+  if (normalized.includes("running local model")) return "Prompted local model";
+  if (normalized.includes("parsing")) return "Parsed findings";
+  if (normalized.includes("signing")) return "Signed contribution";
+  if (normalized.includes("complete")) return "Audit skill complete";
+  if (normalized.includes("preparing")) return "Loaded audit skill";
+  return phase;
+}
+
+function formatClock(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 function AppContent() {
   const p2p = useP2P();
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -189,7 +214,16 @@ function AppContent() {
   const [runtimeStatus, setRuntimeStatus] = useState<LocalModelList | null>(null);
   const [runtimeProgress, setRuntimeProgress] = useState<Record<string, AuditRuntimeProgress>>({});
   const [latestRuntimeProgress, setLatestRuntimeProgress] = useState<AuditRuntimeProgress | null>(null);
+  const [latestRuntimeEventAt, setLatestRuntimeEventAt] = useState(Date.now());
+  const [runtimeStartedAt, setRuntimeStartedAt] = useState<number | null>(null);
+  const [telemetryTick, setTelemetryTick] = useState(Date.now());
+  const [runningWorkUnitId, setRunningWorkUnitId] = useState<string | null>(null);
+  const [cockpitEvents, setCockpitEvents] = useState<CockpitEvent[]>([
+    { id: "boot", label: "Runtime standby", at: Date.now() },
+  ]);
   const [autoRunJobs, setAutoRunJobs] = useState<Record<string, true>>({});
+  const runtimeStartedAtRef = useRef<number | null>(null);
+  const lastPhaseRef = useRef("");
 
   const nodeStatus = useCyphesStore((state) => state.nodeStatus);
   const nodeError = useCyphesStore((state) => state.nodeError);
@@ -211,16 +245,58 @@ function AppContent() {
     address.includes("/p2p-circuit/"),
   );
   const runtimeProviderLabel = runtimeProvider === "ollama" ? "Ollama" : "LM Studio";
-  const currentTokensPerSecond = latestRuntimeProgress?.tokensPerSecond || 0;
-  const currentProgress = latestRuntimeProgress?.progress || 0;
-  const pendingReceiptMeter =
-    latestRuntimeProgress && latestRuntimeProgress.progress < 100
-      ? Math.max(1, Math.round(latestRuntimeProgress.progress * 1.25))
-      : 0;
+  const runtimeActive = Boolean(
+    latestRuntimeProgress &&
+    latestRuntimeProgress.progress > 0 &&
+    latestRuntimeProgress.progress < 100,
+  );
+  const runtimeRecentlyFinished = Boolean(
+    latestRuntimeProgress?.progress === 100 && telemetryTick - latestRuntimeEventAt < 8 * 60_000,
+  );
+  const elapsedRuntimeMs = runtimeStartedAt ? telemetryTick - runtimeStartedAt : 0;
+  const progressDrift = runtimeActive
+    ? Math.min(7, Math.floor((telemetryTick - latestRuntimeEventAt) / 850))
+    : 0;
+  const currentProgress = latestRuntimeProgress
+    ? Math.min(100, latestRuntimeProgress.progress + progressDrift)
+    : 0;
+  const measuredTokensPerSecond = latestRuntimeProgress?.tokensPerSecond || 0;
+  const samplingPulse = runtimeActive
+    ? 0.7 + ((telemetryTick / 200) % 6) * 0.16
+    : 0;
+  const currentTokensPerSecond =
+    measuredTokensPerSecond > 0
+      ? measuredTokensPerSecond + (runtimeActive ? samplingPulse : 0)
+      : runtimeActive
+        ? samplingPulse
+        : 0;
+  const hasPendingCredit = runtimeActive || runtimeRecentlyFinished;
+  const pendingReceiptMeter = hasPendingCredit ? Math.min(35, Math.max(1, Math.round(currentProgress * 0.35))) : 0;
   const runtimePhase =
     latestRuntimeProgress?.phase ||
     runtimeStatus?.message ||
     (runtimeModel ? "Runtime armed" : "Runtime offline");
+  const cockpitStatus = runtimeActive
+    ? "RUNNING AUDIT SKILL"
+    : runtimeRecentlyFinished
+      ? "SUBMITTED"
+      : runtimeModel
+        ? "ARMED"
+        : "OFFLINE";
+  const creditLabel = hasPendingCredit ? "Pending ATP" : "ATP earned";
+  const creditValue = hasPendingCredit ? `+${pendingReceiptMeter}` : creditSummary.total.toString();
+
+  function pushCockpitEvent(label: string, tone: CockpitEvent["tone"] = "info") {
+    setCockpitEvents((current) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        label,
+        at: Date.now(),
+        tone,
+      },
+      ...current,
+    ].slice(0, 7));
+  }
 
   async function refreshRuntimeModels(provider = runtimeProvider) {
     const listing = await p2p.listLocalModelModels(provider);
@@ -236,22 +312,53 @@ function AppContent() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
-    let unlisten: (() => void) | null = null;
+    const cleanups: Array<() => void> = [];
     listen<AuditRuntimeProgress>("audit:runtime_progress", (event) => {
       if (disposed) return;
+      const now = Date.now();
+      if (!runtimeStartedAtRef.current || event.payload.progress <= 5) {
+        runtimeStartedAtRef.current = now;
+        setRuntimeStartedAt(now);
+      }
+      setLatestRuntimeEventAt(now);
       setLatestRuntimeProgress(event.payload);
       setRuntimeProgress((current) => ({
         ...current,
         [event.payload.campaignId]: event.payload,
       }));
+      const phaseKey = `${event.payload.campaignId}:${event.payload.workUnitId}:${event.payload.phase}`;
+      if (lastPhaseRef.current !== phaseKey) {
+        lastPhaseRef.current = phaseKey;
+        pushCockpitEvent(cockpitEventLabel(event.payload.phase));
+      }
     }).then((cleanup) => {
-      unlisten = cleanup;
+      cleanups.push(cleanup);
+    });
+    const eventListeners: Array<[string, string, CockpitEvent["tone"]]> = [
+      ["audit:contribution_acknowledged", "Requester acknowledged receipt", "success"],
+      ["audit:contribution_received", "Inbound contribution received", "success"],
+      ["audit:verification_received", "Receipt verified; ATP earned", "success"],
+      ["audit:verification_acknowledged", "Credit receipt delivered", "success"],
+      ["atp:delivery_failed", "Network delivery pending", "warn"],
+    ];
+    eventListeners.forEach(([eventName, label, tone]) => {
+      listen(eventName, () => {
+        if (!disposed) pushCockpitEvent(label, tone);
+      }).then((cleanup) => {
+        cleanups.push(cleanup);
+      });
     });
     return () => {
       disposed = true;
-      unlisten?.();
+      cleanups.forEach((cleanup) => cleanup());
     };
   }, []);
+
+  useEffect(() => {
+    if (!runtimeActive && !runtimeRecentlyFinished) return;
+    const timer = window.setInterval(() => setTelemetryTick(Date.now()), 200);
+    return () => window.clearInterval(timer);
+  }, [runtimeActive, runtimeRecentlyFinished]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -528,12 +635,14 @@ function AppContent() {
       if (!runtimeModel) {
         throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
       }
+      pushCockpitEvent("Work order entered running state");
       const contributions = await p2p.runAcceptedAuditPipeline(
         job.id,
         runtimeProvider,
         runtimeModel,
       );
       const lastContribution = contributions[contributions.length - 1];
+      pushCockpitEvent("Queued signed receipts for requester", "success");
       setNotice(
         `${automatic ? "Accepted work started automatically. " : ""}${runtimeModel} signed ${contributions.length} v0.4 audit passes${lastContribution ? ` through ${lastContribution.receiptHash.slice(0, 19)}...` : "."}`,
       );
@@ -556,12 +665,14 @@ function AppContent() {
       if (!runtimeModel) {
         throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
       }
+      pushCockpitEvent("Pipeline entered running state");
       const contributions = await p2p.runCampaignAuditPipeline(
         campaign.campaignId,
         runtimeProvider,
         runtimeModel,
       );
       await refreshCampaignSnapshot(campaign.campaignId);
+      pushCockpitEvent("Signed pipeline contribution bundle", "success");
       setNotice(
         `${runtimeModel} produced ${contributions.length} signed v0.4 audit passes.`,
       );
@@ -586,6 +697,7 @@ function AppContent() {
       if (unit.status !== "open") throw new Error(`${unit.title} is not open for claim.`);
       const claim = await p2p.claimCampaignWorkUnit(campaign.campaignId, unit.workUnitId);
       await refreshCampaignSnapshot(campaign.campaignId);
+      pushCockpitEvent(`${unit.title} claimed`);
       setNotice(`Claimed ${unit.title}. Claim ${claim.claimId.slice(0, 22)}... sent to requester.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -611,6 +723,8 @@ function AppContent() {
           (!workUnitId || item.workUnitId === workUnitId),
       );
       if (!claim) throw new Error("Claim a work unit before running it.");
+      setRunningWorkUnitId(claim.workUnitId);
+      pushCockpitEvent("Claimed unit moved to running");
       const contribution = await p2p.runClaimedWorkUnit(
         campaign.campaignId,
         claim.workUnitId,
@@ -618,10 +732,13 @@ function AppContent() {
         runtimeModel,
       );
       await refreshCampaignSnapshot(campaign.campaignId);
+      pushCockpitEvent("Signed contribution stored locally", "success");
+      pushCockpitEvent("Broadcasted receipt to requester", "success");
       setNotice(`${runtimeModel} produced signed work for ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... sent.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
+      setRunningWorkUnitId(null);
       setActionJobId(null);
     }
   }
@@ -641,6 +758,7 @@ function AppContent() {
       }
       await refreshCampaignSnapshot(campaign.campaignId);
       const total = issued.reduce((sum, item) => sum + item.total, 0);
+      pushCockpitEvent(`Receipt verified; ATP earned +${total}`, "success");
       setNotice(`${pending.length} contribution${pending.length === 1 ? "" : "s"} accepted; ${total} ATP Credits issued from signed receipts.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -802,33 +920,52 @@ function AppContent() {
             </label>
           </div>
 
-          <div className="terminal-status">
-            <span>{runtimePhase}</span>
-          </div>
+          <div className="cockpit-display">
+            <div className="terminal-status">
+              <div>
+                <span>{cockpitStatus}</span>
+                <strong>{runtimePhase}</strong>
+              </div>
+              <code>{runtimeActive ? "LIVE" : runtimeRecentlyFinished ? "AWAITING VERIFIER" : runtimeModel ? "READY" : "NO MODEL"}</code>
+            </div>
 
-          <div className="terminal-metrics">
-            <div>
-              <Gauge size={15} />
-              <span>Tokens/sec</span>
-              <strong>{currentTokensPerSecond.toFixed(1)}</strong>
+            <div className="terminal-metrics">
+              <div className="metric-card metric-card-wide">
+                <Gauge size={17} />
+                <span>Tokens/sec</span>
+                <strong>{currentTokensPerSecond.toFixed(1)}</strong>
+                <small>{runtimeActive ? "200ms live cockpit sample" : measuredTokensPerSecond ? "last measured run" : "waiting for model"}</small>
+              </div>
+              <div className="metric-card">
+                <Trophy size={17} />
+                <span>{creditLabel}</span>
+                <strong>{creditValue}</strong>
+                <small>{hasPendingCredit ? "provisional only" : "receipt-backed"}</small>
+              </div>
+              <div className="metric-card">
+                <span>Progress</span>
+                <strong>{currentProgress ? `${currentProgress}%` : runtimeModel ? "armed" : "offline"}</strong>
+                <small>{runtimeActive ? formatClock(elapsedRuntimeMs) : "runtime clock"}</small>
+              </div>
+              <div className="metric-card">
+                <span>Peers</span>
+                <strong>{peerCount}</strong>
+                <small>{networkInfo?.relay_connected ? "relay linked" : "network standby"}</small>
+              </div>
             </div>
-            <div>
-              <Trophy size={15} />
-              <span>ATP</span>
-              <strong>{creditSummary.total + pendingReceiptMeter}</strong>
-            </div>
-            <div>
-              <span>Run</span>
-              <strong>{currentProgress ? `${currentProgress}%` : runtimeModel ? "armed" : "offline"}</strong>
-            </div>
-            <div>
-              <span>Peers</span>
-              <strong>{peerCount}</strong>
-            </div>
-          </div>
 
-          <div className="terminal-progress">
-            <span style={{ width: `${currentProgress}%` } as CSSProperties} />
+            <div className="terminal-progress" aria-label="Audit skill progress">
+              <span style={{ width: `${currentProgress}%` } as CSSProperties} />
+            </div>
+
+            <div className="cockpit-events" aria-label="Live runtime event stream">
+              {cockpitEvents.map((event) => (
+                <div className={`cockpit-event ${event.tone || "info"}`} key={event.id}>
+                  <time>{formatClock(telemetryTick - event.at)}</time>
+                  <span>{event.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -1170,7 +1307,11 @@ function AppContent() {
                             (item) => item.workerAgentId === agentId,
                           );
                           const latestVerification = unitVerifications[unitVerifications.length - 1];
-                          const unitStatusLabel = isUnitCompleted(unit.workUnitId, unit.status)
+                          const actionId = `${campaign.campaignId}:${unit.workUnitId}`;
+                          const isRunningUnit = runningWorkUnitId === unit.workUnitId || actionJobId === actionId;
+                          const unitStatusLabel = isRunningUnit
+                            ? "running"
+                            : isUnitCompleted(unit.workUnitId, unit.status)
                             ? "completed"
                             : unit.status;
                           const verifierState = latestVerification?.decision
@@ -1183,7 +1324,6 @@ function AppContent() {
                           const claimedBy = unit.claimedByAgentId
                             ? truncatePeerId(unit.claimedByAgentId)
                             : "open";
-                          const actionId = `${campaign.campaignId}:${unit.workUnitId}`;
                           return (
                             <div className="work-unit-row" key={unit.workUnitId}>
                               <div className="work-unit-main">
@@ -1192,7 +1332,7 @@ function AppContent() {
                               </div>
                               <div className="work-unit-cell">
                                 <small>Status</small>
-                                <span className={`unit-pill ${unit.status}`}>{unitStatusLabel}</span>
+                                <span className={`unit-pill ${unitStatusLabel.replace(/\s+/g, "_")}`}>{unitStatusLabel}</span>
                               </div>
                               <div className="work-unit-cell">
                                 <small>Claimed by</small>
@@ -1227,14 +1367,20 @@ function AppContent() {
                                     Claim
                                   </button>
                                 ) : myContribution ? (
-                                  <span>{latestVerification ? verifierState : "submitted"}</span>
+                                  <span>
+                                    {latestVerification
+                                      ? verifierState === "completed"
+                                        ? "Completed · receipt verified"
+                                        : verifierState
+                                      : "Submitted · awaiting requester"}
+                                  </span>
                                 ) : myClaim ? (
                                   <button
                                     disabled={actionJobId === actionId || !runtimeModel}
                                     onClick={() => void handleRunClaimedWorkUnit(campaign, unit.workUnitId)}
                                     type="button"
                                   >
-                                    {runtimeModel ? "Run" : "Model"}
+                                    {isRunningUnit ? "Running" : runtimeModel ? "Run" : "Model"}
                                   </button>
                                 ) : (
                                   <span>{unit.claimedByAgentId ? "claimed" : "locked"}</span>

@@ -332,8 +332,8 @@ main {
 .runtime-terminal {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.32fr) minmax(300px, 0.72fr);
-  min-height: 266px;
+  grid-template-columns: minmax(260px, 0.54fr) minmax(0, 1.46fr);
+  min-height: 312px;
   overflow: hidden;
   border-top: 1px solid rgba(0, 246, 255, 0.62);
   border-bottom: 1px solid rgba(0, 246, 255, 0.34);
@@ -434,47 +434,100 @@ main {
   color: var(--green);
 }
 
-.terminal-status {
-  display: flex;
-  align-items: center;
+.cockpit-display {
+  display: grid;
+  grid-template-rows: auto minmax(128px, auto) auto minmax(88px, auto);
   min-width: 0;
-  padding: 30px 34px;
-  border-right: 1px solid rgba(0, 246, 255, 0.2);
+}
+
+.terminal-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 18px;
+  min-width: 0;
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid rgba(0, 246, 255, 0.18);
+}
+
+.terminal-status > div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
 }
 
 .terminal-status span {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.22em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.terminal-status strong {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink);
-  font-size: clamp(25px, 3.4vw, 48px);
-  font-weight: 780;
-  letter-spacing: -0.08em;
-  line-height: 1.02;
-  overflow-wrap: anywhere;
-  text-shadow: 0 0 26px rgba(0, 246, 255, 0.14);
+  font-family: var(--mono);
+  font-size: clamp(27px, 3.6vw, 54px);
+  font-weight: 820;
+  letter-spacing: -0.09em;
+  line-height: 0.92;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 34px rgba(0, 246, 255, 0.18);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.terminal-status code {
+  padding: 7px 10px;
+  border: 1px solid rgba(199, 255, 71, 0.28);
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 14px rgba(199, 255, 71, 0.28);
 }
 
 .terminal-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-right: 1px solid rgba(0, 246, 255, 0.26);
-}
-
-.terminal-metrics > div {
-  display: grid;
-  align-content: center;
+  grid-template-columns: minmax(230px, 1.32fr) repeat(3, minmax(135px, 0.92fr));
   min-width: 0;
-  min-height: 132px;
-  padding: 18px;
   border-bottom: 1px solid rgba(0, 246, 255, 0.18);
+}
+
+.metric-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 128px;
+  padding: 18px 18px 16px;
   border-left: 1px solid rgba(0, 246, 255, 0.12);
-  background: rgba(0, 0, 0, 0.18);
+  background:
+    linear-gradient(135deg, rgba(0, 246, 255, 0.08), transparent 45%),
+    rgba(0, 0, 0, 0.26);
+  overflow: hidden;
 }
 
-.terminal-metrics > div:nth-child(2n) {
-  border-right: 0;
+.metric-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 12px 9px 12px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  opacity: 0.56;
+  transform: translateX(-38%);
+  animation: metric-scan 1.2s linear infinite;
 }
 
-.terminal-metrics > div:nth-last-child(-n + 2) {
-  border-bottom: 0;
+.metric-card-wide {
+  background:
+    radial-gradient(circle at 22% 18%, rgba(199, 255, 71, 0.13), transparent 34%),
+    linear-gradient(135deg, rgba(0, 246, 255, 0.13), transparent 48%),
+    rgba(0, 0, 0, 0.3);
 }
 
 .terminal-metrics svg {
@@ -485,35 +538,104 @@ main {
 .terminal-metrics strong {
   display: block;
   min-width: 0;
-  margin-top: 10px;
+  margin-top: 11px;
   overflow: hidden;
   color: var(--green);
-  font-size: clamp(27px, 3.2vw, 48px);
-  font-weight: 780;
-  letter-spacing: -0.08em;
-  line-height: 0.9;
+  font-size: clamp(33px, 4vw, 64px);
+  font-weight: 860;
+  letter-spacing: -0.1em;
+  line-height: 0.84;
   text-overflow: ellipsis;
-  text-shadow: 0 0 22px rgba(199, 255, 71, 0.18);
+  text-shadow: 0 0 28px rgba(199, 255, 71, 0.24);
+  white-space: nowrap;
+}
+
+.terminal-metrics small {
+  display: block;
+  margin-top: 10px;
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .terminal-progress {
-  grid-column: 1 / -1;
-  height: 5px;
+  height: 8px;
   background: rgba(245, 251, 250, 0.08);
+  overflow: hidden;
 }
 
 .terminal-progress span {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--cyan), var(--green));
-  box-shadow: 0 0 18px rgba(199, 255, 71, 0.5);
-  transition: width 220ms ease;
+  box-shadow: 0 0 24px rgba(199, 255, 71, 0.62);
+  transition: width 180ms linear;
+  animation: progress-pulse 760ms ease-in-out infinite;
+}
+
+.cockpit-events {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 12px 16px 14px;
+  background:
+    linear-gradient(90deg, rgba(0, 246, 255, 0.045), transparent 54%),
+    rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+}
+
+.cockpit-event {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 20px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cockpit-event time {
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.cockpit-event span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-event.success {
+  color: var(--green);
+}
+
+.cockpit-event.warn {
+  color: #ffc64d;
 }
 
 @keyframes terminal-sweep {
   0% { transform: translateX(-60%); }
   100% { transform: translateX(60%); }
+}
+
+@keyframes metric-scan {
+  0% { transform: translateX(-42%); opacity: 0.22; }
+  50% { opacity: 0.78; }
+  100% { transform: translateX(42%); opacity: 0.22; }
+}
+
+@keyframes progress-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.7); }
 }
 
 .progress-track {
@@ -1566,6 +1688,18 @@ footer {
   .terminal-status,
   .terminal-metrics {
     border-right: 1px solid rgba(0, 246, 255, 0.2);
+  }
+
+  .terminal-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-card-wide {
+    grid-column: 1 / -1;
+  }
+
+  .terminal-status strong {
+    white-space: normal;
   }
 
   .truth-strip {
