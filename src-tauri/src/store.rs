@@ -480,6 +480,25 @@ impl AtpStore {
     ) -> Result<NodeContribution, String> {
         verify_signed_contribution(contribution)?;
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let existing = connection
+            .query_row(
+                "SELECT contribution_json FROM audit_contributions WHERE contribution_id = ?1",
+                params![contribution.contribution_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(json) = existing {
+            let existing_contribution: NodeContribution =
+                serde_json::from_str(&json).map_err(|error| error.to_string())?;
+            if existing_contribution.receipt_hash == contribution.receipt_hash
+                && existing_contribution.work_unit_id == contribution.work_unit_id
+                && existing_contribution.worker_agent_id == contribution.worker_agent_id
+            {
+                return Ok(existing_contribution);
+            }
+            return Err("contribution id already exists with different signed content".to_string());
+        }
         let campaign: Option<String> = connection
             .query_row(
                 "SELECT campaign_id FROM protocol_audit_campaigns WHERE campaign_id = ?1",
@@ -535,6 +554,7 @@ impl AtpStore {
             &contribution.campaign_id,
             &contribution.work_unit_id,
             "submitted",
+            Some(contribution.worker_agent_id.as_str()),
         )?;
         Ok(contribution.clone())
     }
@@ -591,6 +611,7 @@ impl AtpStore {
             &contribution.campaign_id,
             &contribution.work_unit_id,
             contribution_status,
+            None,
         )?;
         for allocation in &allocations {
             transaction
@@ -680,6 +701,7 @@ impl AtpStore {
             &contribution.campaign_id,
             &contribution.work_unit_id,
             contribution_status,
+            None,
         )?;
         for allocation in allocations {
             transaction
@@ -782,6 +804,52 @@ impl AtpStore {
             bundles.push((verification, allocations));
         }
         Ok(bundles)
+    }
+
+    pub fn work_unit_claims_for_requester(
+        &self,
+        requester_agent_id: &str,
+    ) -> Result<Vec<AuditWorkUnitClaim>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT claim_json FROM audit_work_unit_claims
+                 WHERE requester_agent_id = ?1
+                 ORDER BY created_at, claim_id",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![requester_agent_id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
+    pub fn contributions_for_requester(
+        &self,
+        requester_agent_id: &str,
+    ) -> Result<Vec<NodeContribution>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT contribution_json FROM audit_contributions c
+                 INNER JOIN protocol_audit_campaigns p
+                    ON p.campaign_id = c.campaign_id
+                 WHERE p.requester_agent_id = ?1
+                 ORDER BY c.created_at, c.contribution_id",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![requester_agent_id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect()
     }
 
     pub fn campaign_report_snapshot(
@@ -2081,6 +2149,7 @@ fn update_work_unit_status(
     campaign_id: &str,
     work_unit_id: &str,
     status: &str,
+    worker_agent_id: Option<&str>,
 ) -> Result<(), String> {
     let json = connection
         .query_row(
@@ -2093,6 +2162,11 @@ fn update_work_unit_status(
     let mut work_unit: AuditWorkUnit =
         serde_json::from_str(&json).map_err(|error| error.to_string())?;
     work_unit.status = status.to_string();
+    if let Some(worker_agent_id) = worker_agent_id {
+        if work_unit.claimed_by_agent_id.is_none() {
+            work_unit.claimed_by_agent_id = Some(worker_agent_id.to_string());
+        }
+    }
     connection
         .execute(
             "UPDATE audit_work_units
@@ -2641,6 +2715,20 @@ mod tests {
                 .status,
             "submitted"
         );
+        assert_eq!(
+            submitted_units
+                .iter()
+                .find(|unit| unit.work_unit_id == accepted_contribution.work_unit_id)
+                .unwrap()
+                .claimed_by_agent_id
+                .as_deref(),
+            Some(agent_id(&worker.public()).as_str())
+        );
+        store.record_contribution(&accepted_contribution).unwrap();
+        let replay_snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(replay_snapshot.contributions.len(), 1);
         let accepted_verification = signed_verification(
             &verifier,
             campaign.campaign_id.clone(),
@@ -2823,6 +2911,21 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.claims.len(), 1);
         assert_eq!(snapshot.contributions.len(), 1);
+        assert_eq!(
+            store
+                .work_unit_claims_for_requester(&agent_id(&requester.public()))
+                .unwrap()
+                .len(),
+            1
+        );
+        let replayable_contributions = store
+            .contributions_for_requester(&agent_id(&requester.public()))
+            .unwrap();
+        assert_eq!(replayable_contributions.len(), 1);
+        assert_eq!(
+            replayable_contributions[0].contribution_id,
+            claimed_worker_contribution.contribution_id
+        );
     }
 
     #[test]
