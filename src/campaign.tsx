@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { isTauriRuntime, truncatePeerId } from "@/lib/utils";
@@ -57,6 +58,12 @@ interface AdminState {
   credits: CreditSummary;
   networkInfo: NetworkInfo | null;
   snapshots: Record<string, CampaignReportSnapshot>;
+}
+
+interface LatestExport {
+  campaignId: string;
+  bundlePath: string;
+  reportPath: string;
 }
 
 function parseGitHubInput(value: string): GitHubInputTarget | null {
@@ -193,6 +200,7 @@ function CampaignConsole() {
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [actionCampaignId, setActionCampaignId] = useState<string | null>(null);
+  const [latestExport, setLatestExport] = useState<LatestExport | null>(null);
 
   const sortedJobs = useMemo(
     () => [...admin.jobs].sort((a, b) => b.createdAt - a.createdAt),
@@ -350,7 +358,14 @@ function CampaignConsole() {
       const bundle = await invoke<ExportedReportBundle>("export_campaign_report", {
         campaignId: campaign.campaignId,
       });
-      setNotice(`Final audit report bundle exported to ${bundle.bundlePath}.`);
+      const reportPath = `${bundle.bundlePath.replace(/\/$/, "")}/report.md`;
+      setLatestExport({
+        campaignId: campaign.campaignId,
+        bundlePath: bundle.bundlePath,
+        reportPath,
+      });
+      setNotice(`Final audit report bundle exported. Finder opened report.md.`);
+      await revealItemInDir(reportPath).catch(() => undefined);
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -571,6 +586,13 @@ function CampaignConsole() {
                     Export report
                   </button>
                 </div>
+                {latestExport?.campaignId === campaign.campaignId ? (
+                  <div className="campaign-export-path">
+                    <strong>Report exported</strong>
+                    <code>{latestExport.reportPath}</code>
+                    <span>Bundle: {latestExport.bundlePath}</span>
+                  </div>
+                ) : null}
               </article>
             );
           })}
@@ -597,6 +619,13 @@ function CampaignConsole() {
           ))}
         </div>
       </section>
+
+      {latestExport ? (
+        <div className="notice report-notice">
+          <strong>Report exported</strong>
+          <code>{latestExport.reportPath}</code>
+        </div>
+      ) : null}
     </main>
   );
 }
