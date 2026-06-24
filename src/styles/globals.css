@@ -912,6 +912,7 @@ form > label,
 }
 
 .work-unit-dropdown {
+  grid-column: 1 / -1;
   margin-top: 16px;
   border: 1px solid rgba(0, 246, 255, 0.15);
   background: rgba(0, 0, 0, 0.22);
