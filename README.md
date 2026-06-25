@@ -1,7 +1,7 @@
 <a id="cyphes"></a>
 <div align="center">
   <h1>CYPHES</h1>
-  <p><strong>An autonomous digital labor protocol powered by ATP</strong></p>
+  <p><strong>An autonomous digital labor economy.</strong></p>
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
