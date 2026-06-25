@@ -8,6 +8,7 @@ import type {
   CreditAllocation,
   CreditSummary,
   ExportedReportBundle,
+  GuardianTarget,
   LegacyAuditJob,
   LocalModelList,
   NetworkInfo,
@@ -108,6 +109,11 @@ export function useP2P() {
   async function listLocalModelProviders() {
     if (!isTauriRuntime()) return [];
     return invoke<LocalModelList[]>("list_local_model_providers");
+  }
+
+  async function listGuardianTargets() {
+    if (!isTauriRuntime()) return [];
+    return invoke<GuardianTarget[]>("list_guardian_targets");
   }
 
   async function listLocalModelModels(provider: string) {
@@ -217,12 +223,14 @@ export function useP2P() {
     workUnitId: string,
     provider: string,
     model: string,
+    maxRuntimeSeconds?: number,
   ) {
     const contribution = await invoke<NodeContribution>("run_claimed_work_unit", {
       campaignId,
       workUnitId,
       provider,
       model,
+      maxRuntimeSeconds,
     });
     await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
     return contribution;
@@ -364,6 +372,7 @@ export function useP2P() {
     loadAudits,
     loadProtocolCampaigns,
     getCampaignSnapshot,
+    listGuardianTargets,
     listLocalModelProviders,
     listLocalModelModels,
     refreshCreditSummary,

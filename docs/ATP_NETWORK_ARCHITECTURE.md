@@ -676,7 +676,7 @@ multi-pass audit pipeline execution, signed node contributions, signed verifier
 decisions, ATP Credit allocation, and professional markdown report bundle
 export.
 
-This layer intentionally does not add fake reputation, token balances, bounty
+This layer intentionally does not add fake reputation, token balances, external
 payouts, or exploit claims. A contribution becomes credit-eligible only after a
 signed verifier result accepts a signed contribution receipt. Network-wide
 campaign discovery, OpenClaw/Hermes advanced execution, verifier challenge

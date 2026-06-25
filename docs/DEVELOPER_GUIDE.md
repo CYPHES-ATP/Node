@@ -2,9 +2,9 @@
 
 ## Product Boundary
 
-The current product has one job: allow two CYPHES nodes to complete a bounded
-public GitHub repository audit through signed, durable ATP events and export an
-independently verifiable Proof of Cognition.
+The current product has one job: allow CYPHES nodes to coordinate bounded,
+public repository security work through signed ATP events, signed work-unit
+contributions, verifier receipts, and portable report/receipt bundles.
 
 Do not add simulated peers, sample jobs, reputation counters, synthetic
 responses, global-network labels, or payment claims.
@@ -13,7 +13,7 @@ responses, global-network labels, or payment claims.
 
 | Path | Owns |
 | --- | --- |
-| `src/App.tsx` | User workflow and truthful state labels |
+| `src/App.tsx` | Work-order cockpit, Genesis Auto Mode, runtime telemetry, and truthful state labels |
 | `src/hooks/useP2P.ts` | Typed calls into the native command boundary |
 | `src/store/useCyphesStore.ts` | Ephemeral frontend view state only |
 | `src/components/providers/P2PProvider.tsx` | Native events and backend refresh |
@@ -29,24 +29,29 @@ responses, global-network labels, or payment claims.
 | `src-tauri/src/lib.rs` | Native application composition |
 | `relay/` | Combined Relay v2/Rendezvous service and network smoke clients |
 | `network/` | Default network publication manifest |
+| `protocol/targets/` | Genesis guardian target index for public DeFi coverage campaigns |
 
 The Rust backend is authoritative. React may request an operation and render
 the returned projection, but it must not manufacture transaction state.
 
 ## Frontend
 
-The UI is intentionally small:
+The UI is intentionally split:
 
-- `src/App.tsx` owns the repository form and request list.
+- `src/App.tsx` owns the CYPHES cockpit: runtime selection, Genesis Auto Mode,
+  Work Orders, per-unit claim/run controls, verification, and report export.
+- `src/campaign.tsx` owns `campaign.html`: protocol/admin campaign creation,
+  network state, guardian target index visibility, ATP proof logs, and
+  developer receipt inspection.
 - `src/store/useCyphesStore.ts` holds the backend-confirmed view model only.
 - `src/hooks/useP2P.ts` wraps the Tauri command boundary.
 - `src/components/providers/P2PProvider.tsx` handles live network events.
 - `src/styles/globals.css` carries the CYPHES AMOLED design system.
 
-Repository creation performs a live lookup against GitHub's public repository
-API and resolves its default branch to an exact commit before the backend signs
-and commits a request. The browser preview is read-only. The legacy localStorage
-key is used only as one-time migration input.
+Campaign creation performs a live lookup against GitHub's public repository API
+and resolves the default branch, file URL, or folder URL to an exact commit
+before the backend signs and commits the request. The browser preview is
+read-only. The legacy localStorage key is used only as one-time migration input.
 
 ## Native Backend
 
@@ -70,6 +75,11 @@ The Rust backend:
 - downloads only the pinned GitHub archive and executes no repository code;
 - verifies signed results before requester settlement;
 - emits and exports the terminal Proof of Cognition.
+- stores protocol audit campaigns, work units, claims, contributions,
+  verifier decisions, ATP Credit allocations, and final report bundles;
+- exposes the Genesis guardian target index;
+- enforces Auto Worker runtime limits when the v0.5.4 auto loop runs claimed
+  work units.
 
 Current audit transaction uses:
 
@@ -140,7 +150,7 @@ Never move ACK generation before the database commit.
 
 ## Explicitly Unavailable
 
-- A deployed CYPHES-operated public host or offline mailbox.
+- Offline mailbox and durable global work-order index.
 - Real escrow or payment settlement.
 - Hardened container or VM isolation for the worker.
 - Private GitHub repository authorization.

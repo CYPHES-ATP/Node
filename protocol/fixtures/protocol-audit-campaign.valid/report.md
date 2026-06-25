@@ -18,11 +18,11 @@
 
 This fixture demonstrates the CYPHES v0.5 audit labor lifecycle. It contains two signed work-unit claims, one accepted scope-mapping contribution, one rejected duplicate lead, one verifier acceptance, one verifier rejection, and one receipt-backed ATP Credit allocation.
 
-No accepted reportable vulnerability is present in this fixture. The report should be read as verified coverage and duplicate-lead handling, not as a bounty claim or exploit submission.
+No accepted reportable vulnerability is present in this fixture. The report should be read as verified coverage and duplicate-lead handling, not as an external reward claim or exploit submission.
 
 ## Scope And Limits
 
-Repository-state audit of `aave-dao/aave-v3-origin` at the pinned commit. The fixture models the lifecycle objects and report shape only; it does not claim live protocol testing, deployed-bytecode certification, bounty payment, or real-world exploit validity.
+Repository-state audit of `aave-dao/aave-v3-origin` at the pinned commit. The fixture models the lifecycle objects and report shape only; it does not claim live protocol testing, deployed-bytecode certification, external payment, or real-world exploit validity.
 
 ## Methodology
 

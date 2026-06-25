@@ -1,0 +1,58 @@
+{
+  "version": "0.5.4",
+  "label": "CYPHES Genesis Guardian Target Index",
+  "generatedAt": "2026-06-25T00:00:00Z",
+  "policy": "Public DeFi coverage only. CYPHES does not submit external reports in auto mode. Human approval is required before any external disclosure, escalation, payout claim, or protocol contact.",
+  "targets": [
+    {
+      "targetId": "genesis-uniswap-v2-erc20",
+      "protocolName": "Uniswap",
+      "repoUrl": "https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2ERC20.sol",
+      "scopeText": "Focused path: contracts/UniswapV2ERC20.sol\nPublic DeFi guardian coverage for ERC20 permit, approval, balance, domain separator, and signature assumptions.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "Genesis guardian quest. Review the pinned Uniswap V2 ERC20 implementation for evidence-backed correctness, signature-domain assumptions, non-reportable leads, and residual uncertainty. Do not submit externally.",
+      "creditBudget": 106,
+      "cadence": "daily-cycle",
+      "tags": ["defi", "amm", "erc20", "solidity"]
+    },
+    {
+      "targetId": "genesis-uniswap-v2-pair",
+      "protocolName": "Uniswap",
+      "repoUrl": "https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2Pair.sol",
+      "scopeText": "Focused path: contracts/UniswapV2Pair.sol\nPublic DeFi guardian coverage for swap, mint, burn, sync, skim, fee, oracle accumulator, and reentrancy assumptions.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "Genesis guardian quest. Review the pinned Uniswap V2 pair contract for exploit-class coverage and evidence-backed negative findings. Do not submit externally.",
+      "creditBudget": 159,
+      "cadence": "daily-cycle",
+      "tags": ["defi", "amm", "solidity", "liquidity"]
+    },
+    {
+      "targetId": "genesis-uniswap-v2-router",
+      "protocolName": "Uniswap",
+      "repoUrl": "https://github.com/Uniswap/v2-periphery/blob/master/contracts/UniswapV2Router02.sol",
+      "scopeText": "Focused path: contracts/UniswapV2Router02.sol\nPublic DeFi guardian coverage for path handling, deadline checks, permit flows, ETH wrapping, and external call assumptions.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "Genesis guardian quest. Review the pinned router for evidence-backed exploit-class coverage and reproducibility notes. Do not submit externally.",
+      "creditBudget": 159,
+      "cadence": "daily-cycle",
+      "tags": ["defi", "amm", "router", "solidity"]
+    },
+    {
+      "targetId": "genesis-openzeppelin-erc20",
+      "protocolName": "OpenZeppelin",
+      "repoUrl": "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/ERC20.sol",
+      "scopeText": "Focused path: contracts/token/ERC20/ERC20.sol\nPublic DeFi guardian coverage for ERC20 transfer, approval, mint, burn, hook, and extension assumptions.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "Genesis guardian quest. Review the pinned OpenZeppelin ERC20 implementation as a baseline reference target for coverage quality and model calibration. Do not submit externally.",
+      "creditBudget": 106,
+      "cadence": "daily-cycle",
+      "tags": ["defi", "erc20", "library", "solidity"]
+    },
+    {
+      "targetId": "genesis-safe-smart-account",
+      "protocolName": "Safe",
+      "repoUrl": "https://github.com/safe-global/safe-smart-account/blob/main/contracts/Safe.sol",
+      "scopeText": "Focused path: contracts/Safe.sol\nPublic DeFi guardian coverage for owner threshold, signature validation, module execution, guard assumptions, and replay boundaries.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "Genesis guardian quest. Review the pinned Safe core contract for evidence-backed coverage and verification-ready notes. Do not submit externally.",
+      "creditBudget": 159,
+      "cadence": "daily-cycle",
+      "tags": ["defi", "wallet", "multisig", "solidity"]
+    }
+  ]
+}

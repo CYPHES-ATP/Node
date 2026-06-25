@@ -10,6 +10,7 @@ import type {
   CreditAllocation,
   CreditSummary,
   ExportedReportBundle,
+  GuardianTarget,
   NetworkInfo,
   ProtocolAuditCampaign,
   RepositorySummary,
@@ -58,6 +59,7 @@ interface AdminState {
   credits: CreditSummary;
   networkInfo: NetworkInfo | null;
   snapshots: Record<string, CampaignReportSnapshot>;
+  targets: GuardianTarget[];
 }
 
 interface LatestExport {
@@ -189,6 +191,7 @@ function CampaignConsole() {
     credits: { total: 0, allocations: [] },
     networkInfo: null,
     snapshots: {},
+    targets: [],
   });
   const [agentId, setAgentId] = useState("");
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -219,12 +222,13 @@ function CampaignConsole() {
       setNotice("Open campaign.html inside the native CYPHES/Tauri app to use the local node backend.");
       return;
     }
-    const [campaigns, jobs, peers, networkInfo, creditSummary] = await Promise.all([
+    const [campaigns, jobs, peers, networkInfo, creditSummary, targets] = await Promise.all([
       invoke<ProtocolAuditCampaign[]>("list_protocol_campaigns"),
       invoke<AuditJob[]>("list_audits"),
       invoke<BackendPeerInfo[]>("get_peers"),
       invoke<NetworkInfo>("get_network_info"),
       invoke<CreditSummary>("get_credit_summary"),
+      invoke<GuardianTarget[]>("list_guardian_targets"),
     ]);
     const snapshotEntries = await Promise.all(
       campaigns.map(async (campaign) => {
@@ -250,6 +254,7 @@ function CampaignConsole() {
           (entry): entry is [string, CampaignReportSnapshot] => Boolean(entry),
         ),
       ),
+      targets,
     });
   }
 
@@ -439,7 +444,7 @@ function CampaignConsole() {
             <textarea
               id="admin-brief"
               onChange={(event) => setAuditBrief(event.currentTarget.value)}
-              placeholder="Scope, concerns, bounty rules, protocol notes."
+              placeholder="Scope, concerns, program rules, protocol notes."
               spellCheck={false}
               value={auditBrief}
             />
@@ -492,6 +497,17 @@ function CampaignConsole() {
               <small>Bootstrap</small>
               <strong>{admin.networkInfo?.bootstrap_source || "local"}</strong>
             </div>
+          </div>
+          <h3>Guardian Quest Index</h3>
+          <div className="proof-log target-index-log">
+            {admin.targets.map((target) => (
+              <div key={target.targetId}>
+                <strong>{target.protocolName}</strong>
+                <span>{target.repoUrl.replace("https://github.com/", "")}</span>
+                <code>{target.creditBudget} ATP</code>
+              </div>
+            ))}
+            {admin.targets.length === 0 ? <span>No local guardian targets loaded.</span> : null}
           </div>
           <h3>ATP Proof Log</h3>
           <div className="proof-log">

@@ -5,26 +5,28 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.3"><img alt="CYPHES: v0.5.3" src="https://img.shields.io/badge/CYPHES-v0.5.3-c7ff47"></a>
+    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.4"><img alt="CYPHES: v0.5.4" src="https://img.shields.io/badge/CYPHES-v0.5.4-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES v0.5.3 desktop node" src="docs/images/CYPHES%20v0.5.3.png" width="100%">
+  <img alt="CYPHES v0.5.4 desktop node" src="docs/images/CYPHES%20v0.5.4.png" width="100%">
 </p>
 
 ## Download
 
-The current developer release is **CYPHES v0.5.3**. It adds real-time local
-model streaming telemetry, a leaner cockpit header, remotely claimable work
-units, and offline-submitted work replay when peers reconnect.
+The current developer release is **CYPHES v0.5.4**. It adds **Genesis Auto
+Mode**: Auto Worker, Auto Verifier, and Quest Seeder toggles; a local DeFi
+guardian target index; live cognition-rate/network pulse telemetry; enforced
+Auto Worker runtime limits; and ATP accounting that stays pending until a
+signed verifier receipt accepts the contribution.
 
 Apple Silicon downloads:
 
-- [Download CYPHES v0.5.3](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.3/CYPHES-v0.5.3-aarch64.dmg)
-- [Download CYPHES Requester v0.5.3](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.3/CYPHES-Requester-v0.5.3-aarch64.dmg)
+- [Download CYPHES v0.5.4](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.4/CYPHES-v0.5.4-aarch64.dmg)
+- [Download CYPHES Requester v0.5.4](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.4/CYPHES-Requester-v0.5.4-aarch64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -103,8 +105,8 @@ Artifact Two independently returns:
 - Signed worker execution results with embedded artifact bytes and hashes.
 - Requester verification and zero-value `SETTLE`.
 - Worker-signed `ATTEST` Proof of Cognition.
-- Local protocol audit campaigns with pinned commits, scope, optional bounty
-  URL, in-scope impacts, out-of-scope rules, audit brief text, hashed
+- Local protocol audit campaigns with pinned commits, scope, optional public
+  program/reference URL, in-scope impacts, out-of-scope rules, audit brief text, hashed
   requester attachments, default skill-pack metadata, and optional custom
   `SKILL.md` overlay hash.
 - Deterministic audit work units for scope mapping, repository inventory,
@@ -134,6 +136,15 @@ Artifact Two independently returns:
 - Professional v0.4 audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
+- Genesis Auto Mode for 24/7 human-supervised participation: Auto Worker
+  claims one open remote work unit, runs the selected local model, enforces the
+  configured runtime limit, signs and submits the contribution; Auto Verifier
+  accepts pending contributions for campaigns this node requested; Quest Seeder
+  cycles one public DeFi guardian target per day from
+  `protocol/targets/guardian-target-index.json`.
+- Live network pulse showing active nodes, open work, pending ATP, earned ATP,
+  daily work progress, and local cognition rate. Pending ATP is provisional;
+  earned ATP only changes after accepted verifier receipts.
 - Signed node contributions and signed verifier decisions.
 - Receipt-backed ATP Credits issued only after accepted verification results.
 - Final audit report bundle export with document control, methodology, audit
@@ -164,6 +175,9 @@ Artifact Two independently returns:
 - No claim that local model output is automatically a valid vulnerability.
   Findings must be backed by signed artifacts and accepted verifier receipts
   before they appear in final reports.
+- Genesis Auto Mode does not submit external vulnerability reports, contact
+  protocols, claim payouts, or move funds. Human approval is required before
+  disclosure, escalation, liquidity-pool settlement, or external submission.
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
@@ -306,7 +320,7 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 | `src-tauri/src/bundle.rs` | Portable receipt and audit-report bundle export |
 | `src-tauri/src/p2p.rs` | Direct, LAN, and relay-backed libp2p delivery |
 | `src-tauri/src/commands.rs` | Tauri operations for the complete work order |
-| `protocol/` | Schemas, skills, canonical fixtures, and verified ATP-L1 bundle |
+| `protocol/` | Schemas, skills, guardian target index, canonical fixtures, and verified ATP-L1 bundle |
 | `relay/` | Combined public relay/rendezvous service and smoke clients |
 | `network/` | Remotely updateable default-network manifest |
 
@@ -315,6 +329,7 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 - [ATP implementation status](docs/ATP_IMPLEMENTATION_STATUS.md)
 - [Join the network](docs/JOIN_NETWORK.md)
 - [Audit labor network](docs/AUDIT_LABOR_NETWORK.md)
+- [Genesis Auto Mode](docs/GENESIS_AUTO_MODE.md)
 - [Repository audit profile](docs/REPOSITORY_AUDIT_PROFILE.md)
 - [Developer guide](docs/DEVELOPER_GUIDE.md)
 - [Network architecture](docs/ATP_NETWORK_ARCHITECTURE.md)
@@ -332,7 +347,7 @@ npm run build
 ```
 
 Please do not add simulated peers, work orders, responses, reputation, payment,
-credits, bounty payouts, exploit claims, or verification claims. Product state
+credits, external payouts, exploit claims, or verification claims. Product state
 must come from signed and committed ATP data or portable artifacts.
 
 ## License

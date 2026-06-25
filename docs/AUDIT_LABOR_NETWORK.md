@@ -9,12 +9,12 @@ audit reports from accepted receipts.
 
 The current implementation is intentionally narrow. It extends the existing
 repository-audit profile; it does not replace the ATP transaction engine, does
-not pay real tokens, and does not invent bounty findings.
+not pay real tokens, and does not invent vulnerability findings.
 
 ## Product Thesis
 
-Protocols submit a repository, pinned commit, scope, and optional bounty or
-program rules. CYPHES decomposes the campaign into smaller work units. Nodes
+Protocols submit a repository, pinned commit, scope, and optional public
+program or reward rules. CYPHES decomposes the campaign into smaller work units. Nodes
 perform audit work and submit signed artifacts. Verifier nodes reproduce,
 reject, challenge, or accept the work. CYPHES aggregates accepted outputs into a
 protocol-facing report.
@@ -26,7 +26,7 @@ or verifiable artifact.
 
 1. A requester creates a Protocol Audit Campaign.
 2. The campaign records protocol name, repository URL, pinned commit, scope,
-   optional bounty URL, in-scope impacts, out-of-scope rules, audit brief text
+   optional public reference URL, in-scope impacts, out-of-scope rules, audit brief text
    or hash, hashed requester attachments, default skill-pack metadata, optional
    custom `SKILL.md` overlay hash, requester ATP identity, and status.
 3. CYPHES decomposes the campaign into work units.
@@ -62,16 +62,33 @@ and send it back to the requester. Future adapters can add runnable PoC
 attempts, invariant hypothesis testing, duplicate/known-issue checks, or
 protocol-specific checklist items.
 
+## Genesis Auto Mode
+
+v0.5.4 adds Genesis Auto Mode for 24/7 human-supervised participation:
+
+- **Auto Worker** claims one open remote work unit, runs the selected local
+  model, enforces the configured runtime limit, signs the contribution, and
+  submits the receipt to the requester.
+- **Auto Verifier** accepts pending signed contributions only for campaigns
+  this node requested, then returns signed verification and ATP Credit receipts
+  to the contributing worker.
+- **Quest Seeder** creates one public DeFi guardian campaign per day from the
+  local target index at `protocol/targets/guardian-target-index.json`.
+
+Genesis Auto Mode does not submit external vulnerability reports, contact
+protocol teams, claim payouts, or move funds. It makes the network feel alive
+while preserving the rule that earned ATP requires accepted verifier receipts.
+
 ## Structured Customization
 
 CYPHES does not expose a raw prompt box as the core product. Requesters can
 customize campaigns through structured, receipt-hashable inputs:
 
-- **Audit Brief**: requester guidance, scope notes, bounty rules, threat model,
+- **Audit Brief**: requester guidance, scope notes, public program rules, threat model,
   and concerns.
 - **Skill Pack**: the default CYPHES methodology reference, version, label, and
   SHA-256 hash.
-- **Attachments**: pasted protocol docs, bounty policy, PDF excerpts, or other
+- **Attachments**: pasted protocol docs, reward policy, PDF excerpts, or other
   reference text. The current implementation stores text attachments with a
   SHA-256 hash; binary file import and PDF extraction are future adapters.
 - **Advanced Custom `SKILL.md`**: optional overlay text. CYPHES keeps the base
@@ -146,22 +163,22 @@ Credit buckets:
 - verification credit for reproducing or falsifying another node's work;
 - coverage credit for high-quality negative findings with evidence;
 - finding credit for valid issues;
-- bonus allocation placeholder for bounty-eligible confirmed bugs.
+- bonus allocation placeholder for externally reward-eligible confirmed bugs.
 
 The v0.4 scoring model is intentionally simple. It uses base work-unit points,
 evidence quality, verifier confidence, model multiplier, and a penalty for
 rejected or non-reportable output. The formula is deterministic so contributors
 can audit credit allocation from the receipt data.
 
-## Bounty Bonus Placeholder
+## Public Reward Placeholder
 
-CYPHES can record a bounty URL and bounty-relevant impacts in scope, but it does
-not integrate with Immunefi, HackerOne, Code4rena, Sherlock, Hats, or direct
-protocol payout systems yet.
+CYPHES can record a public reference URL and reward-relevant impacts in scope,
+but it does not integrate with external submission portals or direct protocol
+payout systems yet.
 
-Confirmed bounty findings can later receive bonus allocation or split logic, but
-v0.4 only records the placeholder. No UI should imply that ATP Credits are
-redeemable bounty payouts.
+Confirmed findings can later receive bonus allocation or split logic through a
+settlement adapter, but v0.5.4 only records the placeholder. No UI should imply
+that ATP Credits are redeemable payouts.
 
 ## Final Report Bundle
 
@@ -220,5 +237,5 @@ ERC-20 or escrow settlement should be added only after the network has:
 - Web/API-only GitHub repository reads at pinned commits.
 - Verifier queues and challenge windows.
 - PDF export adapter.
-- Real bounty program integration.
+- Public liquidity-pool or protocol-funded settlement adapter.
 - Settlement adapter after the receipt system is proven.
