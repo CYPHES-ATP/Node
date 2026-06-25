@@ -1,25 +1,49 @@
 import { listen } from "@tauri-apps/api/event";
-import { type CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type CSSProperties,
+  type Dispatch,
+  FormEvent,
+  type SetStateAction,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Activity,
   ArrowRight,
+  Cpu,
   FileArchive,
   Gauge,
   Github,
   Link,
   LoaderCircle,
+  Power,
   ReceiptText,
   ShieldCheck,
+  Target,
   Trophy,
+  Zap,
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { P2PProvider } from "@/components/providers/P2PProvider";
 import { useP2P } from "@/hooks/useP2P";
+import {
+  type GenesisAutoCounters,
+  type GenesisAutoModeSettings,
+  normalizeGenesisAutoCounters,
+  readGenesisAutoCounters,
+  readGenesisAutoModeSettings,
+  writeGenesisAutoCounters,
+  writeGenesisAutoModeSettings,
+} from "@/lib/genesisAutoMode";
 import { isTauriRuntime, truncatePeerId } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
 import type {
   AuditJob,
   AuditRuntimeProgress,
   CampaignReportSnapshot,
+  GuardianTarget,
   LocalModelList,
   ProtocolAuditCampaign,
   RepositorySummary,
@@ -196,6 +220,39 @@ function formatClock(ms: number) {
   return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function repositoryFullNameFromGitHubUrl(value: string) {
+  const target = parseGitHubInput(value);
+  if (!target) return "";
+  const segments = new URL(target.repoUrl).pathname.split("/").filter(Boolean);
+  return segments.slice(0, 2).join("/");
+}
+
+function campaignIncludesGuardianTarget(campaign: ProtocolAuditCampaign, target: GuardianTarget) {
+  const targetMarker = `Guardian target: ${target.targetId}`;
+  if (campaign.auditBriefText?.includes(targetMarker)) return true;
+  const fullName = repositoryFullNameFromGitHubUrl(target.repoUrl).toLowerCase();
+  return (
+    fullName.length > 0 &&
+    campaign.repository.fullName.toLowerCase() === fullName &&
+    campaign.scopeText.trim() === target.scopeText.trim()
+  );
+}
+
+function requestedByLocalNode(campaign: ProtocolAuditCampaign, agentId: string) {
+  return Boolean(agentId && campaign.requesterAgentId === agentId);
+}
+
+function updateAutoCounter(
+  setAutoCounters: Dispatch<SetStateAction<GenesisAutoCounters>>,
+  updater: (current: GenesisAutoCounters) => GenesisAutoCounters,
+) {
+  setAutoCounters((current) => {
+    const next = updater(normalizeGenesisAutoCounters(current));
+    writeGenesisAutoCounters(next);
+    return next;
+  });
+}
+
 function AppContent() {
   const p2p = useP2P();
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -221,9 +278,19 @@ function AppContent() {
   const [cockpitEvents, setCockpitEvents] = useState<CockpitEvent[]>([
     { id: "boot", label: "Runtime standby", at: Date.now() },
   ]);
-  const [autoRunJobs, setAutoRunJobs] = useState<Record<string, true>>({});
+  const [guardianTargets, setGuardianTargets] = useState<GuardianTarget[]>([]);
+  const [autoMode, setAutoMode] = useState<GenesisAutoModeSettings>(() =>
+    readGenesisAutoModeSettings(),
+  );
+  const [autoCounters, setAutoCounters] = useState<GenesisAutoCounters>(() =>
+    readGenesisAutoCounters(),
+  );
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoPulse, setAutoPulse] = useState("Genesis Auto Mode standing by.");
   const runtimeStartedAtRef = useRef<number | null>(null);
   const lastPhaseRef = useRef("");
+  const autoBusyRef = useRef(false);
+  const lastAutoPulseRef = useRef("");
 
   const nodeStatus = useCyphesStore((state) => state.nodeStatus);
   const nodeError = useCyphesStore((state) => state.nodeError);
@@ -279,6 +346,23 @@ function AppContent() {
       : runtimeModel
         ? "READY"
         : "NO MODEL";
+  const normalizedAutoCounters = normalizeGenesisAutoCounters(autoCounters);
+  const openWorkCount = useMemo(() => {
+    return Object.values(campaignSnapshots).reduce(
+      (sum, snapshot) => sum + snapshot.workUnits.filter((unit) => unit.status === "open").length,
+      0,
+    );
+  }, [campaignSnapshots]);
+  const pendingVerificationCount = useMemo(() => {
+    return Object.values(campaignSnapshots).reduce((sum, snapshot) => {
+      const verified = new Set(snapshot.verifications.map((item) => item.targetContributionId));
+      return sum + snapshot.contributions.filter((item) => !verified.has(item.contributionId)).length;
+    }, 0);
+  }, [campaignSnapshots]);
+  const projectedPendingCredits = pendingVerificationCount * 35 + pendingReceiptMeter;
+  const activeNodeCount = nodeStatus === "online" ? peerCount + 1 : peerCount;
+  const localCognitionRate = runtimeActive ? currentTokensPerSecond : 0;
+  const autoModeArmed = autoMode.autoWorker || autoMode.autoVerifier || autoMode.questSeeder;
 
   function pushCockpitEvent(label: string, tone: CockpitEvent["tone"] = "info") {
     setCockpitEvents((current) => [
@@ -290,6 +374,13 @@ function AppContent() {
       },
       ...current,
     ].slice(0, 7));
+  }
+
+  function pushAutoPulse(label: string, tone: CockpitEvent["tone"] = "info") {
+    setAutoPulse(label);
+    if (lastAutoPulseRef.current === label) return;
+    lastAutoPulseRef.current = label;
+    pushCockpitEvent(label, tone);
   }
 
   async function refreshRuntimeModels(provider = runtimeProvider) {
@@ -364,6 +455,27 @@ function AppContent() {
   }, [runtimeProvider]);
 
   useEffect(() => {
+    if (!isTauriRuntime()) return;
+    p2p.listGuardianTargets()
+      .then(setGuardianTargets)
+      .catch((error) => {
+        setAutoPulse(error instanceof Error ? error.message : String(error));
+      });
+  }, []);
+
+  useEffect(() => {
+    writeGenesisAutoModeSettings(autoMode);
+  }, [autoMode]);
+
+  useEffect(() => {
+    const normalized = normalizeGenesisAutoCounters(autoCounters);
+    if (normalized !== autoCounters) {
+      setAutoCounters(normalized);
+      writeGenesisAutoCounters(normalized);
+    }
+  }, [autoCounters]);
+
+  useEffect(() => {
     if (!isTauriRuntime() || campaigns.length === 0) return;
     let disposed = false;
     async function refreshSnapshots() {
@@ -395,18 +507,23 @@ function AppContent() {
   }, [notice, setNotice]);
 
   useEffect(() => {
-    if (!isTauriRuntime() || !agentId || !runtimeModel) return;
-    const nextJob = jobs.find(
-      (job) =>
-        job.status === "routed" &&
-        job.workerAgentId === agentId &&
-        !job.resultHash &&
-        !autoRunJobs[job.id],
-    );
-    if (!nextJob) return;
-    setAutoRunJobs((current) => ({ ...current, [nextJob.id]: true }));
-    void handleRunAcceptedAuditSkill(nextJob, true);
-  }, [agentId, autoRunJobs, jobs, runtimeModel, runtimeProvider]);
+    if (!isTauriRuntime() || !autoModeArmed) return;
+    void runGenesisAutoTick();
+    const timer = window.setInterval(() => {
+      void runGenesisAutoTick();
+    }, 12_000);
+    return () => window.clearInterval(timer);
+  }, [
+    agentId,
+    autoMode,
+    autoModeArmed,
+    campaigns,
+    campaignSnapshots,
+    guardianTargets,
+    normalizedAutoCounters,
+    runtimeModel,
+    runtimeProvider,
+  ]);
 
   async function resolveCommit(apiUrl: string, ref: string, optional = false) {
     const commitResponse = await fetch(
@@ -523,6 +640,194 @@ function AppContent() {
       focusPath: resolved.focusPath,
       focusRef: resolved.focusRef,
     };
+  }
+
+  function updateAutoModeSetting<K extends keyof GenesisAutoModeSettings>(
+    key: K,
+    value: GenesisAutoModeSettings[K],
+  ) {
+    setAutoMode((current) => ({ ...current, [key]: value }));
+  }
+
+  function selectNextGuardianTarget() {
+    if (guardianTargets.length === 0) return null;
+    for (let offset = 0; offset < guardianTargets.length; offset += 1) {
+      const index = (normalizedAutoCounters.targetCursor + offset) % guardianTargets.length;
+      const target = guardianTargets[index];
+      const alreadySeeded = campaigns.some((campaign) =>
+        requestedByLocalNode(campaign, agentId) &&
+        campaignIncludesGuardianTarget(campaign, target),
+      );
+      if (!alreadySeeded) {
+        return { target, nextCursor: index + 1 };
+      }
+    }
+    return {
+      target: guardianTargets[normalizedAutoCounters.targetCursor % guardianTargets.length],
+      nextCursor: normalizedAutoCounters.targetCursor + 1,
+    };
+  }
+
+  async function seedGuardianCampaign(target: GuardianTarget, nextCursor: number) {
+    pushAutoPulse(`Quest seeder resolving ${target.protocolName}`, "info");
+    const inspected = await inspectRepository(target.repoUrl);
+    const campaign = await p2p.createProtocolCampaign(
+      inspected.repository,
+      target.protocolName,
+      target.scopeText,
+      target.creditBudget.toString(),
+      [
+        `Guardian target: ${target.targetId}`,
+        target.auditBrief,
+        "Genesis Auto Mode: no external report submission, payout claim, or protocol contact without human approval.",
+      ].join("\n\n"),
+      `Guardian target index tags: ${target.tags.join(", ")}\nCadence: ${target.cadence}`,
+      "",
+    );
+    updateAutoCounter(setAutoCounters, (current) => ({
+      ...current,
+      campaignsSeeded: current.campaignsSeeded + 1,
+      targetCursor: nextCursor,
+    }));
+    await refreshCampaignSnapshot(campaign.campaignId);
+    pushAutoPulse(`Quest seeded: ${target.protocolName}`, "success");
+    setNotice(`Genesis quest seeded ${target.protocolName}; work units are open to discovered nodes.`);
+    return true;
+  }
+
+  async function autoVerifyNextContribution() {
+    for (const campaign of campaigns) {
+      if (!requestedByLocalNode(campaign, agentId)) continue;
+      const snapshot =
+        campaignSnapshots[campaign.campaignId] ||
+        (await refreshCampaignSnapshot(campaign.campaignId));
+      const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
+      const pending = snapshot.contributions.filter(
+        (item) => !verifiedIds.has(item.contributionId),
+      );
+      if (pending.length === 0) continue;
+      pushAutoPulse(`Auto verifier checking ${campaign.protocolName}`, "info");
+      const issued: number[] = [];
+      for (const contribution of pending) {
+        const credits = await p2p.verifyCampaignContribution(
+          contribution.contributionId,
+          "accepted",
+          "AUTO_GUARDIAN_COVERAGE_ACCEPTED",
+          "Genesis Auto Verifier accepted a signed, bounded contribution for requester-owned campaign coverage.",
+        );
+        issued.push(...credits.map((credit) => credit.total));
+      }
+      await refreshCampaignSnapshot(campaign.campaignId);
+      updateAutoCounter(setAutoCounters, (current) => ({
+        ...current,
+        verifications: current.verifications + pending.length,
+      }));
+      const total = issued.reduce((sum, value) => sum + value, 0);
+      pushAutoPulse(`Auto verifier issued +${total} ATP`, "success");
+      setNotice(`${pending.length} contribution${pending.length === 1 ? "" : "s"} auto-verified; ${total} ATP Credits returned to worker.`);
+      return true;
+    }
+    return false;
+  }
+
+  async function autoRunWorkUnit(campaign: ProtocolAuditCampaign, workUnitId: string) {
+    const actionId = `${campaign.campaignId}:${workUnitId}`;
+    setActionJobId(actionId);
+    setRunningWorkUnitId(workUnitId);
+    try {
+      const contribution = await p2p.runClaimedWorkUnit(
+        campaign.campaignId,
+        workUnitId,
+        runtimeProvider,
+        runtimeModel,
+        autoMode.maxRuntimeMinutes * 60,
+      );
+      await refreshCampaignSnapshot(campaign.campaignId);
+      updateAutoCounter(setAutoCounters, (current) => ({
+        ...current,
+        workUnits: current.workUnits + 1,
+      }));
+      pushAutoPulse("Auto worker submitted signed contribution", "success");
+      setNotice(`Auto Worker submitted ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... awaiting requester verification.`);
+      return true;
+    } finally {
+      setRunningWorkUnitId(null);
+      setActionJobId(null);
+    }
+  }
+
+  async function autoWorkerNextUnit() {
+    if (!runtimeModel) {
+      pushAutoPulse(`Auto Worker waiting for ${runtimeProviderLabel}`, "warn");
+      return false;
+    }
+    if (normalizedAutoCounters.workUnits >= autoMode.maxDailyWorkUnits) {
+      pushAutoPulse("Auto Worker daily limit reached", "warn");
+      return false;
+    }
+
+    for (const campaign of campaigns) {
+      if (requestedByLocalNode(campaign, agentId)) continue;
+      const snapshot =
+        campaignSnapshots[campaign.campaignId] ||
+        (await refreshCampaignSnapshot(campaign.campaignId));
+      const myClaim = snapshot.claims.find((claim) => {
+        const hasContribution = snapshot.contributions.some(
+          (contribution) =>
+            contribution.workUnitId === claim.workUnitId &&
+            contribution.workerAgentId === agentId,
+        );
+        return claim.workerAgentId === agentId && claim.status === "claimed" && !hasContribution;
+      });
+      if (myClaim) {
+        pushAutoPulse("Auto Worker running claimed unit", "info");
+        return autoRunWorkUnit(campaign, myClaim.workUnitId);
+      }
+      const openUnit = snapshot.workUnits.find((unit) => unit.status === "open");
+      if (!openUnit) continue;
+      const actionId = `${campaign.campaignId}:${openUnit.workUnitId}`;
+      setActionJobId(actionId);
+      try {
+        pushAutoPulse(`Auto Worker claiming ${openUnit.title}`, "info");
+        await p2p.claimCampaignWorkUnit(campaign.campaignId, openUnit.workUnitId);
+        await refreshCampaignSnapshot(campaign.campaignId);
+      } finally {
+        setActionJobId(null);
+      }
+      pushAutoPulse(`Auto Worker running ${openUnit.title}`, "info");
+      return autoRunWorkUnit(campaign, openUnit.workUnitId);
+    }
+    pushAutoPulse("Auto Worker scanning for open work", "info");
+    return false;
+  }
+
+  async function runGenesisAutoTick() {
+    if (!isTauriRuntime() || !agentId || autoBusyRef.current || !autoModeArmed) return;
+    autoBusyRef.current = true;
+    setAutoBusy(true);
+    try {
+      if (autoMode.questSeeder && normalizedAutoCounters.campaignsSeeded < 1) {
+        const selection = selectNextGuardianTarget();
+        if (selection) {
+          const seeded = await seedGuardianCampaign(selection.target, selection.nextCursor);
+          if (seeded) return;
+        }
+      }
+      if (autoMode.autoVerifier) {
+        const verified = await autoVerifyNextContribution();
+        if (verified) return;
+      }
+      if (autoMode.autoWorker) {
+        await autoWorkerNextUnit();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushAutoPulse(message, "warn");
+      setNotice(message);
+    } finally {
+      autoBusyRef.current = false;
+      setAutoBusy(false);
+    }
   }
 
   async function createAudit(event: FormEvent) {
@@ -962,6 +1267,135 @@ function AppContent() {
           </div>
         </section>
 
+        <section className={`genesis-auto-panel ${autoModeArmed ? "armed" : ""}`}>
+          <div className="genesis-auto-header">
+            <div>
+              <span>Genesis Auto Mode</span>
+              <h2>{autoModeArmed ? "Network alive" : "Guardian standby"}</h2>
+            </div>
+            <div className="genesis-status">
+              <Activity size={15} />
+              <strong>{autoBusy ? "EXECUTING" : autoModeArmed ? "ARMED" : "MANUAL"}</strong>
+            </div>
+          </div>
+
+          <div className="auto-switch-grid" aria-label="Genesis auto mode switches">
+            <button
+              className={autoMode.autoWorker ? "active" : ""}
+              onClick={() => updateAutoModeSetting("autoWorker", !autoMode.autoWorker)}
+              type="button"
+            >
+              <Power size={14} />
+              <span>Auto Worker</span>
+              <strong>{autoMode.autoWorker ? "on" : "off"}</strong>
+            </button>
+            <button
+              className={autoMode.autoVerifier ? "active" : ""}
+              onClick={() => updateAutoModeSetting("autoVerifier", !autoMode.autoVerifier)}
+              type="button"
+            >
+              <ShieldCheck size={14} />
+              <span>Auto Verifier</span>
+              <strong>{autoMode.autoVerifier ? "on" : "off"}</strong>
+            </button>
+            <button
+              className={autoMode.questSeeder ? "active" : ""}
+              onClick={() => updateAutoModeSetting("questSeeder", !autoMode.questSeeder)}
+              type="button"
+            >
+              <Target size={14} />
+              <span>Quest Seeder</span>
+              <strong>{autoMode.questSeeder ? "on" : "off"}</strong>
+            </button>
+          </div>
+
+          <div className="auto-config-grid">
+            <label>
+              <span>Daily work cap</span>
+              <input
+                min="1"
+                onChange={(event) =>
+                  updateAutoModeSetting(
+                    "maxDailyWorkUnits",
+                    Math.max(1, Number(event.currentTarget.value) || 1),
+                  )
+                }
+                type="number"
+                value={autoMode.maxDailyWorkUnits}
+              />
+            </label>
+            <label>
+              <span>Max runtime min</span>
+              <input
+                min="1"
+                onChange={(event) =>
+                  updateAutoModeSetting(
+                    "maxRuntimeMinutes",
+                    Math.max(1, Number(event.currentTarget.value) || 1),
+                  )
+                }
+                type="number"
+                value={autoMode.maxRuntimeMinutes}
+              />
+            </label>
+            <label>
+              <span>Model policy</span>
+              <select
+                onChange={(event) =>
+                  updateAutoModeSetting(
+                    "modelRequirement",
+                    event.currentTarget.value as GenesisAutoModeSettings["modelRequirement"],
+                  )
+                }
+                value={autoMode.modelRequirement}
+              >
+                <option value="local-model-required">Local model required</option>
+                <option value="any-local-model">Any selected local model</option>
+              </select>
+            </label>
+            <div className="target-index-pill">
+              <Cpu size={14} />
+              <span>Target index</span>
+              <strong>{guardianTargets.length} DeFi quests</strong>
+            </div>
+          </div>
+
+          <div className="network-pulse-grid">
+            <div>
+              <small>Active nodes</small>
+              <strong>{activeNodeCount}</strong>
+            </div>
+            <div>
+              <small>Open work</small>
+              <strong>{openWorkCount}</strong>
+            </div>
+            <div>
+              <small>Pending ATP</small>
+              <strong>+{projectedPendingCredits}</strong>
+            </div>
+            <div>
+              <small>Earned ATP</small>
+              <strong>{creditSummary.total}</strong>
+            </div>
+            <div>
+              <small>Cognition rate</small>
+              <strong>{localCognitionRate.toFixed(1)}</strong>
+            </div>
+            <div>
+              <small>Today</small>
+              <strong>{normalizedAutoCounters.workUnits}/{autoMode.maxDailyWorkUnits}</strong>
+            </div>
+          </div>
+
+          <div className="auto-pulse-row">
+            <Zap size={14} />
+            <span>{autoPulse}</span>
+            <code>
+              {normalizedAutoCounters.campaignsSeeded} seeded / {normalizedAutoCounters.verifications} verified
+            </code>
+          </div>
+        </section>
+
         <details className="manual-connect" open={!networkInfo?.relay_configured}>
           <summary>Manual peer connection</summary>
           <form className="connect-strip" onSubmit={(event) => void handleConnect(event)}>
@@ -1031,7 +1465,7 @@ function AppContent() {
                   />
                   <span>ATP Credits</span>
                 </div>
-                <p>Receipt-backed accounting only. No ERC-20, escrow, or bounty payout is represented in this build.</p>
+                <p>Receipt-backed accounting only. No ERC-20, escrow, or external payout is represented in this build.</p>
               </div>
 
               <label htmlFor="audit-brief">Audit brief</label>
@@ -1039,7 +1473,7 @@ function AppContent() {
                 <textarea
                   id="audit-brief"
                   onChange={(event) => setAuditBrief(event.currentTarget.value)}
-                  placeholder="Requester guidance, scope notes, bounty rules, threat model, or concerns."
+                  placeholder="Requester guidance, scope notes, program rules, threat model, or concerns."
                   spellCheck={false}
                   value={auditBrief}
                 />
@@ -1050,7 +1484,7 @@ function AppContent() {
                 <textarea
                   id="attachments"
                   onChange={(event) => setAttachmentText(event.currentTarget.value)}
-                  placeholder="Paste bounty policy, protocol docs, or PDF excerpts. CYPHES hashes this text into the campaign."
+                  placeholder="Paste reward policy, protocol docs, or PDF excerpts. CYPHES hashes this text into the campaign."
                   spellCheck={false}
                   value={attachmentText}
                 />

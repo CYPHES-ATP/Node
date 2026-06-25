@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
@@ -72,6 +74,34 @@ pub struct ProtocolCampaignRequest {
 pub struct ExportedReportBundle {
     pub campaign_id: String,
     pub bundle_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GuardianTargetIndex {
+    targets: Vec<GuardianTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardianTarget {
+    pub target_id: String,
+    pub protocol_name: String,
+    pub repo_url: String,
+    pub scope_text: String,
+    pub audit_brief: String,
+    pub credit_budget: u32,
+    pub cadence: String,
+    pub tags: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn list_guardian_targets() -> Result<Vec<GuardianTarget>, String> {
+    let index: GuardianTargetIndex = serde_json::from_str(include_str!(
+        "../../protocol/targets/guardian-target-index.json"
+    ))
+    .map_err(|error| format!("invalid guardian target index: {error}"))?;
+    Ok(index.targets)
 }
 
 #[tauri::command]
@@ -379,6 +409,7 @@ pub async fn run_claimed_work_unit(
     work_unit_id: String,
     provider: String,
     model: String,
+    max_runtime_seconds: Option<u64>,
 ) -> Result<NodeContribution, String> {
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
@@ -401,15 +432,23 @@ pub async fn run_claimed_work_unit(
         .into_iter()
         .find(|unit| unit.work_unit_id == claim.work_unit_id)
         .ok_or_else(|| "Campaign work unit not found".to_string())?;
-    let output = run_local_audit_skill(
+    let run = run_local_audit_skill(
         &app,
         &campaign,
         &work_unit,
         &provider,
         &model,
         &snapshot.contributions,
-    )
-    .await?;
+    );
+    let output = if let Some(seconds) = max_runtime_seconds.filter(|seconds| *seconds > 0) {
+        tokio::time::timeout(Duration::from_secs(seconds), run)
+            .await
+            .map_err(|_| {
+                "Audit runtime exceeded the Genesis Auto Mode policy limit".to_string()
+            })??
+    } else {
+        run.await?
+    };
     let contribution = signed_contribution(
         &keypair,
         campaign.campaign_id.clone(),
@@ -1145,6 +1184,28 @@ pub async fn migrate_legacy_jobs(
 pub async fn get_peers(state: State<'_, P2pState>) -> Result<Vec<PeerInfo>, String> {
     let inner = state.inner.lock().map_err(|error| error.to_string())?;
     Ok(inner.peers.values().cloned().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guardian_target_index_is_valid_and_honest() {
+        let index: GuardianTargetIndex = serde_json::from_str(include_str!(
+            "../../protocol/targets/guardian-target-index.json"
+        ))
+        .expect("guardian target index should parse");
+
+        assert!(!index.targets.is_empty());
+        for target in index.targets {
+            assert!(target.repo_url.starts_with("https://github.com/"));
+            assert!(target.credit_budget > 0);
+            assert!(target.scope_text.contains("No repository writes"));
+            assert!(!target.audit_brief.to_lowercase().contains("immunefi"));
+            assert!(target.audit_brief.contains("Do not submit externally"));
+        }
+    }
 }
 
 fn node_runtime(

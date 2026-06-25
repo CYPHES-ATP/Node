@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-Last reviewed: June 23, 2026
+Last reviewed: June 25, 2026
 
 ## Conformance Position
 
@@ -18,6 +18,13 @@ records signed verifier decisions, assigns receipt-backed ATP Credits, and
 exports a professional markdown report bundle. This is online peer coordination
 and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
+
+v0.5.4 adds Genesis Auto Mode: Auto Worker can claim open remote work units,
+run the selected local model under an enforced runtime limit, and submit signed
+contributions; Auto Verifier can accept pending contributions for campaigns
+this node requested; Quest Seeder can create one public DeFi guardian campaign
+per day from the local target index. External disclosure, protocol contact,
+payout claims, and settlement remain human-gated and not implemented.
 
 The verified path is:
 
@@ -97,13 +104,16 @@ an ATP v0.3 wire verb.
 | Rejected/duplicate/non-reportable lead appendix | Implemented locally |
 | v0.5 local/remote audit skill execution | Implemented |
 | Professional markdown report bundle export | Implemented locally |
+| Genesis Auto Worker/Verifier/Quest Seeder | Implemented locally |
+| Local DeFi guardian target index | Implemented |
+| Auto Worker runtime limit | Implemented |
 | LM Studio local model runtime | Implemented locally |
 | Ollama local model runtime | Implemented locally |
 | Runtime progress and tokens/sec events | Implemented locally |
 | Effective skill hash in contribution runtime | Implemented locally |
 | Durable network-wide campaign/work index | Not implemented |
 | OpenClaw/Hermes runtime adapter | Not implemented |
-| Live bounty intake or payout | Not implemented |
+| External report submission or payout claim | Not implemented |
 | ERC-20 or escrow settlement | Intentionally deferred |
 
 ## Verified Evidence

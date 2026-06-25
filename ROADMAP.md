@@ -42,6 +42,11 @@ signed ATP envelopes or portable artifacts.
 - `campaign.html` separates protocol/admin campaign creation, network stats,
   ATP proof logs, receipt trails, protocol events, and developer ATP envelope
   inspection from the worker cockpit.
+- v0.5.4 Genesis Auto Mode adds 24/7 human-supervised Auto Worker,
+  Auto Verifier, and Quest Seeder toggles; a local public DeFi guardian target
+  index; daily work caps; Auto Worker runtime-limit enforcement; pending ATP
+  projection; earned ATP only after accepted verifier receipts; and live
+  network pulse telemetry.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
@@ -72,7 +77,8 @@ Status: **Partial**
   finding resolution.
 - Improve protocol/requester UX for scope templates, file attachment import,
   PDF parsing, final report review, and claim/revision inspection.
-- Keep bounty allocation as a signed placeholder until settlement is designed.
+- Keep public reward or liquidity-pool bonus allocation as a signed placeholder
+  until settlement is designed.
 
 ## 2. Staging Network
 
@@ -147,6 +153,8 @@ Status: **Partial**
 - Add a durable work-order index and reliable resend for campaigns, claims, and
   contributions when peers are not simultaneously online. Verification/credit
   result resend is now implemented for reconnecting workers.
+- Expand Genesis Auto Mode from requester-owned auto-verification to
+  independent verifier queues, challenge windows, and revision policies.
 - Harden the worker boundary without changing the receipt profile.
 - Add deterministic negative fixtures for invalid leases and worker results.
 - Add peer persistence and reliable resend.

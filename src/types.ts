@@ -192,6 +192,17 @@ export interface LocalModelList {
   message: string;
 }
 
+export interface GuardianTarget {
+  targetId: string;
+  protocolName: string;
+  repoUrl: string;
+  scopeText: string;
+  auditBrief: string;
+  creditBudget: number;
+  cadence: string;
+  tags: string[];
+}
+
 export interface AuditRuntimeProgress {
   campaignId: string;
   workUnitId: string;
