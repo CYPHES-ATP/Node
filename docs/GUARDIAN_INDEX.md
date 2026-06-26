@@ -1,6 +1,6 @@
 # Guardian Index
 
-Status: v0.5.5 developer preview
+Status: v0.5.6 developer preview
 
 `protocol/targets/guardian-target-index.json` is the bundled work seed for the
 Autonomous Guardian Loop. It gives CYPHES enough structured public targets to
@@ -31,6 +31,16 @@ Each target includes:
 CYPHES resolves the GitHub repository to the current default-branch commit. It
 creates work only when the same target/path/commit is not already active in the
 local campaign set. If unchanged, it records the observation and moves on.
+v0.5.6 also rejects duplicate local campaign persistence for the same
+requester/repository/commit/scope tuple.
+
+If GitHub rate-limits the node, CYPHES records a local backoff window and pauses
+GitHub reads until the reset time. The node can keep peer networking alive while
+GitHub-backed work discovery waits.
+
+If a target points to a moved, stale, or unavailable public repository, CYPHES
+records a local target failure, advances to the next target, and skips the
+failed row for 24 hours. Invalid index rows should not pin the autonomous loop.
 
 ## Source Policy
 

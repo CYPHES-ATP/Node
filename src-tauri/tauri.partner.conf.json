@@ -1,10 +1,10 @@
 {
-  "productName": "CYPHES Requester",
-  "identifier": "com.cyphes-atp.requester",
+  "productName": "CYPHES Partner",
+  "identifier": "com.cyphes-atp.partner",
   "app": {
     "windows": [
       {
-        "title": "CYPHES Requester",
+        "title": "CYPHES Partner",
         "url": "campaign.html",
         "width": 1240,
         "height": 860,

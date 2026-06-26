@@ -5,37 +5,46 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.5"><img alt="CYPHES: v0.5.5" src="https://img.shields.io/badge/CYPHES-v0.5.5-c7ff47"></a>
+    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.6"><img alt="CYPHES: v0.5.6" src="https://img.shields.io/badge/CYPHES-v0.5.6-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES v0.5.5 desktop node" src="docs/images/CYPHES%20v0.5.5.png" width="100%">
+  <img alt="CYPHES v0.5.6 desktop node" src="docs/images/CYPHES%20v0.5.6.png" width="100%">
 </p>
 
 ## Download
 
-The current developer release is **CYPHES v0.5.5**. It makes the node
+The current developer release is **CYPHES v0.5.6**. It makes the node
 autonomous by default: CYPHES watches the bundled Guardian Index v2, resolves
 public GitHub targets to pinned commits, creates work only when a target/commit
 has not already been covered, auto-claims remote work when a local model is
 available, auto-verifies requester-owned contributions, and keeps ATP Credits
-pending until a signed verifier receipt accepts the contribution.
+pending until a signed verifier receipt accepts the contribution. v0.5.6 adds
+GitHub rate-limit backoff/status, optional local GitHub token support, stronger
+duplicate campaign suppression, and idempotent verification retries.
 
 Apple Silicon downloads:
 
-- [Download CYPHES v0.5.5](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.5/CYPHES-v0.5.5-aarch64.dmg)
-- [Download CYPHES Requester v0.5.5](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.5/CYPHES-Requester-v0.5.5-aarch64.dmg)
+- [Download CYPHES v0.5.6](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-v0.5.6-aarch64.dmg)
+- [Download CYPHES Partner v0.5.6](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-Partner-v0.5.6-aarch64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
 confirm **Open**. Windows and Linux users should run from source for now.
 
 Use **CYPHES** to connect a local model and watch the autonomous guardian loop
-run. Use **CYPHES Requester** as the admin/protocol console for manual campaign
+run. Use **CYPHES Partner** as the admin/protocol console for manual campaign
 creation, verification inspection, report export, and ATP proof logs.
+
+For 24/7 operation, configure a local GitHub token for higher GitHub API quota:
+set `CYPHES_GITHUB_TOKEN`, `GITHUB_TOKEN`, write the token to
+`~/.cyphes/github.token`, or add `githubToken` to `~/.cyphes/settings.json`.
+CYPHES never ships with a shared embedded GitHub token; production network
+scale should use a CYPHES-operated read-through GitHub gateway with caching and
+per-node quotas.
 
 The developer preview completes one ATP-L1 repository-audit transaction:
 

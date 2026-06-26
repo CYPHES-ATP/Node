@@ -19,6 +19,7 @@ use crate::{
         list_local_models, local_model_providers, run_local_audit_skill, LocalModelList,
     },
     bundle::export_campaign_report_bundle,
+    github::{self, GitHubAccessStatus},
     p2p::{load_or_create_identity, spawn_swarm, SwarmCommand, ATP_PROTOCOL},
     state::{P2pState, PeerInfo},
     store::{
@@ -27,6 +28,9 @@ use crate::{
     },
     worker::{create_repository_leases, execute_pipeline_audit_result, execute_repository_audit},
 };
+
+const GITHUB_REPOSITORY_URL_ERROR: &str =
+    "Use a public GitHub repository URL, file URL, or folder URL, for example https://github.com/owner/repo.";
 
 #[derive(Debug, Serialize)]
 pub struct StartNodeResponse {
@@ -74,6 +78,43 @@ pub struct ProtocolCampaignRequest {
 pub struct ExportedReportBundle {
     pub campaign_id: String,
     pub bundle_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectedRepository {
+    pub repository: RepositorySummary,
+    pub focus_path: Option<String>,
+    pub focus_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRepositoryResponse {
+    full_name: String,
+    description: Option<String>,
+    language: Option<String>,
+    default_branch: String,
+    stargazers_count: u64,
+    private: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommitResponse {
+    sha: String,
+}
+
+#[derive(Debug)]
+struct GitHubInputTarget {
+    api_url: String,
+    kind: GitHubInputKind,
+    path_segments: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum GitHubInputKind {
+    Repository,
+    Blob,
+    Tree,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +175,42 @@ pub async fn list_local_model_providers() -> Result<Vec<LocalModelList>, String>
 #[tauri::command]
 pub async fn list_local_model_models(provider: String) -> Result<LocalModelList, String> {
     Ok(list_local_models(&provider).await)
+}
+
+#[tauri::command]
+pub fn get_github_access_status() -> Result<GitHubAccessStatus, String> {
+    Ok(github::github_access_status())
+}
+
+#[tauri::command]
+pub async fn inspect_github_repository(url: String) -> Result<InspectedRepository, String> {
+    let target = parse_github_input(&url)?;
+    let client = github::client()?;
+    let repository = github::get_json::<GitHubRepositoryResponse>(&client, &target.api_url)
+        .await
+        .map_err(|error| format!("GitHub repository read failed. {error}"))?;
+    if repository.private {
+        return Err("Private repositories are not supported in this build.".to_string());
+    }
+    let (commit_sha, focus_path, focus_ref) =
+        resolve_github_path(&client, &target.api_url, &repository, &target).await?;
+    if !is_git_commit_sha(&commit_sha) {
+        return Err("GitHub did not return an exact commit SHA for this campaign.".to_string());
+    }
+    Ok(InspectedRepository {
+        repository: RepositorySummary {
+            url: format!("https://github.com/{}", repository.full_name),
+            full_name: repository.full_name,
+            description: repository.description,
+            language: repository.language,
+            default_branch: repository.default_branch,
+            stars: repository.stargazers_count,
+            is_private: repository.private,
+            commit_sha,
+        },
+        focus_path,
+        focus_ref,
+    })
 }
 
 #[tauri::command]
@@ -772,6 +849,21 @@ pub async fn verify_campaign_contribution(
 ) -> Result<Vec<crate::audit_labor::CreditAllocation>, String> {
     let (keypair, sender) = node_runtime(&state)?;
     let contribution = store.get_contribution(&contribution_id)?;
+    let local_agent_id = agent_id(&keypair.public());
+    if let Some((verification, allocations)) =
+        store.verification_bundle_for_contribution(&contribution_id)?
+    {
+        if contribution.worker_agent_id != local_agent_id {
+            sender
+                .send(SwarmCommand::SendVerificationResult {
+                    verification,
+                    allocations: allocations.clone(),
+                    audience: contribution.worker_agent_id,
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        return Ok(allocations);
+    }
     let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
     let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
     let evidence_size = evidence_ref.len() as u64;
@@ -794,7 +886,6 @@ pub async fn verify_campaign_contribution(
         }],
     )?;
     let allocations = store.record_verification(&verification)?;
-    let local_agent_id = agent_id(&keypair.public());
     if contribution.worker_agent_id != local_agent_id {
         sender
             .send(SwarmCommand::SendVerificationResult {
@@ -1254,4 +1345,163 @@ fn node_runtime(
         .clone()
         .ok_or_else(|| "P2P node has not started".to_string())?;
     Ok((keypair, sender))
+}
+
+fn parse_github_input(value: &str) -> Result<GitHubInputTarget, String> {
+    let parsed = reqwest::Url::parse(value.trim()).map_err(|_| GITHUB_REPOSITORY_URL_ERROR)?;
+    if parsed.scheme() != "https" {
+        return Err(GITHUB_REPOSITORY_URL_ERROR.to_string());
+    }
+    let host = parsed
+        .host_str()
+        .map(|host| host.to_ascii_lowercase())
+        .unwrap_or_default();
+    if host != "github.com" && host != "www.github.com" {
+        return Err(GITHUB_REPOSITORY_URL_ERROR.to_string());
+    }
+    let segments = parsed
+        .path_segments()
+        .map(|segments| {
+            segments
+                .filter(|segment| !segment.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if segments.len() < 2 {
+        return Err(GITHUB_REPOSITORY_URL_ERROR.to_string());
+    }
+    let owner = segments[0].trim().to_string();
+    let repo = segments[1].trim().trim_end_matches(".git").to_string();
+    if owner.is_empty() || repo.is_empty() || owner == "." || repo == "." {
+        return Err(GITHUB_REPOSITORY_URL_ERROR.to_string());
+    }
+    let route = segments.get(2).map(|segment| segment.to_ascii_lowercase());
+    let kind = match route.as_deref() {
+        Some("blob") => GitHubInputKind::Blob,
+        Some("tree") => GitHubInputKind::Tree,
+        _ => GitHubInputKind::Repository,
+    };
+    let path_segments = if kind == GitHubInputKind::Repository {
+        Vec::new()
+    } else {
+        segments.into_iter().skip(3).collect()
+    };
+    Ok(GitHubInputTarget {
+        api_url: format!(
+            "https://api.github.com/repos/{}/{}",
+            encode_path_segment(&owner),
+            encode_path_segment(&repo)
+        ),
+        kind,
+        path_segments,
+    })
+}
+
+async fn resolve_github_path(
+    client: &reqwest::Client,
+    api_url: &str,
+    repository: &GitHubRepositoryResponse,
+    target: &GitHubInputTarget,
+) -> Result<(String, Option<String>, Option<String>), String> {
+    if target.kind == GitHubInputKind::Repository || target.path_segments.is_empty() {
+        return Ok((
+            resolve_commit(client, api_url, &repository.default_branch, false)
+                .await?
+                .expect("required commit resolution should return a commit"),
+            None,
+            None,
+        ));
+    }
+
+    if target.kind == GitHubInputKind::Blob && target.path_segments.len() < 2 {
+        return Err("That GitHub file URL is missing a branch or path.".to_string());
+    }
+
+    let default_branch_segments = repository.default_branch.split('/').collect::<Vec<_>>();
+    let starts_with_default_branch =
+        default_branch_segments
+            .iter()
+            .enumerate()
+            .all(|(index, segment)| {
+                target
+                    .path_segments
+                    .get(index)
+                    .is_some_and(|value| value == segment)
+            });
+    if starts_with_default_branch {
+        let focus_path = target
+            .path_segments
+            .iter()
+            .skip(default_branch_segments.len())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("/");
+        return Ok((
+            resolve_commit(client, api_url, &repository.default_branch, false)
+                .await?
+                .expect("required commit resolution should return a commit"),
+            (!focus_path.is_empty()).then_some(focus_path),
+            Some(repository.default_branch.clone()),
+        ));
+    }
+
+    let max_ref_segments = if target.kind == GitHubInputKind::Blob {
+        target.path_segments.len().saturating_sub(1).max(1)
+    } else {
+        target.path_segments.len()
+    };
+    for index in (1..=max_ref_segments).rev() {
+        let focus_ref = target.path_segments[..index].join("/");
+        if let Some(commit_sha) = resolve_commit(client, api_url, &focus_ref, true).await? {
+            let focus_path = target.path_segments[index..].join("/");
+            return Ok((
+                commit_sha,
+                (!focus_path.is_empty()).then_some(focus_path),
+                Some(focus_ref),
+            ));
+        }
+    }
+
+    Err(
+        "GitHub resolved the repository, but CYPHES could not resolve the branch or file path from that URL."
+            .to_string(),
+    )
+}
+
+async fn resolve_commit(
+    client: &reqwest::Client,
+    api_url: &str,
+    reference: &str,
+    optional: bool,
+) -> Result<Option<String>, String> {
+    let url = format!("{api_url}/commits/{}", encode_path_segment(reference));
+    match github::get_json::<GitHubCommitResponse>(client, &url).await {
+        Ok(commit) => {
+            if !is_git_commit_sha(&commit.sha) {
+                Err(format!(
+                    "GitHub returned an invalid commit for {reference}."
+                ))
+            } else {
+                Ok(Some(commit.sha))
+            }
+        }
+        Err(error) if optional && error.contains("404") => Ok(None),
+        Err(error) => Err(format!(
+            "GitHub could not resolve {reference} to a commit. {error}"
+        )),
+    }
+}
+
+fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(*byte as char);
+            }
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
 }

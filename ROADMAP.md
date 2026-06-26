@@ -43,11 +43,14 @@ signed ATP envelopes or portable artifacts.
 - `campaign.html` separates protocol/admin campaign creation, network stats,
   ATP proof logs, receipt trails, protocol events, and developer ATP envelope
   inspection from the worker cockpit.
-- v0.5.5 Autonomous Guardian Loop makes Auto Worker, Auto Verifier, and Quest
+- v0.5.6 Autonomous Guardian Loop makes Auto Worker, Auto Verifier, and Quest
   Seeder default-on; adds Guardian Index v2 with 100 structured public coverage
   targets; watches GitHub commits; avoids duplicate unchanged target/path/commit
   campaigns; enforces Auto Worker runtime limits; keeps pending ATP provisional;
-  and increases earned ATP only after accepted verifier receipts.
+  increases earned ATP only after accepted verifier receipts; supports local
+  GitHub tokens; pauses visibly on GitHub rate limits; suppresses duplicate
+  campaign persistence; and resends existing verification/credit receipts
+  idempotently on reconnect.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.

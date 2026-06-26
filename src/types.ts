@@ -22,6 +22,19 @@ export interface RepositorySummary {
   commitSha: string;
 }
 
+export interface InspectedRepository {
+  repository: RepositorySummary;
+  focusPath?: string;
+  focusRef?: string;
+}
+
+export interface GitHubAccessStatus {
+  authenticated: boolean;
+  paused: boolean;
+  retryAt?: string;
+  message: string;
+}
+
 export interface AuditJob {
   id: string;
   transactionId: string;

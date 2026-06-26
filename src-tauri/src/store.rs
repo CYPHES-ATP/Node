@@ -318,6 +318,10 @@ impl AtpStore {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        if let Some(existing) = equivalent_campaign_in_transaction(&transaction, campaign)? {
+            transaction.commit().map_err(|error| error.to_string())?;
+            return Ok(existing);
+        }
         transaction
             .execute(
                 "INSERT INTO protocol_audit_campaigns
@@ -350,6 +354,10 @@ impl AtpStore {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        if let Some(existing) = equivalent_campaign_in_transaction(&transaction, campaign)? {
+            transaction.commit().map_err(|error| error.to_string())?;
+            return Ok(existing);
+        }
         let exists = transaction
             .query_row(
                 "SELECT 1 FROM protocol_audit_campaigns WHERE campaign_id = ?1",
@@ -571,6 +579,12 @@ impl AtpStore {
             Vec::new()
         };
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        if let Some((_, existing_allocations)) = verification_bundle_for_contribution_in_connection(
+            &connection,
+            &verification.target_contribution_id,
+        )? {
+            return Ok(existing_allocations);
+        }
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
@@ -661,6 +675,12 @@ impl AtpStore {
         }
 
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        if let Some((_, existing_allocations)) = verification_bundle_for_contribution_in_connection(
+            &connection,
+            &verification.target_contribution_id,
+        )? {
+            return Ok(existing_allocations);
+        }
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
@@ -730,6 +750,14 @@ impl AtpStore {
     pub fn get_contribution(&self, contribution_id: &str) -> Result<NodeContribution, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         contribution_in_connection(&connection, contribution_id)
+    }
+
+    pub fn verification_bundle_for_contribution(
+        &self,
+        contribution_id: &str,
+    ) -> Result<Option<(VerificationResult, Vec<CreditAllocation>)>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        verification_bundle_for_contribution_in_connection(&connection, contribution_id)
     }
 
     pub fn credit_summary(&self, receiver_agent_id: &str) -> Result<CreditSummary, String> {
@@ -2249,6 +2277,42 @@ fn campaign_in_transaction(
     serde_json::from_str(&json).map_err(|error| error.to_string())
 }
 
+fn equivalent_campaign_in_transaction(
+    transaction: &Transaction<'_>,
+    campaign: &ProtocolAuditCampaign,
+) -> Result<Option<ProtocolAuditCampaign>, String> {
+    let mut statement = transaction
+        .prepare(
+            "SELECT campaign_json FROM protocol_audit_campaigns
+             WHERE requester_agent_id = ?1
+             ORDER BY created_at",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![campaign.requester_agent_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let json = row.map_err(|error| error.to_string())?;
+        let existing: ProtocolAuditCampaign =
+            serde_json::from_str(&json).map_err(|error| error.to_string())?;
+        if existing
+            .repository
+            .full_name
+            .eq_ignore_ascii_case(&campaign.repository.full_name)
+            && existing
+                .repository
+                .commit_sha
+                .eq_ignore_ascii_case(&campaign.repository.commit_sha)
+            && existing.scope_text.trim() == campaign.scope_text.trim()
+        {
+            return Ok(Some(existing));
+        }
+    }
+    Ok(None)
+}
+
 fn work_units_in_connection(
     connection: &Connection,
     campaign_id: &str,
@@ -2393,6 +2457,47 @@ fn credits_in_connection(
         serde_json::from_str(&json).map_err(|error| error.to_string())
     })
     .collect()
+}
+
+fn verification_bundle_for_contribution_in_connection(
+    connection: &Connection,
+    contribution_id: &str,
+) -> Result<Option<(VerificationResult, Vec<CreditAllocation>)>, String> {
+    let verification_json = connection
+        .query_row(
+            "SELECT verification_json FROM audit_verifications
+             WHERE target_contribution_id = ?1
+             ORDER BY created_at, verification_id
+             LIMIT 1",
+            params![contribution_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some(verification_json) = verification_json else {
+        return Ok(None);
+    };
+    let verification: VerificationResult =
+        serde_json::from_str(&verification_json).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "SELECT allocation_json FROM credit_allocations
+             WHERE verification_id = ?1
+             ORDER BY issued_at, allocation_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![verification.verification_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| error.to_string())?;
+    let allocations = rows
+        .map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<CreditAllocation>, String>>()?;
+    Ok(Some((verification, allocations)))
 }
 
 fn millis_from_rfc3339(value: &str) -> Result<i64, String> {
@@ -2669,6 +2774,33 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_protocol_campaign_returns_existing_campaign() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        let first = store.create_protocol_campaign(&campaign).unwrap();
+        let duplicate = ProtocolAuditCampaign::new(
+            campaign.protocol_name.clone(),
+            campaign.repository.clone(),
+            campaign.scope_text.clone(),
+            campaign.bounty_url.clone(),
+            campaign.impacts_in_scope.clone(),
+            campaign.out_of_scope.clone(),
+            campaign.audit_brief_text.clone(),
+            None,
+            Vec::new(),
+            None,
+            campaign.requester_agent_id.clone(),
+        )
+        .unwrap();
+        assert_ne!(first.campaign_id, duplicate.campaign_id);
+        let second = store.create_protocol_campaign(&duplicate).unwrap();
+        assert_eq!(second.campaign_id, first.campaign_id);
+        assert_eq!(store.list_protocol_campaigns().unwrap().len(), 1);
+        assert_eq!(store.list_work_units(&first.campaign_id).unwrap().len(), 7);
+    }
+
+    #[test]
     fn campaign_contributions_verifications_and_credits_are_local_and_receipt_backed() {
         let store = test_store();
         let requester = libp2p::identity::Keypair::generate_ed25519();
@@ -2745,6 +2877,36 @@ mod tests {
         .unwrap();
         let allocations = store.record_verification(&accepted_verification).unwrap();
         assert_eq!(allocations.len(), 2);
+        let duplicate_verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            accepted_contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED_RETRY".to_string(),
+            "Retry should reuse the existing verification bundle.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: accepted_contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification-retry.md")],
+        )
+        .unwrap();
+        let duplicate_allocations = store.record_verification(&duplicate_verification).unwrap();
+        let mut duplicate_ids = duplicate_allocations
+            .iter()
+            .map(|allocation| allocation.allocation_id.clone())
+            .collect::<Vec<_>>();
+        let mut allocation_ids = allocations
+            .iter()
+            .map(|allocation| allocation.allocation_id.clone())
+            .collect::<Vec<_>>();
+        duplicate_ids.sort();
+        allocation_ids.sort();
+        assert_eq!(duplicate_ids, allocation_ids);
+        let replay_snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(replay_snapshot.verifications.len(), 1);
         let accepted_units = store.list_work_units(&campaign.campaign_id).unwrap();
         assert_eq!(
             accepted_units

@@ -1,7 +1,6 @@
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
-use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -12,6 +11,7 @@ use crate::{
         NodeContribution, ProtocolAuditCampaign, RuntimeDescriptor,
     },
     audit_profile::RepositoryTarget,
+    github,
 };
 
 const AUDIT_SKILL_TEXT: &str = include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
@@ -726,20 +726,9 @@ async fn repository_context(
         "https://api.github.com/repos/{}/git/trees/{}?recursive=1",
         repository.full_name, repository.commit_sha
     );
-    let response = client
-        .get(tree_url)
-        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
-        .header(ACCEPT, "application/vnd.github+json")
-        .send()
+    let tree = github::get_json::<GitTreeResponse>(client, &tree_url)
         .await
-        .map_err(|error| format!("GitHub tree read failed: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("GitHub tree read returned {}", response.status()));
-    }
-    let tree = response
-        .json::<GitTreeResponse>()
-        .await
-        .map_err(|error| format!("GitHub tree response was not valid JSON: {error}"))?;
+        .map_err(|error| format!("GitHub tree read failed. {error}"))?;
     let blobs = tree
         .tree
         .into_iter()
@@ -758,10 +747,20 @@ async fn repository_context(
         if total_bytes >= MAX_CONTEXT_BYTES {
             break;
         }
-        if let Ok(content) = fetch_raw_file(client, repository, &path).await {
-            let content = truncate_bytes(&content, MAX_FILE_BYTES);
-            total_bytes += content.len();
-            selected_files.push(SelectedFile { path, content });
+        match fetch_raw_file(client, repository, &path).await {
+            Ok(content) => {
+                let content = truncate_bytes(&content, MAX_FILE_BYTES);
+                total_bytes += content.len();
+                selected_files.push(SelectedFile { path, content });
+            }
+            Err(error)
+                if error.contains("GitHub rate limit")
+                    || error.contains("GitHub paused")
+                    || error.contains("GitHub API") =>
+            {
+                return Err(error);
+            }
+            Err(_) => {}
         }
     }
 
@@ -954,16 +953,9 @@ async fn fetch_raw_file(
         repository.commit_sha,
         path.replace(' ', "%20")
     );
-    let response = client
-        .get(url)
-        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
-        .send()
+    github::get_text(client, &url)
         .await
-        .map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("raw file returned {}", response.status()));
-    }
-    response.text().await.map_err(|error| error.to_string())
+        .map_err(|error| format!("raw file read failed for {path}: {error}"))
 }
 
 fn build_prompt(

@@ -10,12 +10,12 @@ import {
 } from "react";
 import {
   Activity,
+  Clock3,
   Cpu,
   Gauge,
   ShieldCheck,
   Target,
   Trophy,
-  Zap,
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { P2PProvider } from "@/components/providers/P2PProvider";
@@ -27,6 +27,7 @@ import {
   readGuardianObservationLedger,
   readGenesisAutoCounters,
   readGenesisAutoModeSettings,
+  recordGuardianFailure,
   recordGuardianObservation,
   type GuardianObservationLedger,
   writeGenesisAutoCounters,
@@ -37,6 +38,7 @@ import { useCyphesStore } from "@/store/useCyphesStore";
 import type {
   AuditRuntimeProgress,
   CampaignReportSnapshot,
+  GitHubAccessStatus,
   GuardianTarget,
   LocalModelList,
   ProtocolAuditCampaign,
@@ -224,6 +226,17 @@ function campaignIncludesGuardianTarget(campaign: ProtocolAuditCampaign, target:
   );
 }
 
+function isRecentGuardianFailure(observedAt?: string) {
+  if (!observedAt) return false;
+  const observedMs = Date.parse(observedAt);
+  if (!Number.isFinite(observedMs)) return false;
+  return Date.now() - observedMs < 24 * 60 * 60 * 1000;
+}
+
+function isGitHubBackoffError(message: string) {
+  return /github paused|rate limit/i.test(message);
+}
+
 function requestedByLocalNode(campaign: ProtocolAuditCampaign, agentId: string) {
   return Boolean(agentId && campaign.requesterAgentId === agentId);
 }
@@ -245,11 +258,12 @@ function AppContent() {
   const [runtimeProvider, setRuntimeProvider] = useState("lmstudio");
   const [runtimeModels, setRuntimeModels] = useState<string[]>([]);
   const [runtimeModel, setRuntimeModel] = useState("");
-  const [runtimeStatus, setRuntimeStatus] = useState<LocalModelList | null>(null);
+  const [, setRuntimeStatus] = useState<LocalModelList | null>(null);
+  const [githubAccessStatus, setGitHubAccessStatus] = useState<GitHubAccessStatus | null>(null);
   const [, setRuntimeProgress] = useState<Record<string, AuditRuntimeProgress>>({});
   const [latestRuntimeProgress, setLatestRuntimeProgress] = useState<AuditRuntimeProgress | null>(null);
   const [latestRuntimeEventAt, setLatestRuntimeEventAt] = useState(Date.now());
-  const [runtimeStartedAt, setRuntimeStartedAt] = useState<number | null>(null);
+  const [, setRuntimeStartedAt] = useState<number | null>(null);
   const [telemetryTick, setTelemetryTick] = useState(Date.now());
   const [, setRunningWorkUnitId] = useState<string | null>(null);
   const [cockpitEvents, setCockpitEvents] = useState<CockpitEvent[]>([
@@ -265,8 +279,8 @@ function AppContent() {
   const [guardianLedger, setGuardianLedger] = useState<GuardianObservationLedger>(() =>
     readGuardianObservationLedger(),
   );
-  const [autoBusy, setAutoBusy] = useState(false);
-  const [autoPulse, setAutoPulse] = useState("Autonomous guardian loop starting.");
+  const [, setAutoBusy] = useState(false);
+  const [, setAutoPulse] = useState("Autonomous guardian loop starting.");
   const runtimeStartedAtRef = useRef<number | null>(null);
   const lastPhaseRef = useRef("");
   const autoBusyRef = useRef(false);
@@ -292,39 +306,12 @@ function AppContent() {
   const runtimeRecentlyFinished = Boolean(
     latestRuntimeProgress?.progress === 100 && telemetryTick - latestRuntimeEventAt < 8 * 60_000,
   );
-  const elapsedRuntimeMs = runtimeStartedAt ? telemetryTick - runtimeStartedAt : 0;
   const currentProgress = latestRuntimeProgress?.progress || 0;
   const measuredTokensPerSecond = latestRuntimeProgress?.tokensPerSecond || 0;
   const currentTokensPerSecond = measuredTokensPerSecond;
   const hasPendingCredit = runtimeActive || runtimeRecentlyFinished;
   const pendingReceiptMeter = hasPendingCredit ? Math.min(35, Math.max(1, Math.round(currentProgress * 0.35))) : 0;
-  const runtimePhase =
-    latestRuntimeProgress?.phase ||
-    runtimeStatus?.message ||
-    (runtimeModel ? "Runtime armed" : "Runtime offline");
-  const cockpitStatus = runtimeActive
-    ? "RUNNING AUDIT SKILL"
-    : runtimeRecentlyFinished
-      ? "SUBMITTED"
-      : runtimeModel
-        ? "ARMED"
-        : "OFFLINE";
-  const creditLabel = hasPendingCredit ? "Pending ATP" : "ATP earned";
-  const creditValue = hasPendingCredit ? `+${pendingReceiptMeter}` : creditSummary.total.toString();
-  const cockpitCode = runtimeActive
-    ? "LIVE"
-    : runtimeRecentlyFinished
-      ? "AWAITING VERIFIER"
-      : runtimeModel
-        ? "READY"
-        : "NO MODEL";
   const normalizedAutoCounters = normalizeGenesisAutoCounters(autoCounters);
-  const openWorkCount = useMemo(() => {
-    return Object.values(campaignSnapshots).reduce(
-      (sum, snapshot) => sum + snapshot.workUnits.filter((unit) => unit.status === "open").length,
-      0,
-    );
-  }, [campaignSnapshots]);
   const pendingVerificationCount = useMemo(() => {
     return Object.values(campaignSnapshots).reduce((sum, snapshot) => {
       const verified = new Set(snapshot.verifications.map((item) => item.targetContributionId));
@@ -333,7 +320,6 @@ function AppContent() {
   }, [campaignSnapshots]);
   const projectedPendingCredits = pendingVerificationCount * 35 + pendingReceiptMeter;
   const activeNodeCount = nodeStatus === "online" ? peerCount + 1 : peerCount;
-  const localCognitionRate = runtimeActive ? currentTokensPerSecond : 0;
   const autoModeArmed = true;
   const sortedCampaigns = useMemo(
     () => [...campaigns].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
@@ -461,6 +447,33 @@ function AppContent() {
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [runtimeProvider]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    async function refreshGitHubStatus() {
+      try {
+        const status = await p2p.getGitHubAccessStatus();
+        if (!disposed) setGitHubAccessStatus(status);
+      } catch {
+        if (!disposed) {
+          setGitHubAccessStatus({
+            authenticated: false,
+            paused: false,
+            message: "GitHub status unavailable.",
+          });
+        }
+      }
+    }
+    void refreshGitHubStatus();
+    const timer = window.setInterval(() => {
+      void refreshGitHubStatus();
+    }, 15_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     p2p.listGuardianTargets()
@@ -613,6 +626,21 @@ function AppContent() {
   }
 
   async function inspectRepository(url: string): Promise<InspectedRepository> {
+    if (isTauriRuntime()) {
+      const inspected = await p2p.inspectGithubRepository(url);
+      return {
+        repository: inspected.repository,
+        ...repositoryFocusScope(
+          AUDIT_SCOPE,
+          inspected.repository,
+          inspected.focusPath,
+          inspected.focusRef,
+        ),
+        focusPath: inspected.focusPath,
+        focusRef: inspected.focusRef,
+      };
+    }
+
     const target = parseGitHubInput(url);
     if (!target) {
       throw new Error(GITHUB_REPOSITORY_URL_ERROR);
@@ -634,7 +662,7 @@ function AppContent() {
 
     const resolved = await resolveGitHubPath(target.apiUrl, repository, target);
     const summary = toRepositorySummary(
-      { ...repository, html_url: target.repoUrl },
+      repository,
       resolved.commitSha,
     );
     return {
@@ -652,11 +680,18 @@ function AppContent() {
 
   function selectNextGuardianTarget() {
     if (guardianTargets.length === 0) return null;
-    const index = normalizedAutoCounters.targetCursor % guardianTargets.length;
-    return {
-      target: guardianTargets[index],
-      nextCursor: index + 1,
-    };
+    const startCursor = normalizedAutoCounters.targetCursor;
+    for (let offset = 0; offset < guardianTargets.length; offset += 1) {
+      const index = (startCursor + offset) % guardianTargets.length;
+      const target = guardianTargets[index];
+      const observation = guardianLedger.targets[target.targetId];
+      if (isRecentGuardianFailure(observation?.lastErrorAt)) continue;
+      return {
+        target,
+        nextCursor: startCursor + offset + 1,
+      };
+    }
+    return null;
   }
 
   async function seedGuardianCampaign(target: GuardianTarget, nextCursor: number) {
@@ -729,6 +764,17 @@ function AppContent() {
     pushAutoPulse(`Work created: ${target.protocolName} ${shortCommit(inspected.repository.commitSha)}`, "success");
     setNotice(`CYPHES created ${target.protocolName} guardian work at ${shortCommit(inspected.repository.commitSha)}.`);
     return true;
+  }
+
+  function skipGuardianTargetForNow(target: GuardianTarget, nextCursor: number, message: string) {
+    const nextLedger = recordGuardianFailure(guardianLedger, target.targetId, message);
+    setGuardianLedger(nextLedger);
+    updateAutoCounter(setAutoCounters, (current) => ({
+      ...current,
+      targetCursor: nextCursor,
+      targetsObserved: current.targetsObserved + 1,
+    }));
+    pushAutoPulse(`Skipped ${target.protocolName}: ${message}`, "warn");
   }
 
   async function autoVerifyNextContribution() {
@@ -853,7 +899,13 @@ function AppContent() {
       if (autoMode.questSeeder) {
         const selection = selectNextGuardianTarget();
         if (selection) {
-          await seedGuardianCampaign(selection.target, selection.nextCursor);
+          try {
+            await seedGuardianCampaign(selection.target, selection.nextCursor);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (isGitHubBackoffError(message)) throw error;
+            skipGuardianTargetForNow(selection.target, selection.nextCursor, message);
+          }
         }
       }
     } catch (error) {
@@ -879,13 +931,6 @@ function AppContent() {
       <main>
         <section className="runtime-terminal" aria-label="Runtime terminal">
           <div className="terminal-controls">
-            <div className="terminal-compact-status">
-              <div>
-                <span>{cockpitStatus}</span>
-                <strong>{runtimePhase}</strong>
-              </div>
-              <code>{cockpitCode}</code>
-            </div>
             <label>
               <span>Provider</span>
               <select
@@ -924,18 +969,20 @@ function AppContent() {
               </div>
               <div className="metric-card">
                 <Trophy size={17} />
-                <span>{creditLabel}</span>
-                <strong>{creditValue}</strong>
-                <small>{hasPendingCredit ? "provisional only" : "receipt-backed"}</small>
+                <span>ATP earned</span>
+                <strong>{creditSummary.total}</strong>
+                <small>receipt-backed</small>
               </div>
               <div className="metric-card">
-                <span>Progress</span>
-                <strong>{currentProgress ? `${currentProgress}%` : runtimeModel ? "armed" : "offline"}</strong>
-                <small>{runtimeActive ? formatClock(elapsedRuntimeMs) : "runtime clock"}</small>
+                <Clock3 size={17} />
+                <span>Pending</span>
+                <strong>+{projectedPendingCredits}</strong>
+                <small>{runtimeActive ? `${currentProgress}% active` : "awaiting receipts"}</small>
               </div>
               <div className="metric-card">
-                <span>Peers</span>
-                <strong>{peerCount}</strong>
+                <Activity size={17} />
+                <span>Active nodes</span>
+                <strong>{activeNodeCount}</strong>
                 <small>{networkInfo?.relay_connected ? "relay linked" : "network standby"}</small>
               </div>
             </div>
@@ -955,55 +1002,12 @@ function AppContent() {
           </div>
         </section>
 
-        <section className="genesis-auto-panel armed">
-          <div className="genesis-auto-header">
-            <div>
-              <span>Autonomous Guardian Loop</span>
-              <h2>{autoBusy ? "Intelligence in motion" : "Network alive"}</h2>
-            </div>
-            <div className="genesis-status">
-              <Activity size={15} />
-              <strong>{autoBusy ? "EXECUTING" : "ALWAYS ON"}</strong>
-            </div>
-          </div>
-
-          <div className="network-pulse-grid">
-            <div>
-              <small>Active nodes</small>
-              <strong>{activeNodeCount}</strong>
-            </div>
-            <div>
-              <small>Open work</small>
-              <strong>{openWorkCount}</strong>
-            </div>
-            <div>
-              <small>Pending ATP</small>
-              <strong>+{projectedPendingCredits}</strong>
-            </div>
-            <div>
-              <small>Earned ATP</small>
-              <strong>{creditSummary.total}</strong>
-            </div>
-            <div>
-              <small>Cognition rate</small>
-              <strong>{localCognitionRate.toFixed(1)}</strong>
-            </div>
-            <div>
-              <small>Observed</small>
-              <strong>{normalizedAutoCounters.targetsObserved}</strong>
-            </div>
-          </div>
-
-          <div className="auto-pulse-row">
-            <Zap size={14} />
-            <span>{autoPulse}</span>
-            <code>
-              {normalizedAutoCounters.campaignsSeeded} seeded / {normalizedAutoCounters.verifications} verified / {normalizedAutoCounters.unchangedTargets} unchanged
-            </code>
-          </div>
-        </section>
-
         {nodeError ? <div className="error-banner">Node error: {nodeError}</div> : null}
+        {githubAccessStatus?.paused ? (
+          <div className="error-banner github-pause">
+            GitHub paused{githubAccessStatus.retryAt ? ` until ${new Date(githubAccessStatus.retryAt).toLocaleTimeString()}` : ""}: {githubAccessStatus.message}
+          </div>
+        ) : null}
         {!isTauriRuntime() ? (
           <div className="preview-banner">
             Read-only browser preview. Signing, persistence, and networking require the native app.

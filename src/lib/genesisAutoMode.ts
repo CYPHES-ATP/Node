@@ -23,6 +23,8 @@ export interface GuardianTargetObservation {
   lastObservedAt?: string;
   lastSeededCommit?: string;
   lastSeededAt?: string;
+  lastError?: string;
+  lastErrorAt?: string;
   unchangedCount: number;
 }
 
@@ -114,7 +116,7 @@ export function writeGenesisAutoCounters(counters: GenesisAutoCounters) {
 
 export function defaultGuardianObservationLedger(): GuardianObservationLedger {
   return {
-    version: "0.5.5",
+    version: "0.5.6",
     targets: {},
   };
 }
@@ -143,6 +145,8 @@ export function recordGuardianObservation(
     targetId,
     lastObservedCommit: commitSha,
     lastObservedAt: new Date().toISOString(),
+    lastError: undefined,
+    lastErrorAt: undefined,
     unchangedCount: unchanged ? current.unchangedCount + 1 : current.unchangedCount,
   };
   if (seeded) {
@@ -151,10 +155,36 @@ export function recordGuardianObservation(
   }
   const updated = {
     ...ledger,
-    version: "0.5.5",
+    version: "0.5.6",
     targets: {
       ...ledger.targets,
       [targetId]: next,
+    },
+  };
+  writeGuardianObservationLedger(updated);
+  return updated;
+}
+
+export function recordGuardianFailure(
+  ledger: GuardianObservationLedger,
+  targetId: string,
+  error: string,
+) {
+  const current = ledger.targets[targetId] || {
+    targetId,
+    unchangedCount: 0,
+  };
+  const updated = {
+    ...ledger,
+    version: "0.5.6",
+    targets: {
+      ...ledger.targets,
+      [targetId]: {
+        ...current,
+        targetId,
+        lastError: error.slice(0, 240),
+        lastErrorAt: new Date().toISOString(),
+      },
     },
   };
   writeGuardianObservationLedger(updated);

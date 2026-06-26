@@ -2,10 +2,10 @@
 
 ## Download The macOS Preview
 
-Apple Silicon users can download the current v0.5.5 developer DMGs from:
+Apple Silicon users can download the current v0.5.6 developer DMGs from:
 
-- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.5/CYPHES-v0.5.5-aarch64.dmg
-- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.5/CYPHES-Requester-v0.5.5-aarch64.dmg
+- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-v0.5.6-aarch64.dmg
+- https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-Partner-v0.5.6-aarch64.dmg
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
@@ -16,10 +16,27 @@ available yet.
   Studio or Ollama model and the node watches targets, creates non-duplicate
   work, auto-claims remote work, runs bounded audit skill passes, and receives
   receipt-backed ATP Credits after verifier acceptance.
-- **CYPHES Requester** is the admin/protocol console for manual campaign
+- **CYPHES Partner** is the admin/protocol console for manual campaign
   creation, verification inspection, ATP proof logs, and final report export.
 - The Autonomous Guardian Loop does not submit external reports or claim
   payouts; ATP Credits become earned only after accepted verifier receipts.
+
+## GitHub Access For 24/7 Runs
+
+CYPHES reads public GitHub repositories to resolve pinned commits and gather
+read-only audit context. Unauthenticated GitHub requests are limited per public
+IP, so multi-node home QA can exhaust the quota quickly.
+
+For higher quota, configure a local GitHub token on each serious node using one
+of:
+
+```bash
+export CYPHES_GITHUB_TOKEN=github_pat_...
+printf '%s' 'github_pat_...' > ~/.cyphes/github.token
+```
+
+The app does not include a shared CYPHES GitHub token. A shared token in a DMG
+would be public the moment the app ships.
 
 ## Native Development
 
