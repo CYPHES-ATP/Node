@@ -1,55 +1,62 @@
-# Genesis Auto Mode
+# Autonomous Guardian Loop
 
-Status: v0.5.4 developer preview
+Status: v0.5.5 developer preview
 
-Genesis Auto Mode is the first 24/7 participation loop for CYPHES. It makes a
-node feel alive without pretending that unverified model output is payment,
-reputation, or a confirmed exploit.
+The v0.5.5 main CYPHES app is autonomous by default. Users open the app,
+select a local LM Studio or Ollama model, and watch CYPHES coordinate public
+audit work. There are no Auto Worker, Auto Verifier, Quest Seeder, or Work
+Order controls in the main node UI.
 
-## What It Does
+## Runtime Loop
 
-The desktop cockpit exposes three independent toggles:
+```text
+Guardian Index v2
+-> resolve GitHub target to pinned commit
+-> create work only if target/path/commit is not already active
+-> discovered worker auto-claims open work
+-> local model runs bounded audit skill
+-> worker signs contribution receipt
+-> requester auto-verifies requester-owned pending contributions
+-> signed verification/credit receipt returns to worker
+-> report bundles can be exported from campaign.html
+```
 
-- **Auto Worker** claims one open remote work unit, runs the selected local
-  model, signs the contribution, and submits the receipt back to the requester.
+## What Runs By Default
+
+- **Auto Worker** claims one open remote work unit when a selected local model
+  is available, runs the bounded audit skill, signs the contribution, and sends
+  the receipt back to the requester.
 - **Auto Verifier** accepts pending signed contributions only for campaigns
-  this node requested, then returns signed verification and ATP Credit receipts
-  to the contributing worker.
-- **Quest Seeder** creates one public DeFi guardian campaign per day from the
-  local target index at `protocol/targets/guardian-target-index.json`.
+  requested by this same local identity, then returns signed verification and
+  ATP Credit receipts to the contributing worker.
+- **Quest Seeder** watches `protocol/targets/guardian-target-index.json`,
+  resolves targets to pinned commits, and creates a signed campaign only when
+  the same target/path/commit is not already covered locally.
 
-Auto Worker has two guardrails:
+The runtime limit remains enforced by Rust for autonomous worker runs. If a local
+model exceeds the limit, CYPHES does not create a signed contribution.
 
-- **Max daily work units** limits how many work units this node can complete in
-  one UTC day.
-- **Max runtime minutes** is enforced by the Rust command wrapper for auto
-  worker runs. If the selected local model exceeds the limit, CYPHES does not
-  create a signed contribution.
+## Guardian Index v2
 
-## What It Does Not Do
+The bundled index contains 100 structured public coverage targets. Each target
+includes:
 
-Genesis Auto Mode does not:
+- source signals: `manual-curated`, `github`, and `defillama`;
+- protocol, category, chains, static TVL/risk-rank seed;
+- GitHub repository URLs and focused paths;
+- protocol docs/security references when known;
+- in-scope and out-of-scope text;
+- contract criticality and work priority score;
+- credit budget and cadence.
 
-- submit vulnerability reports to external programs;
-- contact protocol teams;
-- claim a payout;
-- move funds;
-- convert ATP Credits into a token;
-- mark unverified model output as a valid finding.
+The index is a deterministic seed for developer-preview work generation. It is
+not a live bounty feed, not an affiliation claim, and not a payout guarantee.
 
-Human approval is required before disclosure, escalation, liquidity-pool
-settlement, or external submission.
+## Anti-Spam Rule
 
-## Target Index
-
-The local target index is intentionally small and transparent. It contains
-public DeFi repositories, focused paths, scope text, audit briefs, tags, and ATP
-Credit budgets.
-
-Quest Seeder reads the target index, resolves the GitHub repository and pinned
-commit, creates a signed protocol audit campaign, and broadcasts the work order
-to discovered peers. It records a `Guardian target: <targetId>` marker in the
-audit brief so duplicate daily seeding is easy to detect.
+CYPHES creates at most one active local campaign per Guardian target/path/commit.
+If the commit has not changed, the node records the observation and keeps
+watching instead of creating duplicate work.
 
 ## Credit Semantics
 
@@ -60,34 +67,27 @@ CYPHES shows two credit states:
 - **Earned ATP** is receipt-backed. It increases only after a signed verifier
   result accepts a signed contribution and issues a credit allocation.
 
-Auto Worker can create pending work. Auto Verifier can issue earned ATP only for
-campaigns this node requested. Network-wide independent verification remains a
-roadmap item.
+Credits are local, off-chain, receipt-backed accounting. They are not an
+ERC-20, escrow balance, payout claim, or transferable token in this release.
 
-## Network Pulse
+## What It Does Not Do
 
-The v0.5.4 cockpit shows:
+The Autonomous Guardian Loop does not:
 
-- active visible nodes;
-- open work units;
-- pending ATP estimate;
-- earned ATP;
-- daily work progress;
-- local cognition rate in tokens/sec.
+- submit vulnerability reports to external programs;
+- contact protocol teams;
+- claim a payout;
+- move funds;
+- convert ATP Credits into a token;
+- mark unverified model output as a valid vulnerability.
 
-Remote peers do not yet broadcast telemetry, so the cognition-rate gauge is the
-local model stream. Peer telemetry, durable work indexes, and reliable offline
-mailboxes are future protocol work.
+Human approval is required before disclosure, escalation, liquidity-pool
+settlement, external submission, or protocol contact.
 
-## Why This Matters
+## Current Network Limits
 
-Genesis Auto Mode makes CYPHES behave like an always-on guardian network while
-keeping the accounting honest:
-
-```text
-campaign -> work units -> signed contributions -> verifier decisions -> credits -> report
-```
-
-The node can run continuously, participate in open DeFi coverage, and produce
-portable receipts. The network can later add public liquidity-pool settlement
-only after the receipt and verification layer is strong enough to deserve it.
+The live loop depends on online peer delivery. The relay/rendezvous network can
+discover nodes, but CYPHES does not yet have a durable replicated work index or
+offline mailbox. If a requester/verifier is offline, a worker can create a
+pending signed contribution, but earned ATP arrives only after the requester
+comes back online and verifies the contribution.

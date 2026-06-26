@@ -8,8 +8,8 @@ first protocol audit labor network objects.
 - `skills/` contains versioned CYPHES audit skill prompts and manifests used
   by local model runtime receipts. v0.4 is the current professional multi-pass
   audit pipeline skill and v0.5 records it as the default campaign skill pack.
-- `targets/` contains the v0.5.4 Genesis guardian target index used by Quest
-  Seeder for public DeFi coverage campaigns.
+- `targets/` contains Guardian Index v2, the v0.5.5 structured public target
+  seed used by the Autonomous Guardian Loop.
 - `fixtures/repository-audit-*.json` contains canonical structural examples.
 - `fixtures/atp-l1-repository-audit.valid/` is a real complete transaction
   bundle produced by CYPHES Node and accepted by Artifact Two.

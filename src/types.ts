@@ -195,7 +195,21 @@ export interface LocalModelList {
 export interface GuardianTarget {
   targetId: string;
   protocolName: string;
+  source: string[];
+  category: string;
+  chains: string[];
+  tvlRiskRank: number;
   repoUrl: string;
+  repoUrls: string[];
+  contractPaths: string[];
+  docsUrl?: string;
+  securityUrl?: string;
+  inScopeText?: string;
+  outOfScopeText?: string;
+  lastAuditedCommit?: string | null;
+  lastObservedCommit?: string | null;
+  contractCriticality: number;
+  priorityScore: number;
   scopeText: string;
   auditBrief: string;
   creditBudget: number;

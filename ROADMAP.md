@@ -36,17 +36,18 @@ signed ATP envelopes or portable artifacts.
 - Signed verification-result bundles return accepted/rejected decisions and
   ATP Credit allocations to the contributing worker, with idempotent resend on
   reconnect.
-- Desktop operator UI now presents **Work Orders** as the primary surface:
-  per-unit status, claimant, contribution count, verifier state, claim buttons,
-  and run buttons for claimed work.
+- Desktop operator UI now presents an autonomous cockpit as the primary
+  surface: local model telemetry, tokens/sec, pending/earned ATP, peers,
+  progress, active protocol context, Guardian Index metadata, and live receipt
+  events. Manual work-order controls are removed from the main node app.
 - `campaign.html` separates protocol/admin campaign creation, network stats,
   ATP proof logs, receipt trails, protocol events, and developer ATP envelope
   inspection from the worker cockpit.
-- v0.5.4 Genesis Auto Mode adds 24/7 human-supervised Auto Worker,
-  Auto Verifier, and Quest Seeder toggles; a local public DeFi guardian target
-  index; daily work caps; Auto Worker runtime-limit enforcement; pending ATP
-  projection; earned ATP only after accepted verifier receipts; and live
-  network pulse telemetry.
+- v0.5.5 Autonomous Guardian Loop makes Auto Worker, Auto Verifier, and Quest
+  Seeder default-on; adds Guardian Index v2 with 100 structured public coverage
+  targets; watches GitHub commits; avoids duplicate unchanged target/path/commit
+  campaigns; enforces Auto Worker runtime limits; keeps pending ATP provisional;
+  and increases earned ATP only after accepted verifier receipts.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
@@ -150,10 +151,11 @@ Status: **Partial**
   and verifier review before adding more runtime providers.
 - Connect OpenClaw/Hermes as an advanced adapter while preserving the signed
   contribution and verification receipt shape.
-- Add a durable work-order index and reliable resend for campaigns, claims, and
-  contributions when peers are not simultaneously online. Verification/credit
-  result resend is now implemented for reconnecting workers.
-- Expand Genesis Auto Mode from requester-owned auto-verification to
+- Add a durable replicated work index and reliable resend for campaigns,
+  claims, and contributions when peers are not simultaneously online.
+  Verification/credit result resend is now implemented for reconnecting
+  workers.
+- Expand the Autonomous Guardian Loop from requester-owned auto-verification to
   independent verifier queues, challenge windows, and revision policies.
 - Harden the worker boundary without changing the receipt profile.
 - Add deterministic negative fixtures for invalid leases and worker results.

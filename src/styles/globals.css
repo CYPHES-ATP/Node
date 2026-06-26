@@ -1101,6 +1101,185 @@ form > label,
   margin-top: 14px;
 }
 
+.intelligence-panel {
+  min-height: 0;
+  margin-top: 14px;
+  padding: 18px;
+}
+
+.intelligence-card {
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid rgba(0, 246, 255, 0.18);
+  background:
+    radial-gradient(circle at 78% 12%, rgba(199, 255, 71, 0.1), transparent 28%),
+    linear-gradient(90deg, rgba(0, 246, 255, 0.055), transparent 44%),
+    rgba(0, 0, 0, 0.36);
+  box-shadow: inset 3px 0 0 rgba(199, 255, 71, 0.28);
+}
+
+.intelligence-topline,
+.intelligence-main {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+}
+
+.intelligence-topline {
+  grid-template-columns: auto minmax(0, 1fr);
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.intelligence-topline span {
+  width: fit-content;
+  padding: 4px 8px;
+  border: 1px solid rgba(199, 255, 71, 0.3);
+  color: var(--green);
+}
+
+.intelligence-topline code {
+  overflow: hidden;
+  color: var(--cyan-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intelligence-main {
+  grid-template-columns: minmax(0, 1fr) 170px;
+  margin-top: 14px;
+}
+
+.intelligence-main h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: clamp(30px, 5vw, 70px);
+  font-weight: 860;
+  letter-spacing: -0.09em;
+  line-height: 0.86;
+  text-transform: uppercase;
+}
+
+.intelligence-main p {
+  max-width: 820px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.target-radar {
+  display: grid;
+  align-content: center;
+  min-height: 126px;
+  padding: 14px;
+  border: 1px solid rgba(0, 246, 255, 0.18);
+  background:
+    repeating-linear-gradient(90deg, rgba(0, 246, 255, 0.05) 0 1px, transparent 1px 16px),
+    rgba(1, 7, 7, 0.72);
+  text-transform: uppercase;
+}
+
+.target-radar svg {
+  color: var(--cyan);
+}
+
+.target-radar span {
+  margin-top: 10px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.target-radar strong {
+  margin-top: 4px;
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 25px;
+  letter-spacing: -0.08em;
+  line-height: 0.95;
+}
+
+.intelligence-grid,
+.watch-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.intelligence-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.intelligence-grid > div,
+.watch-grid > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(0, 246, 255, 0.13);
+  background:
+    linear-gradient(135deg, rgba(0, 246, 255, 0.052), transparent),
+    rgba(1, 7, 7, 0.62);
+}
+
+.intelligence-grid small,
+.watch-grid small {
+  display: block;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.intelligence-grid strong,
+.watch-grid strong {
+  display: block;
+  margin-top: 7px;
+  overflow: hidden;
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 23px;
+  font-weight: 820;
+  letter-spacing: -0.08em;
+  line-height: 0.9;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.watch-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.watch-grid > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: start;
+}
+
+.watch-grid svg {
+  grid-row: 1 / 4;
+  color: var(--cyan);
+}
+
+.watch-grid span {
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .campaign-list {
   display: grid;
   gap: 12px;
