@@ -64,7 +64,7 @@ protocol-specific checklist items.
 
 ## Autonomous Guardian Loop
 
-v0.5.5 makes the main CYPHES node autonomous by default:
+v0.5.6 makes the main CYPHES node autonomous by default:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
   model, enforces the configured runtime limit, signs the contribution, and
@@ -76,6 +76,9 @@ v0.5.5 makes the main CYPHES node autonomous by default:
   `protocol/targets/guardian-target-index.json`, resolves targets to pinned
   commits, and creates work only when the same target/path/commit is not
   already active locally.
+- **GitHub backoff** pauses repository reads when GitHub rate-limits the node,
+  surfaces the reset window in the UI, and resumes without killing peer
+  networking. Nodes can set a local GitHub token for higher quota.
 
 The Autonomous Guardian Loop does not submit external vulnerability reports,
 contact protocol teams, claim payouts, or move funds. It makes the network feel
@@ -180,7 +183,7 @@ but it does not integrate with external submission portals or direct protocol
 payout systems yet.
 
 Confirmed findings can later receive bonus allocation or split logic through a
-settlement adapter, but v0.5.5 only records the placeholder. No UI should imply
+settlement adapter, but v0.5.6 only records the placeholder. No UI should imply
 that ATP Credits are redeemable payouts.
 
 ## Final Report Bundle

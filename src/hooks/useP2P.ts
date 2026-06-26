@@ -10,6 +10,8 @@ import type {
   CreditSummary,
   ExportedReportBundle,
   GuardianTarget,
+  GitHubAccessStatus,
+  InspectedRepository,
   LegacyAuditJob,
   LocalModelList,
   NetworkInfo,
@@ -115,6 +117,24 @@ export function useP2P() {
   async function listGuardianTargets() {
     if (!isTauriRuntime()) return guardianTargetIndex.targets as GuardianTarget[];
     return invoke<GuardianTarget[]>("list_guardian_targets");
+  }
+
+  async function getGitHubAccessStatus() {
+    if (!isTauriRuntime()) {
+      return {
+        authenticated: false,
+        paused: false,
+        message: "Browser preview does not use the native GitHub access layer.",
+      } satisfies GitHubAccessStatus;
+    }
+    return invoke<GitHubAccessStatus>("get_github_access_status");
+  }
+
+  async function inspectGithubRepository(url: string) {
+    if (!isTauriRuntime()) {
+      throw new Error("GitHub inspection requires the native CYPHES app.");
+    }
+    return invoke<InspectedRepository>("inspect_github_repository", { url });
   }
 
   async function listLocalModelModels(provider: string) {
@@ -374,6 +394,8 @@ export function useP2P() {
     loadProtocolCampaigns,
     getCampaignSnapshot,
     listGuardianTargets,
+    getGitHubAccessStatus,
+    inspectGithubRepository,
     listLocalModelProviders,
     listLocalModelModels,
     refreshCreditSummary,

@@ -160,7 +160,7 @@ async function inspectRepository(url: string) {
 
   const summary: RepositorySummary = {
     fullName: repository.full_name,
-    url: target.repoUrl,
+    url: repository.html_url,
     description: repository.description,
     language: repository.language,
     defaultBranch: repository.default_branch,

@@ -19,13 +19,15 @@ exports a professional markdown report bundle. This is online peer coordination
 and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
 
-v0.5.5 adds the Autonomous Guardian Loop: Auto Worker, Auto Verifier, and Quest
-Seeder run by default in the main app; Guardian Index v2 provides 100
+v0.5.6 hardens the Autonomous Guardian Loop: Auto Worker, Auto Verifier, and
+Quest Seeder run by default in the main app; Guardian Index v2 provides 100
 structured public coverage targets; CYPHES watches target commits, avoids
 duplicate unchanged target/path/commit campaigns, auto-claims remote work when
-a local model is selected, and returns signed verification/ATP Credit receipts
-to workers after requester-owned verification. External disclosure, protocol
-contact, payout claims, and settlement remain human-gated and not implemented.
+a local model is selected, returns signed verification/ATP Credit receipts to
+workers after requester-owned verification, pauses visibly when GitHub rate
+limits the node, and supports a local GitHub token for higher API quota.
+External disclosure, protocol contact, payout claims, and settlement remain
+human-gated and not implemented.
 
 The verified path is:
 
@@ -80,7 +82,7 @@ an ATP v0.3 wire verb.
 | Combined deployable relay/rendezvous service | Implemented |
 | Signed rendezvous registration and automatic peer discovery | Implemented and externally smoke tested |
 | Default network manifest and runtime overrides | Implemented |
-| Manual direct/relay multiaddress dialing | Command implemented; hidden from main v0.5.5 UI |
+| Manual direct/relay multiaddress dialing | Command implemented; hidden from main v0.5.6 UI |
 | DCUtR behavior | Implemented |
 | CYPHES-hosted public endpoint | `relay.cyphes.com` is live on a dedicated IPv4 and externally smoke tested; redundancy pending |
 | Durable public work index | Not implemented |
@@ -108,6 +110,10 @@ an ATP v0.3 wire verb.
 | Autonomous Guardian Loop | Implemented locally; default-on in main app |
 | Guardian Index v2 with 100 structured public targets | Implemented |
 | Commit-diff watch and duplicate target/path/commit suppression | Implemented locally |
+| GitHub authenticated reads and rate-limit backoff | Implemented locally |
+| Duplicate campaign persistence suppression | Implemented locally |
+| Verification-result idempotent resend | Implemented locally |
+| Stale Guardian target quarantine | Implemented locally |
 | Auto Worker runtime limit | Implemented |
 | LM Studio local model runtime | Implemented locally |
 | Ollama local model runtime | Implemented locally |

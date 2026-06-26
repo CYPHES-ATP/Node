@@ -1,8 +1,8 @@
 # Autonomous Guardian Loop
 
-Status: v0.5.5 developer preview
+Status: v0.5.6 developer preview
 
-The v0.5.5 main CYPHES app is autonomous by default. Users open the app,
+The v0.5.6 main CYPHES app is autonomous by default. Users open the app,
 select a local LM Studio or Ollama model, and watch CYPHES coordinate public
 audit work. There are no Auto Worker, Auto Verifier, Quest Seeder, or Work
 Order controls in the main node UI.
@@ -36,6 +36,19 @@ Guardian Index v2
 The runtime limit remains enforced by Rust for autonomous worker runs. If a local
 model exceeds the limit, CYPHES does not create a signed contribution.
 
+## GitHub Backoff
+
+The loop depends on public GitHub reads for commit resolution, tree inventory,
+and scoped file context. v0.5.6 adds shared GitHub backoff across campaign
+seeding and worker context reads. If GitHub returns a rate-limit response,
+CYPHES pauses GitHub reads until the reset time and surfaces that status in the
+cockpit instead of continuing to hammer GitHub or creating unpinned campaigns.
+
+Nodes can increase quota by configuring a local GitHub token through
+`CYPHES_GITHUB_TOKEN`, `GITHUB_TOKEN`, `~/.cyphes/github.token`, or
+`githubToken` in `~/.cyphes/settings.json`. CYPHES does not ship with an
+embedded network-wide GitHub token.
+
 ## Guardian Index v2
 
 The bundled index contains 100 structured public coverage targets. Each target
@@ -57,6 +70,15 @@ not a live bounty feed, not an affiliation claim, and not a payout guarantee.
 CYPHES creates at most one active local campaign per Guardian target/path/commit.
 If the commit has not changed, the node records the observation and keeps
 watching instead of creating duplicate work.
+
+v0.5.6 also enforces duplicate suppression in SQLite for the same
+requester/repository/commit/scope tuple, so UI races or reconnect replay do not
+create parallel local campaigns for unchanged work.
+
+If a Guardian Index row resolves to a stale, moved, or unavailable GitHub
+repository, CYPHES records the target-level failure, advances the cursor, and
+quarantines that row for 24 hours. GitHub rate-limit/backoff errors are treated
+separately and pause repository reads instead of cycling through the index.
 
 ## Credit Semantics
 
