@@ -5,36 +5,37 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.4"><img alt="CYPHES: v0.5.4" src="https://img.shields.io/badge/CYPHES-v0.5.4-c7ff47"></a>
+    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.5"><img alt="CYPHES: v0.5.5" src="https://img.shields.io/badge/CYPHES-v0.5.5-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES v0.5.4 desktop node" src="docs/images/CYPHES%20v0.5.4.png" width="100%">
+  <img alt="CYPHES v0.5.5 desktop node" src="docs/images/CYPHES%20v0.5.5.png" width="100%">
 </p>
 
 ## Download
 
-The current developer release is **CYPHES v0.5.4**. It adds **Genesis Auto
-Mode**: Auto Worker, Auto Verifier, and Quest Seeder toggles; a local DeFi
-guardian target index; live cognition-rate/network pulse telemetry; enforced
-Auto Worker runtime limits; and ATP accounting that stays pending until a
-signed verifier receipt accepts the contribution.
+The current developer release is **CYPHES v0.5.5**. It makes the node
+autonomous by default: CYPHES watches the bundled Guardian Index v2, resolves
+public GitHub targets to pinned commits, creates work only when a target/commit
+has not already been covered, auto-claims remote work when a local model is
+available, auto-verifies requester-owned contributions, and keeps ATP Credits
+pending until a signed verifier receipt accepts the contribution.
 
 Apple Silicon downloads:
 
-- [Download CYPHES v0.5.4](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.4/CYPHES-v0.5.4-aarch64.dmg)
-- [Download CYPHES Requester v0.5.4](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.4/CYPHES-Requester-v0.5.4-aarch64.dmg)
+- [Download CYPHES v0.5.5](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.5/CYPHES-v0.5.5-aarch64.dmg)
+- [Download CYPHES Requester v0.5.5](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.5/CYPHES-Requester-v0.5.5-aarch64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
 confirm **Open**. Windows and Linux users should run from source for now.
 
-Use **CYPHES** to discover campaigns, claim individual work units, run local
-AI audit passes, and receive receipt-backed ATP Credits. Use **CYPHES
-Requester** to create campaigns, verify submitted work, and export reports.
+Use **CYPHES** to connect a local model and watch the autonomous guardian loop
+run. Use **CYPHES Requester** as the admin/protocol console for manual campaign
+creation, verification inspection, report export, and ATP proof logs.
 
 The developer preview completes one ATP-L1 repository-audit transaction:
 
@@ -122,9 +123,10 @@ Artifact Two independently returns:
 - Requester verification sends signed verification results and receipt-backed
   ATP Credit allocations back to the contributing worker, including idempotent
   resend when that worker reconnects.
-- Operator UI is centered on **Work Orders**: every campaign exposes each work
-  unit, status, claimant, contribution count, verifier state, and per-unit
-  claim/run controls.
+- Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
+  earned ATP, progress, peers, target metadata, live protocol coverage, and
+  receipt-backed event telemetry. Manual work-order controls are intentionally
+  removed from the main node app.
 - `campaign.html` provides a separate protocol/admin console for creating
   signed campaigns, viewing network state, ATP proof logs, receipt trails,
   protocol events, work-unit status, requester verification/export actions,
@@ -136,12 +138,17 @@ Artifact Two independently returns:
 - Professional v0.4 audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
-- Genesis Auto Mode for 24/7 human-supervised participation: Auto Worker
-  claims one open remote work unit, runs the selected local model, enforces the
-  configured runtime limit, signs and submits the contribution; Auto Verifier
-  accepts pending contributions for campaigns this node requested; Quest Seeder
-  cycles one public DeFi guardian target per day from
-  `protocol/targets/guardian-target-index.json`.
+- Autonomous Guardian Loop for 24/7 participation: Auto Worker, Auto Verifier,
+  and Quest Seeder are on by default. CYPHES watches Guardian Index v2,
+  resolves GitHub commits, avoids duplicate unchanged target/commit campaigns,
+  auto-claims open remote work, runs the selected local model under the runtime
+  limit, signs contributions, and returns verifier receipts/ATP Credit
+  allocations.
+- Guardian Index v2 contains 100 structured public coverage targets with
+  source signals, category, chains, static TVL/risk rank seed, repo URLs,
+  focused paths, docs/security references, in-scope/out-of-scope text,
+  criticality, and priority score. It is a bundled seed, not a live bounty or
+  payout feed.
 - Live network pulse showing active nodes, open work, pending ATP, earned ATP,
   daily work progress, and local cognition rate. Pending ATP is provisional;
   earned ATP only changes after accepted verifier receipts.
@@ -175,9 +182,10 @@ Artifact Two independently returns:
 - No claim that local model output is automatically a valid vulnerability.
   Findings must be backed by signed artifacts and accepted verifier receipts
   before they appear in final reports.
-- Genesis Auto Mode does not submit external vulnerability reports, contact
-  protocols, claim payouts, or move funds. Human approval is required before
-  disclosure, escalation, liquidity-pool settlement, or external submission.
+- The Autonomous Guardian Loop does not submit external vulnerability reports,
+  contact protocols, claim payouts, or move funds. Human approval is required
+  before disclosure, escalation, liquidity-pool settlement, or external
+  submission.
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
@@ -329,7 +337,8 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 - [ATP implementation status](docs/ATP_IMPLEMENTATION_STATUS.md)
 - [Join the network](docs/JOIN_NETWORK.md)
 - [Audit labor network](docs/AUDIT_LABOR_NETWORK.md)
-- [Genesis Auto Mode](docs/GENESIS_AUTO_MODE.md)
+- [Autonomous Guardian Loop](docs/GENESIS_AUTO_MODE.md)
+- [Guardian Index](docs/GUARDIAN_INDEX.md)
 - [Repository audit profile](docs/REPOSITORY_AUDIT_PROFILE.md)
 - [Developer guide](docs/DEVELOPER_GUIDE.md)
 - [Network architecture](docs/ATP_NETWORK_ARCHITECTURE.md)

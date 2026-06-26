@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import guardianTargetIndex from "../../protocol/targets/guardian-target-index.json";
 import { isTauriRuntime } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
 import type {
@@ -112,7 +113,7 @@ export function useP2P() {
   }
 
   async function listGuardianTargets() {
-    if (!isTauriRuntime()) return [];
+    if (!isTauriRuntime()) return guardianTargetIndex.targets as GuardianTarget[];
     return invoke<GuardianTarget[]>("list_guardian_targets");
   }
 

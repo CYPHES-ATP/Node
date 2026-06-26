@@ -13,7 +13,7 @@ responses, global-network labels, or payment claims.
 
 | Path | Owns |
 | --- | --- |
-| `src/App.tsx` | Work-order cockpit, Genesis Auto Mode, runtime telemetry, and truthful state labels |
+| `src/App.tsx` | Autonomous guardian cockpit, runtime telemetry, target watch state, and truthful credit labels |
 | `src/hooks/useP2P.ts` | Typed calls into the native command boundary |
 | `src/store/useCyphesStore.ts` | Ephemeral frontend view state only |
 | `src/components/providers/P2PProvider.tsx` | Native events and backend refresh |
@@ -29,7 +29,7 @@ responses, global-network labels, or payment claims.
 | `src-tauri/src/lib.rs` | Native application composition |
 | `relay/` | Combined Relay v2/Rendezvous service and network smoke clients |
 | `network/` | Default network publication manifest |
-| `protocol/targets/` | Genesis guardian target index for public DeFi coverage campaigns |
+| `protocol/targets/` | Guardian Index v2 for public DeFi coverage campaigns |
 
 The Rust backend is authoritative. React may request an operation and render
 the returned projection, but it must not manufacture transaction state.
@@ -38,8 +38,9 @@ the returned projection, but it must not manufacture transaction state.
 
 The UI is intentionally split:
 
-- `src/App.tsx` owns the CYPHES cockpit: runtime selection, Genesis Auto Mode,
-  Work Orders, per-unit claim/run controls, verification, and report export.
+- `src/App.tsx` owns the CYPHES cockpit: runtime selection, the default-on
+  Autonomous Guardian Loop, tokens/sec telemetry, target context, pending/earned
+  ATP labels, and live receipt events.
 - `src/campaign.tsx` owns `campaign.html`: protocol/admin campaign creation,
   network state, guardian target index visibility, ATP proof logs, and
   developer receipt inspection.
@@ -77,9 +78,9 @@ The Rust backend:
 - emits and exports the terminal Proof of Cognition.
 - stores protocol audit campaigns, work units, claims, contributions,
   verifier decisions, ATP Credit allocations, and final report bundles;
-- exposes the Genesis guardian target index;
-- enforces Auto Worker runtime limits when the v0.5.4 auto loop runs claimed
-  work units.
+- exposes Guardian Index v2;
+- enforces Auto Worker runtime limits when the v0.5.5 autonomous loop runs
+  claimed work units.
 
 Current audit transaction uses:
 

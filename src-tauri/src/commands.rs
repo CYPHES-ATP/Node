@@ -87,7 +87,29 @@ struct GuardianTargetIndex {
 pub struct GuardianTarget {
     pub target_id: String,
     pub protocol_name: String,
+    #[serde(default)]
+    pub source: Vec<String>,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub chains: Vec<String>,
+    #[serde(default)]
+    pub tvl_risk_rank: u32,
     pub repo_url: String,
+    #[serde(default)]
+    pub repo_urls: Vec<String>,
+    #[serde(default)]
+    pub contract_paths: Vec<String>,
+    pub docs_url: Option<String>,
+    pub security_url: Option<String>,
+    pub in_scope_text: Option<String>,
+    pub out_of_scope_text: Option<String>,
+    pub last_audited_commit: Option<String>,
+    pub last_observed_commit: Option<String>,
+    #[serde(default)]
+    pub contract_criticality: u32,
+    #[serde(default)]
+    pub priority_score: u32,
     pub scope_text: String,
     pub audit_brief: String,
     pub credit_budget: u32,
@@ -1197,9 +1219,14 @@ mod tests {
         ))
         .expect("guardian target index should parse");
 
-        assert!(!index.targets.is_empty());
+        assert!(index.targets.len() >= 100);
         for target in index.targets {
             assert!(target.repo_url.starts_with("https://github.com/"));
+            assert!(target.source.iter().any(|source| source == "github"));
+            assert!(!target.category.trim().is_empty());
+            assert!(target.tvl_risk_rank > 0);
+            assert!(target.contract_criticality > 0);
+            assert!(target.priority_score > 0);
             assert!(target.credit_budget > 0);
             assert!(target.scope_text.contains("No repository writes"));
             assert!(!target.audit_brief.to_lowercase().contains("immunefi"));

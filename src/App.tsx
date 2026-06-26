@@ -2,7 +2,6 @@ import { listen } from "@tauri-apps/api/event";
 import {
   type CSSProperties,
   type Dispatch,
-  FormEvent,
   type SetStateAction,
   useEffect,
   useMemo,
@@ -11,15 +10,8 @@ import {
 } from "react";
 import {
   Activity,
-  ArrowRight,
   Cpu,
-  FileArchive,
   Gauge,
-  Github,
-  Link,
-  LoaderCircle,
-  Power,
-  ReceiptText,
   ShieldCheck,
   Target,
   Trophy,
@@ -32,15 +24,17 @@ import {
   type GenesisAutoCounters,
   type GenesisAutoModeSettings,
   normalizeGenesisAutoCounters,
+  readGuardianObservationLedger,
   readGenesisAutoCounters,
   readGenesisAutoModeSettings,
+  recordGuardianObservation,
+  type GuardianObservationLedger,
   writeGenesisAutoCounters,
   writeGenesisAutoModeSettings,
 } from "@/lib/genesisAutoMode";
-import { isTauriRuntime, truncatePeerId } from "@/lib/utils";
+import { isTauriRuntime } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
 import type {
-  AuditJob,
   AuditRuntimeProgress,
   CampaignReportSnapshot,
   GuardianTarget,
@@ -173,14 +167,6 @@ function toRepositorySummary(
   };
 }
 
-function deliveryLabel(job: AuditJob) {
-  if (job.origin === "remote") return "Verified from peer";
-  if (job.deliveryState === "acknowledged") {
-    return `${job.acknowledgedPeers} peer ${job.acknowledgedPeers === 1 ? "receipt" : "receipts"}`;
-  }
-  return "Signed locally, no peer receipt";
-}
-
 function scopeLine(scopeText: string, prefix: string) {
   return scopeText
     .split("\n")
@@ -255,38 +241,32 @@ function updateAutoCounter(
 
 function AppContent() {
   const p2p = useP2P();
-  const [repositoryUrl, setRepositoryUrl] = useState("");
-  const [compensation, setCompensation] = useState("100");
-  const [auditBrief, setAuditBrief] = useState("");
-  const [attachmentText, setAttachmentText] = useState("");
-  const [customSkillText, setCustomSkillText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [actionJobId, setActionJobId] = useState<string | null>(null);
-  const [peerAddress, setPeerAddress] = useState("");
-  const [connecting, setConnecting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [, setActionJobId] = useState<string | null>(null);
   const [runtimeProvider, setRuntimeProvider] = useState("lmstudio");
   const [runtimeModels, setRuntimeModels] = useState<string[]>([]);
   const [runtimeModel, setRuntimeModel] = useState("");
   const [runtimeStatus, setRuntimeStatus] = useState<LocalModelList | null>(null);
-  const [runtimeProgress, setRuntimeProgress] = useState<Record<string, AuditRuntimeProgress>>({});
+  const [, setRuntimeProgress] = useState<Record<string, AuditRuntimeProgress>>({});
   const [latestRuntimeProgress, setLatestRuntimeProgress] = useState<AuditRuntimeProgress | null>(null);
   const [latestRuntimeEventAt, setLatestRuntimeEventAt] = useState(Date.now());
   const [runtimeStartedAt, setRuntimeStartedAt] = useState<number | null>(null);
   const [telemetryTick, setTelemetryTick] = useState(Date.now());
-  const [runningWorkUnitId, setRunningWorkUnitId] = useState<string | null>(null);
+  const [, setRunningWorkUnitId] = useState<string | null>(null);
   const [cockpitEvents, setCockpitEvents] = useState<CockpitEvent[]>([
     { id: "boot", label: "Runtime standby", at: Date.now() },
   ]);
   const [guardianTargets, setGuardianTargets] = useState<GuardianTarget[]>([]);
-  const [autoMode, setAutoMode] = useState<GenesisAutoModeSettings>(() =>
+  const [autoMode] = useState<GenesisAutoModeSettings>(() =>
     readGenesisAutoModeSettings(),
   );
   const [autoCounters, setAutoCounters] = useState<GenesisAutoCounters>(() =>
     readGenesisAutoCounters(),
   );
+  const [guardianLedger, setGuardianLedger] = useState<GuardianObservationLedger>(() =>
+    readGuardianObservationLedger(),
+  );
   const [autoBusy, setAutoBusy] = useState(false);
-  const [autoPulse, setAutoPulse] = useState("Genesis Auto Mode standing by.");
+  const [autoPulse, setAutoPulse] = useState("Autonomous guardian loop starting.");
   const runtimeStartedAtRef = useRef<number | null>(null);
   const lastPhaseRef = useRef("");
   const autoBusyRef = useRef(false);
@@ -297,20 +277,12 @@ function AppContent() {
   const agentId = useCyphesStore((state) => state.agentId);
   const peerCount = useCyphesStore((state) => state.peerCount);
   const networkInfo = useCyphesStore((state) => state.networkInfo);
-  const jobs = useCyphesStore((state) => state.jobs);
   const campaigns = useCyphesStore((state) => state.campaigns);
   const creditSummary = useCyphesStore((state) => state.creditSummary);
   const notice = useCyphesStore((state) => state.notice);
   const setNotice = useCyphesStore((state) => state.setNotice);
   const [campaignSnapshots, setCampaignSnapshots] = useState<Record<string, CampaignReportSnapshot>>({});
 
-  const sortedJobs = useMemo(
-    () => [...jobs].sort((a, b) => b.createdAt - a.createdAt),
-    [jobs],
-  );
-  const relayAddress = networkInfo?.listen_addrs.find((address) =>
-    address.includes("/p2p-circuit/"),
-  );
   const runtimeProviderLabel = runtimeProvider === "ollama" ? "Ollama" : "LM Studio";
   const runtimeActive = Boolean(
     latestRuntimeProgress &&
@@ -362,7 +334,43 @@ function AppContent() {
   const projectedPendingCredits = pendingVerificationCount * 35 + pendingReceiptMeter;
   const activeNodeCount = nodeStatus === "online" ? peerCount + 1 : peerCount;
   const localCognitionRate = runtimeActive ? currentTokensPerSecond : 0;
-  const autoModeArmed = autoMode.autoWorker || autoMode.autoVerifier || autoMode.questSeeder;
+  const autoModeArmed = true;
+  const sortedCampaigns = useMemo(
+    () => [...campaigns].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [campaigns],
+  );
+  const liveCampaign = useMemo(() => {
+    if (latestRuntimeProgress) {
+      const active = campaigns.find(
+        (campaign) => campaign.campaignId === latestRuntimeProgress.campaignId,
+      );
+      if (active) return active;
+    }
+    return sortedCampaigns[0] || null;
+  }, [campaigns, latestRuntimeProgress, sortedCampaigns]);
+  const liveSnapshot = liveCampaign ? campaignSnapshots[liveCampaign.campaignId] : null;
+  const liveTarget = liveCampaign
+    ? guardianTargets.find((target) => campaignIncludesGuardianTarget(liveCampaign, target))
+    : null;
+  const nextWatchTarget =
+    guardianTargets.length > 0
+      ? guardianTargets[normalizedAutoCounters.targetCursor % guardianTargets.length]
+      : null;
+  const completedWorkUnits = liveSnapshot
+    ? liveSnapshot.workUnits.filter((unit) => unit.status === "accepted").length
+    : 0;
+  const submittedWorkUnits = liveSnapshot
+    ? liveSnapshot.workUnits.filter((unit) => unit.status === "submitted").length
+    : 0;
+  const liveFindings = liveSnapshot
+    ? liveSnapshot.contributions.reduce((sum, contribution) => sum + contribution.findings.length, 0)
+    : 0;
+  const liveAccepted = liveSnapshot
+    ? liveSnapshot.verifications.filter((verification) => verification.decision === "accepted").length
+    : 0;
+  const watchObservation = nextWatchTarget
+    ? guardianLedger.targets[nextWatchTarget.targetId]
+    : undefined;
 
   function pushCockpitEvent(label: string, tone: CockpitEvent["tone"] = "info") {
     setCockpitEvents((current) => [
@@ -455,7 +463,6 @@ function AppContent() {
   }, [runtimeProvider]);
 
   useEffect(() => {
-    if (!isTauriRuntime()) return;
     p2p.listGuardianTargets()
       .then(setGuardianTargets)
       .catch((error) => {
@@ -519,6 +526,7 @@ function AppContent() {
     autoModeArmed,
     campaigns,
     campaignSnapshots,
+    guardianLedger,
     guardianTargets,
     normalizedAutoCounters,
     runtimeModel,
@@ -642,35 +650,44 @@ function AppContent() {
     };
   }
 
-  function updateAutoModeSetting<K extends keyof GenesisAutoModeSettings>(
-    key: K,
-    value: GenesisAutoModeSettings[K],
-  ) {
-    setAutoMode((current) => ({ ...current, [key]: value }));
-  }
-
   function selectNextGuardianTarget() {
     if (guardianTargets.length === 0) return null;
-    for (let offset = 0; offset < guardianTargets.length; offset += 1) {
-      const index = (normalizedAutoCounters.targetCursor + offset) % guardianTargets.length;
-      const target = guardianTargets[index];
-      const alreadySeeded = campaigns.some((campaign) =>
-        requestedByLocalNode(campaign, agentId) &&
-        campaignIncludesGuardianTarget(campaign, target),
-      );
-      if (!alreadySeeded) {
-        return { target, nextCursor: index + 1 };
-      }
-    }
+    const index = normalizedAutoCounters.targetCursor % guardianTargets.length;
     return {
-      target: guardianTargets[normalizedAutoCounters.targetCursor % guardianTargets.length],
-      nextCursor: normalizedAutoCounters.targetCursor + 1,
+      target: guardianTargets[index],
+      nextCursor: index + 1,
     };
   }
 
   async function seedGuardianCampaign(target: GuardianTarget, nextCursor: number) {
-    pushAutoPulse(`Quest seeder resolving ${target.protocolName}`, "info");
+    pushAutoPulse(`Watching ${target.protocolName}`, "info");
     const inspected = await inspectRepository(target.repoUrl);
+    const existingCampaign = campaigns.find(
+      (campaign) =>
+        requestedByLocalNode(campaign, agentId) &&
+        campaignIncludesGuardianTarget(campaign, target) &&
+        campaign.repository.commitSha === inspected.repository.commitSha,
+    );
+    const observation = guardianLedger.targets[target.targetId];
+    const alreadySeededCommit =
+      observation?.lastSeededCommit === inspected.repository.commitSha || Boolean(existingCampaign);
+    if (alreadySeededCommit) {
+      const nextLedger = recordGuardianObservation(
+        guardianLedger,
+        target.targetId,
+        inspected.repository.commitSha,
+        false,
+      );
+      setGuardianLedger(nextLedger);
+      updateAutoCounter(setAutoCounters, (current) => ({
+        ...current,
+        targetCursor: nextCursor,
+        targetsObserved: current.targetsObserved + 1,
+        unchangedTargets: current.unchangedTargets + 1,
+      }));
+      pushAutoPulse(`${target.protocolName} unchanged at ${shortCommit(inspected.repository.commitSha)}`, "info");
+      return false;
+    }
     const campaign = await p2p.createProtocolCampaign(
       inspected.repository,
       target.protocolName,
@@ -679,19 +696,38 @@ function AppContent() {
       [
         `Guardian target: ${target.targetId}`,
         target.auditBrief,
-        "Genesis Auto Mode: no external report submission, payout claim, or protocol contact without human approval.",
+        `Category: ${target.category}`,
+        `Chains: ${target.chains.join(", ")}`,
+        `Priority score: ${target.priorityScore}`,
+        `Static TVL/risk rank seed: ${target.tvlRiskRank}`,
+        "Autonomous Guardian Loop: no external report submission, payout claim, or protocol contact without human approval.",
       ].join("\n\n"),
-      `Guardian target index tags: ${target.tags.join(", ")}\nCadence: ${target.cadence}`,
+      [
+        `Guardian target index tags: ${target.tags.join(", ")}`,
+        `Cadence: ${target.cadence}`,
+        target.docsUrl ? `Docs: ${target.docsUrl}` : "",
+        target.securityUrl ? `Security reference: ${target.securityUrl}` : "",
+        target.inScopeText ? `In scope: ${target.inScopeText}` : "",
+        target.outOfScopeText ? `Out of scope: ${target.outOfScopeText}` : "",
+      ].filter(Boolean).join("\n"),
       "",
     );
+    const nextLedger = recordGuardianObservation(
+      guardianLedger,
+      target.targetId,
+      inspected.repository.commitSha,
+      true,
+    );
+    setGuardianLedger(nextLedger);
     updateAutoCounter(setAutoCounters, (current) => ({
       ...current,
       campaignsSeeded: current.campaignsSeeded + 1,
+      targetsObserved: current.targetsObserved + 1,
       targetCursor: nextCursor,
     }));
     await refreshCampaignSnapshot(campaign.campaignId);
-    pushAutoPulse(`Quest seeded: ${target.protocolName}`, "success");
-    setNotice(`Genesis quest seeded ${target.protocolName}; work units are open to discovered nodes.`);
+    pushAutoPulse(`Work created: ${target.protocolName} ${shortCommit(inspected.repository.commitSha)}`, "success");
+    setNotice(`CYPHES created ${target.protocolName} guardian work at ${shortCommit(inspected.repository.commitSha)}.`);
     return true;
   }
 
@@ -713,7 +749,7 @@ function AppContent() {
           contribution.contributionId,
           "accepted",
           "AUTO_GUARDIAN_COVERAGE_ACCEPTED",
-          "Genesis Auto Verifier accepted a signed, bounded contribution for requester-owned campaign coverage.",
+          "Autonomous verifier accepted a signed, bounded contribution for requester-owned campaign coverage.",
         );
         issued.push(...credits.map((credit) => credit.total));
       }
@@ -748,7 +784,7 @@ function AppContent() {
         workUnits: current.workUnits + 1,
       }));
       pushAutoPulse("Auto worker submitted signed contribution", "success");
-      setNotice(`Auto Worker submitted ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... awaiting requester verification.`);
+      setNotice(`CYPHES submitted ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... awaiting requester verification.`);
       return true;
     } finally {
       setRunningWorkUnitId(null);
@@ -758,11 +794,11 @@ function AppContent() {
 
   async function autoWorkerNextUnit() {
     if (!runtimeModel) {
-      pushAutoPulse(`Auto Worker waiting for ${runtimeProviderLabel}`, "warn");
+      pushAutoPulse(`Waiting for ${runtimeProviderLabel}`, "warn");
       return false;
     }
     if (normalizedAutoCounters.workUnits >= autoMode.maxDailyWorkUnits) {
-      pushAutoPulse("Auto Worker daily limit reached", "warn");
+      pushAutoPulse("Daily work limit reached", "warn");
       return false;
     }
 
@@ -780,7 +816,7 @@ function AppContent() {
         return claim.workerAgentId === agentId && claim.status === "claimed" && !hasContribution;
       });
       if (myClaim) {
-        pushAutoPulse("Auto Worker running claimed unit", "info");
+        pushAutoPulse("Running claimed unit", "info");
         return autoRunWorkUnit(campaign, myClaim.workUnitId);
       }
       const openUnit = snapshot.workUnits.find((unit) => unit.status === "open");
@@ -788,16 +824,16 @@ function AppContent() {
       const actionId = `${campaign.campaignId}:${openUnit.workUnitId}`;
       setActionJobId(actionId);
       try {
-        pushAutoPulse(`Auto Worker claiming ${openUnit.title}`, "info");
+        pushAutoPulse(`Claiming ${openUnit.title}`, "info");
         await p2p.claimCampaignWorkUnit(campaign.campaignId, openUnit.workUnitId);
         await refreshCampaignSnapshot(campaign.campaignId);
       } finally {
         setActionJobId(null);
       }
-      pushAutoPulse(`Auto Worker running ${openUnit.title}`, "info");
+      pushAutoPulse(`Running ${openUnit.title}`, "info");
       return autoRunWorkUnit(campaign, openUnit.workUnitId);
     }
-    pushAutoPulse("Auto Worker scanning for open work", "info");
+    pushAutoPulse("Scanning for open work", "info");
     return false;
   }
 
@@ -806,19 +842,19 @@ function AppContent() {
     autoBusyRef.current = true;
     setAutoBusy(true);
     try {
-      if (autoMode.questSeeder && normalizedAutoCounters.campaignsSeeded < 1) {
-        const selection = selectNextGuardianTarget();
-        if (selection) {
-          const seeded = await seedGuardianCampaign(selection.target, selection.nextCursor);
-          if (seeded) return;
-        }
-      }
       if (autoMode.autoVerifier) {
         const verified = await autoVerifyNextContribution();
         if (verified) return;
       }
       if (autoMode.autoWorker) {
-        await autoWorkerNextUnit();
+        const worked = await autoWorkerNextUnit();
+        if (worked) return;
+      }
+      if (autoMode.questSeeder) {
+        const selection = selectNextGuardianTarget();
+        if (selection) {
+          await seedGuardianCampaign(selection.target, selection.nextCursor);
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -830,359 +866,11 @@ function AppContent() {
     }
   }
 
-  async function createAudit(event: FormEvent) {
-    event.preventDefault();
-    setFormError(null);
-
-    const credits = Number(compensation);
-    if (!Number.isFinite(credits) || credits <= 0) {
-      setFormError("Enter an ATP Credits budget greater than zero.");
-      return;
-    }
-    if (!isTauriRuntime()) {
-      setFormError("Open the native CYPHES app to create a signed ATP request.");
-      return;
-    }
-    if (nodeStatus !== "online" || !agentId) {
-      setFormError("The local node is not ready yet.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const inspected = await inspectRepository(repositoryUrl);
-      const { repository } = inspected;
-      const job = await p2p.createAudit(
-        repository,
-        credits.toString(),
-        inspected.scope,
-        auditBrief,
-        attachmentText,
-        customSkillText,
-      );
-      setRepositoryUrl("");
-      setAuditBrief("");
-      setAttachmentText("");
-      setCustomSkillText("");
-      setNotice(
-        peerCount > 0
-          ? `Campaign and ATP request signed, committed, and sent to ${peerCount} ${peerCount === 1 ? "peer" : "peers"}.`
-          : `Campaign and ATP request signed locally. Peer delivery is queued until discovery finds another node.`,
-      );
-      return job;
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleOffer(job: AuditJob) {
-    setActionJobId(job.id);
-    try {
-      await p2p.offerAudit(job.id);
-      setNotice(`Signed worker offer sent for ${job.repository.fullName}.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  async function handleAcceptOffer(job: AuditJob) {
-    setActionJobId(job.id);
-    try {
-      await p2p.acceptOffer(job.id);
-      setNotice(`Worker selected for ${job.repository.fullName}.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  async function handleConnect(event: FormEvent) {
-    event.preventDefault();
-    if (!peerAddress.trim()) return;
-    setConnecting(true);
-    try {
-      await p2p.connectPeer(peerAddress.trim());
-      setNotice("Dialing the supplied libp2p address.");
-      setPeerAddress("");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setConnecting(false);
-    }
-  }
-
-  async function handleRoute(job: AuditJob) {
-    setActionJobId(job.id);
-    try {
-      await p2p.routeAudit(job.id);
-      setNotice("Requester-signed repository and artifact leases sent to the worker.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  async function handleRunAcceptedAuditSkill(job: AuditJob, automatic = false) {
-    setActionJobId(job.id);
-    try {
-      if (!runtimeModel) {
-        throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
-      }
-      pushCockpitEvent("Work order entered running state");
-      const contributions = await p2p.runAcceptedAuditPipeline(
-        job.id,
-        runtimeProvider,
-        runtimeModel,
-      );
-      const lastContribution = contributions[contributions.length - 1];
-      pushCockpitEvent("Queued signed receipts for requester", "success");
-      setNotice(
-        `${automatic ? "Accepted work started automatically. " : ""}${runtimeModel} signed ${contributions.length} v0.4 audit passes${lastContribution ? ` through ${lastContribution.receiptHash.slice(0, 19)}...` : "."}`,
-      );
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
   async function refreshCampaignSnapshot(campaignId: string) {
     const snapshot = await p2p.getCampaignSnapshot(campaignId);
     setCampaignSnapshots((current) => ({ ...current, [campaignId]: snapshot }));
     return snapshot;
   }
-
-  async function handleRunAuditPipeline(campaign: ProtocolAuditCampaign) {
-    setActionJobId(campaign.campaignId);
-    try {
-      if (!runtimeModel) {
-        throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
-      }
-      pushCockpitEvent("Pipeline entered running state");
-      const contributions = await p2p.runCampaignAuditPipeline(
-        campaign.campaignId,
-        runtimeProvider,
-        runtimeModel,
-      );
-      await refreshCampaignSnapshot(campaign.campaignId);
-      pushCockpitEvent("Signed pipeline contribution bundle", "success");
-      setNotice(
-        `${runtimeModel} produced ${contributions.length} signed v0.4 audit passes.`,
-      );
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  async function handleClaimWorkUnit(campaign: ProtocolAuditCampaign, workUnitId?: string) {
-    const actionId = workUnitId ? `${campaign.campaignId}:${workUnitId}` : campaign.campaignId;
-    setActionJobId(actionId);
-    try {
-      const snapshot =
-        campaignSnapshots[campaign.campaignId] ||
-        (await refreshCampaignSnapshot(campaign.campaignId));
-      const unit = workUnitId
-        ? snapshot.workUnits.find((item) => item.workUnitId === workUnitId)
-        : snapshot.workUnits.find((item) => item.status === "open");
-      if (!unit) throw new Error("No open work unit is claimable.");
-      if (unit.status !== "open") throw new Error(`${unit.title} is not open for claim.`);
-      const claim = await p2p.claimCampaignWorkUnit(campaign.campaignId, unit.workUnitId);
-      await refreshCampaignSnapshot(campaign.campaignId);
-      pushCockpitEvent(`${unit.title} claimed`);
-      setNotice(`Claimed ${unit.title}. Claim ${claim.claimId.slice(0, 22)}... sent to requester.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  async function handleRunClaimedWorkUnit(campaign: ProtocolAuditCampaign, workUnitId?: string) {
-    const actionId = workUnitId ? `${campaign.campaignId}:${workUnitId}` : campaign.campaignId;
-    setActionJobId(actionId);
-    try {
-      if (!runtimeModel) {
-        throw new Error(`Start ${runtimeProviderLabel}, load a local model, then select it.`);
-      }
-      const snapshot =
-        campaignSnapshots[campaign.campaignId] ||
-        (await refreshCampaignSnapshot(campaign.campaignId));
-      const claim = snapshot.claims.find(
-        (item) =>
-          item.workerAgentId === agentId &&
-          item.status === "claimed" &&
-          (!workUnitId || item.workUnitId === workUnitId),
-      );
-      if (!claim) throw new Error("Claim a work unit before running it.");
-      setRunningWorkUnitId(claim.workUnitId);
-      pushCockpitEvent("Claimed unit moved to running");
-      const contribution = await p2p.runClaimedWorkUnit(
-        campaign.campaignId,
-        claim.workUnitId,
-        runtimeProvider,
-        runtimeModel,
-      );
-      await refreshCampaignSnapshot(campaign.campaignId);
-      pushCockpitEvent("Signed contribution stored locally", "success");
-      pushCockpitEvent("Broadcasted receipt to requester", "success");
-      setNotice(`${runtimeModel} produced signed work for ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... sent.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setRunningWorkUnitId(null);
-      setActionJobId(null);
-    }
-  }
-
-  async function handleVerifyQueue(campaign: ProtocolAuditCampaign) {
-    setActionJobId(campaign.campaignId);
-    try {
-      const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
-      const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
-      const pending = snapshot.contributions.filter(
-        (item) => !verifiedIds.has(item.contributionId),
-      );
-      if (pending.length === 0) throw new Error("No unverified contribution is available.");
-      const issued = [];
-      for (const contribution of pending) {
-        issued.push(...(await p2p.verifyCampaignContribution(contribution.contributionId)));
-      }
-      await refreshCampaignSnapshot(campaign.campaignId);
-      const total = issued.reduce((sum, item) => sum + item.total, 0);
-      pushCockpitEvent(`Receipt verified; ATP earned +${total}`, "success");
-      setNotice(`${pending.length} contribution${pending.length === 1 ? "" : "s"} accepted; ${total} ATP Credits issued from signed receipts.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  async function handleExportCampaign(campaign: ProtocolAuditCampaign) {
-    setActionJobId(campaign.campaignId);
-    try {
-      const bundle = await p2p.exportCampaignReport(campaign.campaignId);
-      setNotice(`Final audit report bundle exported to ${bundle.bundlePath}.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  async function handleApprove(job: AuditJob) {
-    setActionJobId(job.id);
-    try {
-      await p2p.approveResult(job.id);
-      setNotice("Verified result approved; settlement sent for worker attestation.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      setActionJobId(null);
-    }
-  }
-
-  function jobAction(job: AuditJob, isMine: boolean) {
-    if (!job.repository.commitSha) {
-      return <div className="job-outcome">Legacy unpinned request; repost required</div>;
-    }
-    if (job.status === "discovered" && !isMine) {
-      return (
-        <button
-          disabled={actionJobId === job.id}
-          onClick={() => void handleOffer(job)}
-          type="button"
-        >
-          {actionJobId === job.id ? "Signing offer" : "Offer to audit"}
-          <ArrowRight size={14} />
-        </button>
-      );
-    }
-    if (job.status === "negotiating" && isMine) {
-      return (
-        <button
-          disabled={actionJobId === job.id}
-          onClick={() => void handleAcceptOffer(job)}
-          type="button"
-        >
-          {actionJobId === job.id ? "Signing selection" : "Select worker"}
-          <ArrowRight size={14} />
-        </button>
-      );
-    }
-    if (job.status === "negotiated" && isMine) {
-      return (
-        <button
-          disabled={actionJobId === job.id}
-          onClick={() => void handleRoute(job)}
-          type="button"
-        >
-          {actionJobId === job.id ? "Signing lease" : "Issue context lease"}
-          <ArrowRight size={14} />
-        </button>
-      );
-    }
-    if (job.status === "routed" && !isMine && !job.resultHash) {
-      return (
-        <button
-          disabled={actionJobId === job.id || !runtimeModel}
-          onClick={() => void handleRunAcceptedAuditSkill(job)}
-          type="button"
-        >
-          {actionJobId === job.id ? "Running pipeline" : runtimeModel ? "Run audit pipeline" : "Select local model"}
-          <ArrowRight size={14} />
-        </button>
-      );
-    }
-    if (job.status === "routed" && isMine && job.resultHash) {
-      return (
-        <button
-          disabled={actionJobId === job.id}
-          onClick={() => void handleApprove(job)}
-          type="button"
-        >
-          {actionJobId === job.id ? "Signing approval" : "Approve verified result"}
-          <ArrowRight size={14} />
-        </button>
-      );
-    }
-
-    let outcome = deliveryLabel(job);
-    if (job.status === "negotiating") {
-      outcome = isMine
-        ? `Offer from ${truncatePeerId(job.workerAgentId || "")}`
-        : "Offer committed, awaiting requester";
-    } else if (job.status === "negotiated") {
-      outcome = isMine
-        ? `Worker selected: ${truncatePeerId(job.workerAgentId || "")}`
-        : "Selected; awaiting requester lease";
-    } else if (job.status === "routed") {
-      outcome = job.resultHash
-        ? isMine
-          ? "Signed result verified"
-          : "Result sent; awaiting approval"
-        : isMine
-          ? "Lease active; awaiting worker result"
-          : "Requester lease verified";
-    } else if (job.status === "settled") {
-      outcome = "Requester approved; awaiting worker receipt";
-    } else if (job.status === "attested") {
-      outcome = job.bundlePath
-        ? `Receipt: ${job.bundlePath}`
-        : `Proof of Cognition: ${job.receiptHash?.slice(0, 19) || "committed"}`;
-    }
-    return <div className="job-outcome">{outcome}</div>;
-  }
-
-  const showLegacyProtocolMechanics = false;
 
   return (
     <div className="app-shell">
@@ -1267,96 +955,15 @@ function AppContent() {
           </div>
         </section>
 
-        <section className={`genesis-auto-panel ${autoModeArmed ? "armed" : ""}`}>
+        <section className="genesis-auto-panel armed">
           <div className="genesis-auto-header">
             <div>
-              <span>Genesis Auto Mode</span>
-              <h2>{autoModeArmed ? "Network alive" : "Guardian standby"}</h2>
+              <span>Autonomous Guardian Loop</span>
+              <h2>{autoBusy ? "Intelligence in motion" : "Network alive"}</h2>
             </div>
             <div className="genesis-status">
               <Activity size={15} />
-              <strong>{autoBusy ? "EXECUTING" : autoModeArmed ? "ARMED" : "MANUAL"}</strong>
-            </div>
-          </div>
-
-          <div className="auto-switch-grid" aria-label="Genesis auto mode switches">
-            <button
-              className={autoMode.autoWorker ? "active" : ""}
-              onClick={() => updateAutoModeSetting("autoWorker", !autoMode.autoWorker)}
-              type="button"
-            >
-              <Power size={14} />
-              <span>Auto Worker</span>
-              <strong>{autoMode.autoWorker ? "on" : "off"}</strong>
-            </button>
-            <button
-              className={autoMode.autoVerifier ? "active" : ""}
-              onClick={() => updateAutoModeSetting("autoVerifier", !autoMode.autoVerifier)}
-              type="button"
-            >
-              <ShieldCheck size={14} />
-              <span>Auto Verifier</span>
-              <strong>{autoMode.autoVerifier ? "on" : "off"}</strong>
-            </button>
-            <button
-              className={autoMode.questSeeder ? "active" : ""}
-              onClick={() => updateAutoModeSetting("questSeeder", !autoMode.questSeeder)}
-              type="button"
-            >
-              <Target size={14} />
-              <span>Quest Seeder</span>
-              <strong>{autoMode.questSeeder ? "on" : "off"}</strong>
-            </button>
-          </div>
-
-          <div className="auto-config-grid">
-            <label>
-              <span>Daily work cap</span>
-              <input
-                min="1"
-                onChange={(event) =>
-                  updateAutoModeSetting(
-                    "maxDailyWorkUnits",
-                    Math.max(1, Number(event.currentTarget.value) || 1),
-                  )
-                }
-                type="number"
-                value={autoMode.maxDailyWorkUnits}
-              />
-            </label>
-            <label>
-              <span>Max runtime min</span>
-              <input
-                min="1"
-                onChange={(event) =>
-                  updateAutoModeSetting(
-                    "maxRuntimeMinutes",
-                    Math.max(1, Number(event.currentTarget.value) || 1),
-                  )
-                }
-                type="number"
-                value={autoMode.maxRuntimeMinutes}
-              />
-            </label>
-            <label>
-              <span>Model policy</span>
-              <select
-                onChange={(event) =>
-                  updateAutoModeSetting(
-                    "modelRequirement",
-                    event.currentTarget.value as GenesisAutoModeSettings["modelRequirement"],
-                  )
-                }
-                value={autoMode.modelRequirement}
-              >
-                <option value="local-model-required">Local model required</option>
-                <option value="any-local-model">Any selected local model</option>
-              </select>
-            </label>
-            <div className="target-index-pill">
-              <Cpu size={14} />
-              <span>Target index</span>
-              <strong>{guardianTargets.length} DeFi quests</strong>
+              <strong>{autoBusy ? "EXECUTING" : "ALWAYS ON"}</strong>
             </div>
           </div>
 
@@ -1382,8 +989,8 @@ function AppContent() {
               <strong>{localCognitionRate.toFixed(1)}</strong>
             </div>
             <div>
-              <small>Today</small>
-              <strong>{normalizedAutoCounters.workUnits}/{autoMode.maxDailyWorkUnits}</strong>
+              <small>Observed</small>
+              <strong>{normalizedAutoCounters.targetsObserved}</strong>
             </div>
           </div>
 
@@ -1391,34 +998,10 @@ function AppContent() {
             <Zap size={14} />
             <span>{autoPulse}</span>
             <code>
-              {normalizedAutoCounters.campaignsSeeded} seeded / {normalizedAutoCounters.verifications} verified
+              {normalizedAutoCounters.campaignsSeeded} seeded / {normalizedAutoCounters.verifications} verified / {normalizedAutoCounters.unchangedTargets} unchanged
             </code>
           </div>
         </section>
-
-        <details className="manual-connect" open={!networkInfo?.relay_configured}>
-          <summary>Manual peer connection</summary>
-          <form className="connect-strip" onSubmit={(event) => void handleConnect(event)}>
-            <Link size={15} />
-            <label htmlFor="peer-address">Peer multiaddress</label>
-            <input
-              id="peer-address"
-              onChange={(event) => setPeerAddress(event.currentTarget.value)}
-              placeholder="Optional multiaddress fallback"
-              spellCheck={false}
-              value={peerAddress}
-            />
-            <button disabled={connecting || !peerAddress.trim()} type="submit">
-              {connecting ? "Dialing" : "Connect"}
-            </button>
-          </form>
-          {relayAddress ? (
-            <div className="share-address">
-              <span>Your relay address</span>
-              <code>{relayAddress}</code>
-            </div>
-          ) : null}
-        </details>
 
         {nodeError ? <div className="error-banner">Node error: {nodeError}</div> : null}
         {!isTauriRuntime() ? (
@@ -1427,401 +1010,103 @@ function AppContent() {
           </div>
         ) : null}
 
-        {showLegacyProtocolMechanics ? (
-        <div className="workspace">
-          <section className="panel compose-panel">
-            <div className="section-heading">
-              <span>01</span>
-              <div>
-                <h2>Create protocol audit campaign</h2>
-                <p>Public GitHub repository, pinned commit, signed ATP request.</p>
-              </div>
-            </div>
-
-            <form onSubmit={(event) => void createAudit(event)}>
-              <label htmlFor="repository-url">Repository URL</label>
-              <div className="input-shell">
-                <Github size={18} />
-                <input
-                  id="repository-url"
-                  onChange={(event) => setRepositoryUrl(event.currentTarget.value)}
-                  placeholder="https://github.com/owner/repository"
-                  spellCheck={false}
-                  type="url"
-                  value={repositoryUrl}
-                />
-              </div>
-
-              <label htmlFor="compensation">PAY with ATP</label>
-              <div className="compensation-row">
-                <div className="input-shell">
-                  <input
-                    id="compensation"
-                    min="1"
-                    onChange={(event) => setCompensation(event.currentTarget.value)}
-                    step="1"
-                    type="number"
-                    value={compensation}
-                  />
-                  <span>ATP Credits</span>
-                </div>
-                <p>Receipt-backed accounting only. No ERC-20, escrow, or external payout is represented in this build.</p>
-              </div>
-
-              <label htmlFor="audit-brief">Audit brief</label>
-              <div className="input-shell textarea-shell">
-                <textarea
-                  id="audit-brief"
-                  onChange={(event) => setAuditBrief(event.currentTarget.value)}
-                  placeholder="Requester guidance, scope notes, program rules, threat model, or concerns."
-                  spellCheck={false}
-                  value={auditBrief}
-                />
-              </div>
-
-              <label htmlFor="attachments">Attachments / protocol docs</label>
-              <div className="input-shell textarea-shell">
-                <textarea
-                  id="attachments"
-                  onChange={(event) => setAttachmentText(event.currentTarget.value)}
-                  placeholder="Paste reward policy, protocol docs, or PDF excerpts. CYPHES hashes this text into the campaign."
-                  spellCheck={false}
-                  value={attachmentText}
-                />
-              </div>
-
-              <details className="advanced-skill">
-                <summary>Advanced: custom SKILL.md overlay</summary>
-                <div className="input-shell textarea-shell">
-                  <textarea
-                    onChange={(event) => setCustomSkillText(event.currentTarget.value)}
-                    placeholder="Paste an optional SKILL.md overlay. CYPHES keeps the base skill pack and records this hash in receipts."
-                    spellCheck={false}
-                    value={customSkillText}
-                  />
-                </div>
-              </details>
-
-              {formError ? <div className="form-error">{formError}</div> : null}
-
-              <button
-                className="primary-action"
-                disabled={
-                  submitting ||
-                  !repositoryUrl.trim() ||
-                  nodeStatus !== "online" ||
-                  !isTauriRuntime()
-                }
-                type="submit"
-              >
-                {submitting ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}
-                {submitting ? "Checking repository" : "Sign campaign"}
-                {!submitting ? <ArrowRight size={16} /> : null}
-              </button>
-            </form>
-          </section>
-
-          <section className="panel jobs-panel">
-            <div className="section-heading">
-              <span>02</span>
-              <div>
-                <h2>ATP transactions</h2>
-              </div>
-            </div>
-
-            <div className="jobs-list">
-              {sortedJobs.length === 0 ? (
-                <div className="empty-state">
-                  <Github size={24} />
-                  <strong>No committed audit requests</strong>
-                  <span>Post a repository or wait for signed work from another CYPHES node.</span>
-                </div>
-              ) : (
-                sortedJobs.map((job) => {
-                  const isMine = job.requesterAgentId === agentId;
-                  return (
-                    <article className="job-card" key={job.id}>
-                      <div className="job-topline">
-                        <span className={`job-status ${job.status}`}>{job.status}</span>
-                        <span>{isMine ? "Requested by you" : `From ${truncatePeerId(job.requesterAgentId)}`}</span>
-                      </div>
-                      <h3>{job.repository.fullName}</h3>
-                      {job.repository.description ? <p>{job.repository.description}</p> : null}
-                      <div className="repo-meta">
-                        <span>{job.repository.language || "Language unknown"}</span>
-                        <span>
-                          {job.repository.defaultBranch}
-                          {job.repository.commitSha
-                            ? `@${job.repository.commitSha.slice(0, 7)}`
-                            : ""}
-                        </span>
-                        <span>{job.repository.stars.toLocaleString()} stars</span>
-                        {job.receiptHash ? (
-                          <span className="receipt-chip">
-                            <ReceiptText size={11} />
-                            Proof of Cognition
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="job-footer">
-                        <div>
-                          <span>Proposed</span>
-                          <strong>{job.compensation} {job.currency}</strong>
-                        </div>
-                        {jobAction(job, isMine)}
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
-          </section>
-        </div>
-        ) : null}
-
-        <section className="panel labor-panel">
+        <section className="panel intelligence-panel">
           <div className="section-heading">
             <span>Live</span>
             <div>
-              <h2>Work Orders</h2>
+              <h2>Intelligence Feed</h2>
+              <p>Autonomous protocol coverage, signed receipts, and local-model work.</p>
             </div>
           </div>
 
-          <div className="campaign-list">
-            {campaigns.length === 0 ? (
-              <div className="empty-state compact">
-                <ShieldCheck size={24} />
-                <strong>No protocol campaigns yet</strong>
-                <span>Create a campaign from campaign.html; this app receives signed work orders.</span>
+          {liveCampaign ? (
+            <article className="intelligence-card">
+              <div className="intelligence-topline">
+                <span>{liveCampaign.status}</span>
+                <code>{liveCampaign.repository.fullName}</code>
               </div>
-            ) : (
-              campaigns.map((campaign) => {
-                const snapshot = campaignSnapshots[campaign.campaignId];
-                const progress = runtimeProgress[campaign.campaignId];
-                const workUnits = snapshot?.workUnits || [];
-                const contributions = snapshot?.contributions.length || 0;
-                const accepted = snapshot?.verifications.filter((item) => item.decision === "accepted").length || 0;
-                const unverified = contributions - (snapshot?.verifications.length || 0);
-                const isMine = campaign.requesterAgentId === agentId;
-                const claimedCount = snapshot?.claims.filter((item) => item.status === "claimed").length || 0;
-                const contributionWorkUnitById = new Map(
-                  (snapshot?.contributions || []).map((item) => [item.contributionId, item.workUnitId]),
-                );
-                const latestVerificationDecisionByWorkUnit = new Map<string, string>();
-                (snapshot?.verifications || []).forEach((item) => {
-                  const workUnitId = contributionWorkUnitById.get(item.targetContributionId);
-                  if (workUnitId) {
-                    latestVerificationDecisionByWorkUnit.set(workUnitId, item.decision);
-                  }
-                });
-                const isUnitCompleted = (workUnitId: string, status: string) =>
-                  status === "accepted" ||
-                  latestVerificationDecisionByWorkUnit.get(workUnitId) === "accepted";
-                const openUnitCount = workUnits.filter((unit) => unit.status === "open").length;
-                const completedUnitCount = workUnits.filter((unit) =>
-                  isUnitCompleted(unit.workUnitId, unit.status),
-                ).length;
-                const activeUnitCount = workUnits.filter(
-                  (unit) => unit.status !== "open" && !isUnitCompleted(unit.workUnitId, unit.status),
-                ).length;
-                const workUnitSummary = [
-                  `${openUnitCount} open`,
-                  activeUnitCount > 0 ? `${activeUnitCount} active` : null,
-                  completedUnitCount > 0 ? `${completedUnitCount} completed` : null,
-                ].filter(Boolean).join(" / ");
-                return (
-                  <article className="campaign-card" key={campaign.campaignId}>
-                    <div className="campaign-main">
-                      <div className="job-topline">
-                        <span className="job-status routed">{campaign.status}</span>
-                        <span>{campaign.repository.fullName}</span>
-                      </div>
-                      <h3>{campaign.protocolName}</h3>
-                      <div className="campaign-target">
-                        <span>{campaignFocus(campaign)}</span>
-                        <code>{shortCommit(campaign.repository.commitSha)}</code>
-                      </div>
-                      <div className="repo-meta">
-                        <span>{workUnits.length} work units</span>
-                        <span>{claimedCount} claimed</span>
-                        <span>{contributions} contributions</span>
-                        <span>{accepted} accepted</span>
-                        <span>
-                          {contributions === 0
-                            ? "no local-model audit yet"
-                            : unverified > 0
-                              ? `${unverified} unverified`
-                              : "verified queue clear"}
-                        </span>
-                      </div>
-                      {progress ? (
-                        <div className="campaign-progress">
-                          <div>
-                            <span>{progress.phase}</span>
-                            <strong>{progress.progress}%</strong>
-                          </div>
-                          <div className="progress-track">
-                            <span style={{ width: `${progress.progress}%` }} />
-                          </div>
-                          <small>{progress.tokensPerSecond ? `${progress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="campaign-actions">
-                      {isMine ? (
-                        <>
-                          <button
-                            disabled={actionJobId === campaign.campaignId || !runtimeModel}
-                            onClick={() => void handleRunAuditPipeline(campaign)}
-                            type="button"
-                          >
-                            Run local pipeline
-                            <ArrowRight size={14} />
-                          </button>
-                          <button
-                            disabled={actionJobId === campaign.campaignId}
-                            onClick={() => void handleVerifyQueue(campaign)}
-                            type="button"
-                          >
-                            {unverified > 0 ? `Verify ${unverified}` : "Verify queue"}
-                            <ShieldCheck size={14} />
-                          </button>
-                          <button
-                            disabled={actionJobId === campaign.campaignId || contributions === 0}
-                            onClick={() => void handleExportCampaign(campaign)}
-                            type="button"
-                            title={
-                              contributions === 0
-                                ? "Run or receive signed work before exporting a report bundle."
-                                : undefined
-                            }
-                          >
-                            Export report
-                            <FileArchive size={14} />
-                          </button>
-                        </>
-                      ) : (
-                        <div className="job-outcome">Claim and run individual work units.</div>
-                      )}
-                    </div>
-                    <details className="work-unit-dropdown">
-                        <summary>
-                          <span>Select work unit</span>
-                          <strong>
-                            {isMine && unverified > 0
-                              ? `${unverified} needs verification`
-                              : workUnitSummary}
-                          </strong>
-                        </summary>
-                        <div className="work-unit-list">
-                        {workUnits.map((unit) => {
-                          const unitContributions = snapshot?.contributions.filter(
-                            (item) => item.workUnitId === unit.workUnitId,
-                          ) || [];
-                          const contributionIds = new Set(
-                            unitContributions.map((item) => item.contributionId),
-                          );
-                          const unitVerifications = snapshot?.verifications.filter((item) =>
-                            contributionIds.has(item.targetContributionId),
-                          ) || [];
-                          const myClaim = snapshot?.claims.find(
-                            (item) =>
-                              item.workUnitId === unit.workUnitId &&
-                              item.workerAgentId === agentId &&
-                              item.status === "claimed",
-                          );
-                          const myContribution = unitContributions.find(
-                            (item) => item.workerAgentId === agentId,
-                          );
-                          const latestVerification = unitVerifications[unitVerifications.length - 1];
-                          const actionId = `${campaign.campaignId}:${unit.workUnitId}`;
-                          const isRunningUnit = runningWorkUnitId === unit.workUnitId || actionJobId === actionId;
-                          const unitStatusLabel = isRunningUnit
-                            ? "running"
-                            : isUnitCompleted(unit.workUnitId, unit.status)
-                            ? "completed"
-                            : unit.status;
-                          const verifierState = latestVerification?.decision
-                            ? latestVerification.decision === "accepted"
-                              ? "completed"
-                              : latestVerification.decision
-                            : unitContributions.length > 0
-                              ? "awaiting verifier"
-                              : unit.status;
-                          const claimedBy = unit.claimedByAgentId
-                            ? truncatePeerId(unit.claimedByAgentId)
-                            : "open";
-                          return (
-                            <div className="work-unit-row" key={unit.workUnitId}>
-                              <div className="work-unit-main">
-                                <strong>{unit.title}</strong>
-                                <span>{unit.kind}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Status</small>
-                                <span className={`unit-pill ${unitStatusLabel.replace(/\s+/g, "_")}`}>{unitStatusLabel}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Claimed by</small>
-                                <span>{claimedBy}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Contrib</small>
-                                <span>{unitContributions.length}</span>
-                              </div>
-                              <div className="work-unit-cell">
-                                <small>Verifier</small>
-                                <span>{verifierState}</span>
-                              </div>
-                              <div className="work-unit-action">
-                                {isMine ? unitContributions.length > unitVerifications.length ? (
-                                  <button
-                                    className="needs-action-button"
-                                    disabled={actionJobId === campaign.campaignId}
-                                    onClick={() => void handleVerifyQueue(campaign)}
-                                    type="button"
-                                  >
-                                    Verify
-                                  </button>
-                                ) : (
-                                  <span>{unitContributions.length > 0 ? "completed" : "awaiting node"}</span>
-                                ) : unit.status === "open" ? (
-                                  <button
-                                    disabled={actionJobId === actionId}
-                                    onClick={() => void handleClaimWorkUnit(campaign, unit.workUnitId)}
-                                    type="button"
-                                  >
-                                    Claim
-                                  </button>
-                                ) : myContribution ? (
-                                  <span>
-                                    {latestVerification
-                                      ? verifierState === "completed"
-                                        ? "Completed · receipt verified"
-                                        : verifierState
-                                      : "Submitted · awaiting requester"}
-                                  </span>
-                                ) : myClaim ? (
-                                  <button
-                                    disabled={actionJobId === actionId || !runtimeModel}
-                                    onClick={() => void handleRunClaimedWorkUnit(campaign, unit.workUnitId)}
-                                    type="button"
-                                  >
-                                    {isRunningUnit ? "Running" : runtimeModel ? "Run" : "Model"}
-                                  </button>
-                                ) : (
-                                  <span>{unit.claimedByAgentId ? "claimed" : "locked"}</span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        </div>
-                      </details>
-                  </article>
-                );
-              })
-            )}
+              <div className="intelligence-main">
+                <div>
+                  <h3>{liveCampaign.protocolName}</h3>
+                  <p>{liveTarget?.auditBrief || "CYPHES is coordinating signed audit work for this pinned public repository."}</p>
+                </div>
+                <div className="target-radar">
+                  <Target size={18} />
+                  <span>{liveTarget?.category || "protocol"}</span>
+                  <strong>{liveTarget ? `rank ${liveTarget.tvlRiskRank}` : "indexed"}</strong>
+                </div>
+              </div>
+              <div className="campaign-target">
+                <span>{campaignFocus(liveCampaign)}</span>
+                <code>{shortCommit(liveCampaign.repository.commitSha)}</code>
+                {liveTarget ? <span>{liveTarget.chains.slice(0, 4).join(" / ")}</span> : null}
+              </div>
+              <div className="intelligence-grid">
+                <div>
+                  <small>Work units</small>
+                  <strong>{liveSnapshot?.workUnits.length || 0}</strong>
+                </div>
+                <div>
+                  <small>Submitted</small>
+                  <strong>{submittedWorkUnits}</strong>
+                </div>
+                <div>
+                  <small>Accepted</small>
+                  <strong>{liveAccepted || completedWorkUnits}</strong>
+                </div>
+                <div>
+                  <small>Findings</small>
+                  <strong>{liveFindings}</strong>
+                </div>
+                <div>
+                  <small>Priority</small>
+                  <strong>{liveTarget?.priorityScore || "n/a"}</strong>
+                </div>
+                <div>
+                  <small>Criticality</small>
+                  <strong>{liveTarget ? `${liveTarget.contractCriticality}/6` : "n/a"}</strong>
+                </div>
+              </div>
+              {latestRuntimeProgress?.campaignId === liveCampaign.campaignId ? (
+                <div className="campaign-progress">
+                  <div>
+                    <span>{latestRuntimeProgress.phase}</span>
+                    <strong>{latestRuntimeProgress.progress}%</strong>
+                  </div>
+                  <div className="progress-track">
+                    <span style={{ width: `${latestRuntimeProgress.progress}%` }} />
+                  </div>
+                  <small>{latestRuntimeProgress.tokensPerSecond ? `${latestRuntimeProgress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
+                </div>
+              ) : null}
+            </article>
+          ) : (
+            <div className="empty-state compact">
+              <ShieldCheck size={24} />
+              <strong>Guardian loop warming up</strong>
+              <span>CYPHES will resolve the next indexed target, pin the commit, and create work if it has not been covered yet.</span>
+            </div>
+          )}
+
+          <div className="watch-grid">
+            <div>
+              <Cpu size={14} />
+              <small>Guardian Index</small>
+              <strong>{guardianTargets.length} targets</strong>
+              <span>Structured public DeFi coverage seed</span>
+            </div>
+            <div>
+              <Target size={14} />
+              <small>Next watch</small>
+              <strong>{nextWatchTarget?.protocolName || "loading"}</strong>
+              <span>{nextWatchTarget?.contractPaths[0] || "repository root"}</span>
+            </div>
+            <div>
+              <ShieldCheck size={14} />
+              <small>Last observed</small>
+              <strong>{watchObservation?.lastObservedCommit ? shortCommit(watchObservation.lastObservedCommit) : "none"}</strong>
+              <span>{watchObservation?.lastObservedAt ? new Date(watchObservation.lastObservedAt).toLocaleTimeString() : "waiting for first scan"}</span>
+            </div>
           </div>
         </section>
 

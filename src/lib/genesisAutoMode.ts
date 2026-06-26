@@ -13,16 +13,33 @@ export interface GenesisAutoCounters {
   verifications: number;
   campaignsSeeded: number;
   targetCursor: number;
+  targetsObserved: number;
+  unchangedTargets: number;
+}
+
+export interface GuardianTargetObservation {
+  targetId: string;
+  lastObservedCommit?: string;
+  lastObservedAt?: string;
+  lastSeededCommit?: string;
+  lastSeededAt?: string;
+  unchangedCount: number;
+}
+
+export interface GuardianObservationLedger {
+  version: string;
+  targets: Record<string, GuardianTargetObservation>;
 }
 
 const SETTINGS_KEY = "cyphes.genesis-auto-mode.settings.v1";
 const COUNTERS_KEY = "cyphes.genesis-auto-mode.counters.v1";
+const LEDGER_KEY = "cyphes.guardian-observation-ledger.v1";
 
 export const DEFAULT_GENESIS_AUTO_MODE: GenesisAutoModeSettings = {
-  autoWorker: false,
-  autoVerifier: false,
-  questSeeder: false,
-  maxDailyWorkUnits: 3,
+  autoWorker: true,
+  autoVerifier: true,
+  questSeeder: true,
+  maxDailyWorkUnits: 24,
   maxRuntimeMinutes: 8,
   modelRequirement: "local-model-required",
 };
@@ -38,6 +55,8 @@ export function defaultGenesisAutoCounters(): GenesisAutoCounters {
     verifications: 0,
     campaignsSeeded: 0,
     targetCursor: 0,
+    targetsObserved: 0,
+    unchangedTargets: 0,
   };
 }
 
@@ -51,11 +70,27 @@ function readJson<T>(key: string, fallback: T): T {
 }
 
 export function readGenesisAutoModeSettings() {
-  return readJson(SETTINGS_KEY, DEFAULT_GENESIS_AUTO_MODE);
+  const stored = readJson(SETTINGS_KEY, DEFAULT_GENESIS_AUTO_MODE);
+  return {
+    ...stored,
+    autoWorker: true,
+    autoVerifier: true,
+    questSeeder: true,
+    maxDailyWorkUnits: Math.max(1, stored.maxDailyWorkUnits || DEFAULT_GENESIS_AUTO_MODE.maxDailyWorkUnits),
+    maxRuntimeMinutes: Math.max(1, stored.maxRuntimeMinutes || DEFAULT_GENESIS_AUTO_MODE.maxRuntimeMinutes),
+  };
 }
 
 export function writeGenesisAutoModeSettings(settings: GenesisAutoModeSettings) {
-  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  window.localStorage.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      ...settings,
+      autoWorker: true,
+      autoVerifier: true,
+      questSeeder: true,
+    }),
+  );
 }
 
 export function normalizeGenesisAutoCounters(counters: GenesisAutoCounters) {
@@ -75,4 +110,53 @@ export function readGenesisAutoCounters() {
 
 export function writeGenesisAutoCounters(counters: GenesisAutoCounters) {
   window.localStorage.setItem(COUNTERS_KEY, JSON.stringify(counters));
+}
+
+export function defaultGuardianObservationLedger(): GuardianObservationLedger {
+  return {
+    version: "0.5.5",
+    targets: {},
+  };
+}
+
+export function readGuardianObservationLedger() {
+  return readJson(LEDGER_KEY, defaultGuardianObservationLedger());
+}
+
+export function writeGuardianObservationLedger(ledger: GuardianObservationLedger) {
+  window.localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger));
+}
+
+export function recordGuardianObservation(
+  ledger: GuardianObservationLedger,
+  targetId: string,
+  commitSha: string,
+  seeded: boolean,
+) {
+  const current = ledger.targets[targetId] || {
+    targetId,
+    unchangedCount: 0,
+  };
+  const unchanged = current.lastObservedCommit === commitSha && !seeded;
+  const next: GuardianTargetObservation = {
+    ...current,
+    targetId,
+    lastObservedCommit: commitSha,
+    lastObservedAt: new Date().toISOString(),
+    unchangedCount: unchanged ? current.unchangedCount + 1 : current.unchangedCount,
+  };
+  if (seeded) {
+    next.lastSeededCommit = commitSha;
+    next.lastSeededAt = next.lastObservedAt;
+  }
+  const updated = {
+    ...ledger,
+    version: "0.5.5",
+    targets: {
+      ...ledger.targets,
+      [targetId]: next,
+    },
+  };
+  writeGuardianObservationLedger(updated);
+  return updated;
 }

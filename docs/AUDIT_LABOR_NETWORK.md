@@ -62,9 +62,9 @@ and send it back to the requester. Future adapters can add runnable PoC
 attempts, invariant hypothesis testing, duplicate/known-issue checks, or
 protocol-specific checklist items.
 
-## Genesis Auto Mode
+## Autonomous Guardian Loop
 
-v0.5.4 adds Genesis Auto Mode for 24/7 human-supervised participation:
+v0.5.5 makes the main CYPHES node autonomous by default:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
   model, enforces the configured runtime limit, signs the contribution, and
@@ -72,12 +72,15 @@ v0.5.4 adds Genesis Auto Mode for 24/7 human-supervised participation:
 - **Auto Verifier** accepts pending signed contributions only for campaigns
   this node requested, then returns signed verification and ATP Credit receipts
   to the contributing worker.
-- **Quest Seeder** creates one public DeFi guardian campaign per day from the
-  local target index at `protocol/targets/guardian-target-index.json`.
+- **Quest Seeder** watches Guardian Index v2 at
+  `protocol/targets/guardian-target-index.json`, resolves targets to pinned
+  commits, and creates work only when the same target/path/commit is not
+  already active locally.
 
-Genesis Auto Mode does not submit external vulnerability reports, contact
-protocol teams, claim payouts, or move funds. It makes the network feel alive
-while preserving the rule that earned ATP requires accepted verifier receipts.
+The Autonomous Guardian Loop does not submit external vulnerability reports,
+contact protocol teams, claim payouts, or move funds. It makes the network feel
+alive while preserving the rule that earned ATP requires accepted verifier
+receipts.
 
 ## Structured Customization
 
@@ -177,7 +180,7 @@ but it does not integrate with external submission portals or direct protocol
 payout systems yet.
 
 Confirmed findings can later receive bonus allocation or split logic through a
-settlement adapter, but v0.5.4 only records the placeholder. No UI should imply
+settlement adapter, but v0.5.5 only records the placeholder. No UI should imply
 that ATP Credits are redeemable payouts.
 
 ## Final Report Bundle
