@@ -29,6 +29,8 @@ not Apple-notarized yet.
   requester/repository/commit/scope tuple.
 - Makes verification/credit receipt retries idempotent so reconnects resend the
   existing receipt instead of minting duplicate credit events.
+- Pins GitHub pause state inside the cockpit telemetry stream until GitHub
+  reads resume, and tightens the autonomous campaign brief spacing.
 
 ## Verification
 
@@ -47,6 +49,6 @@ Rust tests: 35 passed, 1 intentionally ignored live-GitHub fixture test.
 ## SHA-256
 
 ```text
-9ea2c23917d721141fde799bf487ea067791f4719b59421850fac4ea0c1322a6  CYPHES-v0.5.6-aarch64.dmg
+b1b197ad73b7af1c73fc61feb58701fcd9a0fc7c8e95f06970654e2fd52a6e1d  CYPHES-v0.5.6-aarch64.dmg
 77310d99947549c1eeadd039bc41f2745ce70a53554dceaa74c6baff41f7d804  CYPHES-Partner-v0.5.6-aarch64.dmg
 ```
