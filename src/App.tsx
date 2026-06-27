@@ -87,7 +87,7 @@ interface CockpitEvent {
   id: string;
   label: string;
   at: number;
-  tone?: "info" | "success" | "warn";
+  tone?: "info" | "success" | "warn" | "danger";
 }
 
 const GITHUB_REPOSITORY_URL_ERROR =
@@ -184,6 +184,20 @@ function campaignFocus(campaign: ProtocolAuditCampaign) {
     scopeLine(campaign.scopeText, "Focused file:") ||
     "Full repository"
   );
+}
+
+function compactAuditBrief(brief?: string | null) {
+  const normalized = (brief || "CYPHES is coordinating signed audit work for this pinned public repository.")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentences = normalized.match(/[^.!?]+[.!?]+/g);
+  return sentences ? sentences.slice(0, 2).join(" ").trim() : normalized;
+}
+
+function githubPauseEventLabel(status: GitHubAccessStatus) {
+  const until = status.retryAt ? ` until ${new Date(status.retryAt).toLocaleTimeString()}` : "";
+  const reason = /rate limit/i.test(status.message) ? "rate limit" : status.message.replace(/\s+/g, " ").trim();
+  return `GitHub paused${until}: ${reason}; add token for higher quota`;
 }
 
 function shortCommit(commitSha: string) {
@@ -285,6 +299,7 @@ function AppContent() {
   const lastPhaseRef = useRef("");
   const autoBusyRef = useRef(false);
   const lastAutoPulseRef = useRef("");
+  const lastGitHubPauseRef = useRef("");
 
   const nodeStatus = useCyphesStore((state) => state.nodeStatus);
   const nodeError = useCyphesStore((state) => state.nodeError);
@@ -334,7 +349,6 @@ function AppContent() {
     }
     return sortedCampaigns[0] || null;
   }, [campaigns, latestRuntimeProgress, sortedCampaigns]);
-  const liveSnapshot = liveCampaign ? campaignSnapshots[liveCampaign.campaignId] : null;
   const liveTarget = liveCampaign
     ? guardianTargets.find((target) => campaignIncludesGuardianTarget(liveCampaign, target))
     : null;
@@ -342,18 +356,6 @@ function AppContent() {
     guardianTargets.length > 0
       ? guardianTargets[normalizedAutoCounters.targetCursor % guardianTargets.length]
       : null;
-  const completedWorkUnits = liveSnapshot
-    ? liveSnapshot.workUnits.filter((unit) => unit.status === "accepted").length
-    : 0;
-  const submittedWorkUnits = liveSnapshot
-    ? liveSnapshot.workUnits.filter((unit) => unit.status === "submitted").length
-    : 0;
-  const liveFindings = liveSnapshot
-    ? liveSnapshot.contributions.reduce((sum, contribution) => sum + contribution.findings.length, 0)
-    : 0;
-  const liveAccepted = liveSnapshot
-    ? liveSnapshot.verifications.filter((verification) => verification.decision === "accepted").length
-    : 0;
   const watchObservation = nextWatchTarget
     ? guardianLedger.targets[nextWatchTarget.targetId]
     : undefined;
@@ -474,6 +476,14 @@ function AppContent() {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (!githubAccessStatus?.paused) return;
+    const label = githubPauseEventLabel(githubAccessStatus);
+    if (lastGitHubPauseRef.current === label) return;
+    lastGitHubPauseRef.current = label;
+    pushCockpitEvent(label, "danger");
+  }, [githubAccessStatus?.message, githubAccessStatus?.paused, githubAccessStatus?.retryAt]);
 
   useEffect(() => {
     p2p.listGuardianTargets()
@@ -929,100 +939,7 @@ function AppContent() {
       <TitleBar />
 
       <main>
-        <section className="runtime-terminal" aria-label="Runtime terminal">
-          <div className="terminal-controls">
-            <label>
-              <span>Provider</span>
-              <select
-                onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
-                value={runtimeProvider}
-              >
-                <option value="lmstudio">LM Studio</option>
-                <option value="ollama">Ollama</option>
-              </select>
-            </label>
-            <label>
-              <span>Model</span>
-              <select
-                disabled={runtimeModels.length === 0}
-                onChange={(event) => setRuntimeModel(event.currentTarget.value)}
-                value={runtimeModel}
-              >
-                {runtimeModels.length === 0 ? (
-                  <option value="">No model</option>
-                ) : (
-                  runtimeModels.map((model) => (
-                    <option key={model} value={model}>{model}</option>
-                  ))
-                )}
-              </select>
-            </label>
-          </div>
-
-          <div className="cockpit-display">
-            <div className="terminal-metrics">
-              <div className="metric-card metric-card-wide">
-                <Gauge size={17} />
-                <span>Tokens/sec</span>
-                <strong>{currentTokensPerSecond.toFixed(1)}</strong>
-                <small>{runtimeActive ? "streaming local model" : measuredTokensPerSecond ? "last streamed run" : "waiting for model"}</small>
-              </div>
-              <div className="metric-card">
-                <Trophy size={17} />
-                <span>ATP earned</span>
-                <strong>{creditSummary.total}</strong>
-                <small>receipt-backed</small>
-              </div>
-              <div className="metric-card">
-                <Clock3 size={17} />
-                <span>Pending</span>
-                <strong>+{projectedPendingCredits}</strong>
-                <small>{runtimeActive ? `${currentProgress}% active` : "awaiting receipts"}</small>
-              </div>
-              <div className="metric-card">
-                <Activity size={17} />
-                <span>Active nodes</span>
-                <strong>{activeNodeCount}</strong>
-                <small>{networkInfo?.relay_connected ? "relay linked" : "network standby"}</small>
-              </div>
-            </div>
-
-            <div className="terminal-progress" aria-label="Audit skill progress">
-              <span style={{ width: `${currentProgress}%` } as CSSProperties} />
-            </div>
-
-            <div className="cockpit-events" aria-label="Live runtime event stream">
-              {cockpitEvents.map((event) => (
-                <div className={`cockpit-event ${event.tone || "info"}`} key={event.id}>
-                  <time>{formatClock(telemetryTick - event.at)}</time>
-                  <span>{event.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {nodeError ? <div className="error-banner">Node error: {nodeError}</div> : null}
-        {githubAccessStatus?.paused ? (
-          <div className="error-banner github-pause">
-            GitHub paused{githubAccessStatus.retryAt ? ` until ${new Date(githubAccessStatus.retryAt).toLocaleTimeString()}` : ""}: {githubAccessStatus.message}
-          </div>
-        ) : null}
-        {!isTauriRuntime() ? (
-          <div className="preview-banner">
-            Read-only browser preview. Signing, persistence, and networking require the native app.
-          </div>
-        ) : null}
-
         <section className="panel intelligence-panel">
-          <div className="section-heading">
-            <span>Live</span>
-            <div>
-              <h2>Intelligence Feed</h2>
-              <p>Autonomous protocol coverage, signed receipts, and local-model work.</p>
-            </div>
-          </div>
-
           {liveCampaign ? (
             <article className="intelligence-card">
               <div className="intelligence-topline">
@@ -1032,12 +949,35 @@ function AppContent() {
               <div className="intelligence-main">
                 <div>
                   <h3>{liveCampaign.protocolName}</h3>
-                  <p>{liveTarget?.auditBrief || "CYPHES is coordinating signed audit work for this pinned public repository."}</p>
+                  <p className="audit-brief">{compactAuditBrief(liveTarget?.auditBrief)}</p>
                 </div>
-                <div className="target-radar">
-                  <Target size={18} />
-                  <span>{liveTarget?.category || "protocol"}</span>
-                  <strong>{liveTarget ? `rank ${liveTarget.tvlRiskRank}` : "indexed"}</strong>
+                <div className="runtime-radar">
+                  <label>
+                    <span>Provider</span>
+                    <select
+                      onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
+                      value={runtimeProvider}
+                    >
+                      <option value="lmstudio">LM Studio</option>
+                      <option value="ollama">Ollama</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Model</span>
+                    <select
+                      disabled={runtimeModels.length === 0}
+                      onChange={(event) => setRuntimeModel(event.currentTarget.value)}
+                      value={runtimeModel}
+                    >
+                      {runtimeModels.length === 0 ? (
+                        <option value="">No model</option>
+                      ) : (
+                        runtimeModels.map((model) => (
+                          <option key={model} value={model}>{model}</option>
+                        ))
+                      )}
+                    </select>
+                  </label>
                 </div>
               </div>
               <div className="campaign-target">
@@ -1045,31 +985,48 @@ function AppContent() {
                 <code>{shortCommit(liveCampaign.repository.commitSha)}</code>
                 {liveTarget ? <span>{liveTarget.chains.slice(0, 4).join(" / ")}</span> : null}
               </div>
-              <div className="intelligence-grid">
+              <div className="intelligence-grid telemetry-grid">
                 <div>
-                  <small>Work units</small>
-                  <strong>{liveSnapshot?.workUnits.length || 0}</strong>
+                  <Gauge size={16} />
+                  <small>Tokens/sec</small>
+                  <strong>{currentTokensPerSecond.toFixed(1)}</strong>
+                  <span>{runtimeActive ? "streaming local model" : measuredTokensPerSecond ? "last streamed run" : "waiting for model"}</span>
                 </div>
                 <div>
-                  <small>Submitted</small>
-                  <strong>{submittedWorkUnits}</strong>
+                  <Trophy size={16} />
+                  <small>ATP earned</small>
+                  <strong>{creditSummary.total}</strong>
+                  <span>receipt-backed</span>
                 </div>
                 <div>
-                  <small>Accepted</small>
-                  <strong>{liveAccepted || completedWorkUnits}</strong>
+                  <Clock3 size={16} />
+                  <small>Pending</small>
+                  <strong>+{projectedPendingCredits}</strong>
+                  <span>{runtimeActive ? `${currentProgress}% active` : "awaiting receipts"}</span>
                 </div>
                 <div>
-                  <small>Findings</small>
-                  <strong>{liveFindings}</strong>
+                  <Activity size={16} />
+                  <small>Active nodes</small>
+                  <strong>{activeNodeCount}</strong>
+                  <span>{networkInfo?.relay_connected ? "relay linked" : "network standby"}</span>
                 </div>
-                <div>
-                  <small>Priority</small>
-                  <strong>{liveTarget?.priorityScore || "n/a"}</strong>
-                </div>
-                <div>
-                  <small>Criticality</small>
-                  <strong>{liveTarget ? `${liveTarget.contractCriticality}/6` : "n/a"}</strong>
-                </div>
+              </div>
+              <div className="terminal-progress intelligence-progress" aria-label="Audit skill progress">
+                <span style={{ width: `${currentProgress}%` } as CSSProperties} />
+              </div>
+              <div className="cockpit-events intelligence-events" aria-label="Live runtime event stream">
+                {githubAccessStatus?.paused ? (
+                  <div className="cockpit-event danger pinned" key="github-paused">
+                    <time>HOLD</time>
+                    <span>{githubPauseEventLabel(githubAccessStatus)}</span>
+                  </div>
+                ) : null}
+                {cockpitEvents.map((event) => (
+                  <div className={`cockpit-event ${event.tone || "info"}`} key={event.id}>
+                    <time>{formatClock(telemetryTick - event.at)}</time>
+                    <span>{event.label}</span>
+                  </div>
+                ))}
               </div>
               {latestRuntimeProgress?.campaignId === liveCampaign.campaignId ? (
                 <div className="campaign-progress">
@@ -1092,6 +1049,46 @@ function AppContent() {
             </div>
           )}
 
+          {!liveCampaign && githubAccessStatus?.paused ? (
+            <div className="cockpit-events intelligence-events standby-events" aria-label="GitHub pause status">
+              <div className="cockpit-event danger pinned">
+                <time>HOLD</time>
+                <span>{githubPauseEventLabel(githubAccessStatus)}</span>
+              </div>
+            </div>
+          ) : null}
+
+          {!liveCampaign ? (
+            <div className="runtime-radar standby-runtime-card">
+              <label>
+                <span>Provider</span>
+                <select
+                  onChange={(event) => setRuntimeProvider(event.currentTarget.value)}
+                  value={runtimeProvider}
+                >
+                  <option value="lmstudio">LM Studio</option>
+                  <option value="ollama">Ollama</option>
+                </select>
+              </label>
+              <label>
+                <span>Model</span>
+                <select
+                  disabled={runtimeModels.length === 0}
+                  onChange={(event) => setRuntimeModel(event.currentTarget.value)}
+                  value={runtimeModel}
+                >
+                  {runtimeModels.length === 0 ? (
+                    <option value="">No model</option>
+                  ) : (
+                    runtimeModels.map((model) => (
+                      <option key={model} value={model}>{model}</option>
+                    ))
+                  )}
+                </select>
+              </label>
+            </div>
+          ) : null}
+
           <div className="watch-grid">
             <div>
               <Cpu size={14} />
@@ -1113,6 +1110,15 @@ function AppContent() {
             </div>
           </div>
         </section>
+
+        <div className="system-message-stack">
+          {nodeError ? <div className="error-banner">Node error: {nodeError}</div> : null}
+          {!isTauriRuntime() ? (
+            <div className="preview-banner">
+              Read-only browser preview. Signing, persistence, and networking require the native app.
+            </div>
+          ) : null}
+        </div>
 
         <footer>
           <span>ATP v0.3 envelopes</span>

@@ -234,12 +234,6 @@ main {
   font-size: 13px;
 }
 
-.github-pause {
-  border-color: rgba(255, 198, 77, 0.38);
-  background: rgba(255, 198, 77, 0.08);
-  color: #ffd886;
-}
-
 .connect-strip {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
@@ -578,6 +572,20 @@ main {
   color: #ffc64d;
 }
 
+.cockpit-event.danger {
+  color: #ff5f5f;
+  text-shadow: 0 0 14px rgba(255, 95, 95, 0.2);
+}
+
+.cockpit-event.pinned {
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 95, 95, 0.22);
+}
+
+.standby-events {
+  margin-top: 14px;
+}
+
 @keyframes terminal-sweep {
   0% { transform: translateX(-60%); }
   100% { transform: translateX(60%); }
@@ -857,12 +865,12 @@ form > label,
 
 .intelligence-panel {
   min-height: 0;
-  margin-top: 14px;
+  margin-top: 0;
   padding: 18px;
 }
 
 .intelligence-card {
-  margin-top: 14px;
+  margin-top: 0;
   padding: 18px;
   border: 1px solid rgba(0, 246, 255, 0.18);
   background:
@@ -903,7 +911,7 @@ form > label,
 }
 
 .intelligence-main {
-  grid-template-columns: minmax(0, 1fr) 170px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 270px);
   margin-top: 14px;
 }
 
@@ -918,12 +926,16 @@ form > label,
   text-transform: uppercase;
 }
 
-.intelligence-main p {
-  max-width: 820px;
-  margin: 12px 0 0;
+.intelligence-main .audit-brief {
+  display: -webkit-box;
+  max-width: 760px;
+  margin: 8px 0 0;
+  overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 11px;
+  line-height: 1.36;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .target-radar {
@@ -959,6 +971,67 @@ form > label,
   line-height: 0.95;
 }
 
+.runtime-radar {
+  display: grid;
+  align-content: center;
+  min-height: 126px;
+  padding: 14px;
+  border: 1px solid rgba(0, 246, 255, 0.18);
+  background:
+    repeating-linear-gradient(90deg, rgba(0, 246, 255, 0.05) 0 1px, transparent 1px 16px),
+    rgba(1, 7, 7, 0.72);
+}
+
+.runtime-radar label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.runtime-radar label + label {
+  margin-top: 12px;
+}
+
+.runtime-radar span {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.runtime-radar select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(0, 246, 255, 0.18);
+  border-radius: 0;
+  outline: 0;
+  background:
+    linear-gradient(90deg, rgba(0, 246, 255, 0.075), transparent),
+    rgba(0, 0, 0, 0.34);
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: clamp(12px, 1.35vw, 18px);
+  font-weight: 820;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
+
+.runtime-radar select:disabled {
+  color: rgba(245, 251, 250, 0.28);
+}
+
+.runtime-radar select:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px rgba(199, 255, 71, 0.22);
+}
+
+.standby-runtime-card {
+  max-width: 360px;
+  margin: 14px auto 0;
+}
+
 .intelligence-grid,
 .watch-grid {
   display: grid;
@@ -966,7 +1039,7 @@ form > label,
 }
 
 .intelligence-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 14px;
 }
 
@@ -1006,6 +1079,51 @@ form > label,
   white-space: nowrap;
 }
 
+.telemetry-grid {
+  margin-top: 18px;
+}
+
+.telemetry-grid > div {
+  min-height: 92px;
+}
+
+.telemetry-grid svg {
+  color: var(--cyan);
+}
+
+.telemetry-grid strong {
+  margin-top: 8px;
+  color: var(--green);
+  font-size: clamp(31px, 3.5vw, 44px);
+  font-weight: 900;
+  letter-spacing: -0.09em;
+  text-shadow: 0 0 16px rgba(199, 255, 71, 0.24);
+}
+
+.telemetry-grid span {
+  display: block;
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.intelligence-progress {
+  margin-top: 10px;
+}
+
+.intelligence-events {
+  height: 76px;
+  margin-top: 0;
+  border: 1px solid rgba(0, 246, 255, 0.12);
+  border-top: 0;
+}
+
 .watch-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 12px;
@@ -1032,6 +1150,12 @@ form > label,
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.system-message-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .campaign-list {
@@ -1084,7 +1208,7 @@ form > label,
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .campaign-target span,
