@@ -2,10 +2,10 @@
 
 ## Download The macOS Preview
 
-Apple Silicon users can download the current packaged v0.6.2 developer DMG
-from:
+macOS users can download the current packaged v0.6.2 developer DMGs from:
 
-- https://github.com/CYPHES-ATP/Node/releases/download/v0.6.2/CYPHES_0.6.2_aarch64.dmg
+- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.6.2/CYPHES_0.6.2_aarch64.dmg
+- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.6.2/CYPHES_0.6.2_x64.dmg
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm

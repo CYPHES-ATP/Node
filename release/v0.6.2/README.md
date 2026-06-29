@@ -5,8 +5,9 @@ Release date: 2026-06-29
 ## Download
 
 - `CYPHES_0.6.2_aarch64.dmg`
+- `CYPHES_0.6.2_x64.dmg`
 
-This Apple Silicon macOS build is ad hoc signed and verified locally, but not
+These macOS builds are ad hoc signed and verified locally, but not
 Apple-notarized yet.
 
 ## What Changed
@@ -33,6 +34,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path source-gateway/Cargo.toml
 codesign --verify --deep --strict --verbose=2 CYPHES.app
 hdiutil verify CYPHES_0.6.2_aarch64.dmg
+hdiutil verify CYPHES_0.6.2_x64.dmg
 ```
 
 Rust desktop tests: 42 passed, 1 intentionally ignored live-GitHub fixture test.
@@ -42,4 +44,5 @@ Source Gateway tests: 2 passed.
 
 ```text
 1d38398e9585b5badcbd19bfdccd657481a31134db9932d9ae67fc234a82cce5  CYPHES_0.6.2_aarch64.dmg
+b00bd80147af1c40902483f2e0a9cf24bd302a20557e1f2ec4b09103f324df38  CYPHES_0.6.2_x64.dmg
 ```

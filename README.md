@@ -29,9 +29,10 @@ require a signed contribution, a signed acceptance from an independent verifier,
 and a deterministic allocation that matches the receipt data. Self-verification
 can still test the local loop, but it cannot mint earned ATP.
 
-Apple Silicon download:
+macOS downloads:
 
 - [Download CYPHES v0.6.2](https://github.com/CYPHES-ATP/Node/releases/download/v0.6.2/CYPHES_0.6.2_aarch64.dmg)
+- [Download CYPHES v0.6.2 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.6.2/CYPHES_0.6.2_x64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
