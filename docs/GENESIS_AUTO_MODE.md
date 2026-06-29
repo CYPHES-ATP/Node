@@ -1,8 +1,8 @@
 # Autonomous Guardian Loop
 
-Status: v0.5.6 developer preview
+Status: v0.6.1 source preview
 
-The v0.5.6 main CYPHES app is autonomous by default. Users open the app,
+The v0.6.1 main CYPHES app is autonomous by default. Users open the app,
 select a local LM Studio or Ollama model, and watch CYPHES coordinate public
 audit work. There are no Auto Worker, Auto Verifier, Quest Seeder, or Work
 Order controls in the main node UI.
@@ -16,7 +16,7 @@ Guardian Index v2
 -> discovered worker auto-claims open work
 -> local model runs bounded audit skill
 -> worker signs contribution receipt
--> requester auto-verifies requester-owned pending contributions
+-> requester or verifier accepts independent worker contributions
 -> signed verification/credit receipt returns to worker
 -> report bundles can be exported from campaign.html
 ```
@@ -27,8 +27,9 @@ Guardian Index v2
   is available, runs the bounded audit skill, signs the contribution, and sends
   the receipt back to the requester.
 - **Auto Verifier** accepts pending signed contributions only for campaigns
-  requested by this same local identity, then returns signed verification and
-  ATP Credit receipts to the contributing worker.
+  requested by this same local identity and only when the worker is a different
+  ATP identity. Self-verification can test the local loop, but it cannot mint
+  Verified ATP.
 - **Quest Seeder** watches `protocol/targets/guardian-target-index.json`,
   resolves targets to pinned commits, and creates a signed campaign only when
   the same target/path/commit is not already covered locally.
@@ -39,15 +40,23 @@ model exceeds the limit, CYPHES does not create a signed contribution.
 ## GitHub Backoff
 
 The loop depends on public GitHub reads for commit resolution, tree inventory,
-and scoped file context. v0.5.6 adds shared GitHub backoff across campaign
+and scoped file context. v0.5.7 keeps shared GitHub backoff across campaign
 seeding and worker context reads. If GitHub returns a rate-limit response,
 CYPHES pauses GitHub reads until the reset time and surfaces that status in the
 cockpit instead of continuing to hammer GitHub or creating unpinned campaigns.
+
+v0.5.7 also caches immutable pinned GitHub tree and raw-file reads locally under
+`~/.cyphes/source-cache/github/`. Repeated work against the same commit/path can
+reuse cached source context instead of spending API quota again.
 
 Nodes can increase quota by configuring a local GitHub token through
 `CYPHES_GITHUB_TOKEN`, `GITHUB_TOKEN`, `~/.cyphes/github.token`, or
 `githubToken` in `~/.cyphes/settings.json`. CYPHES does not ship with an
 embedded network-wide GitHub token.
+
+For public-scale 24/7 operation, v0.6.1 includes the Source Gateway binary.
+The remaining operations step is deploying it at `source.cyphes.com` with a
+CYPHES GitHub App, cache limits, metrics, and per-node quotas.
 
 ## Guardian Index v2
 
@@ -86,11 +95,15 @@ CYPHES shows two credit states:
 
 - **Pending ATP** is provisional. It estimates useful work while a node is
   running or after a contribution has been submitted but not yet verified.
-- **Earned ATP** is receipt-backed. It increases only after a signed verifier
-  result accepts a signed contribution and issues a credit allocation.
+- **Verified ATP** is receipt-derived. It increases only after a signed
+  verifier result from a different ATP identity accepts a signed contribution
+  and issues a deterministic credit allocation.
 
 Credits are local, off-chain, receipt-backed accounting. They are not an
 ERC-20, escrow balance, payout claim, or transferable token in this release.
+v0.5.7 recomputes the displayed verified total from signed contribution and
+verifier records. Local SQLite edits that do not match those receipts are
+ignored by the credit summary.
 
 ## What It Does Not Do
 
@@ -111,5 +124,5 @@ settlement, external submission, or protocol contact.
 The live loop depends on online peer delivery. The relay/rendezvous network can
 discover nodes, but CYPHES does not yet have a durable replicated work index or
 offline mailbox. If a requester/verifier is offline, a worker can create a
-pending signed contribution, but earned ATP arrives only after the requester
-comes back online and verifies the contribution.
+pending signed contribution, but Verified ATP arrives only after an independent
+verifier comes online and accepts the contribution.

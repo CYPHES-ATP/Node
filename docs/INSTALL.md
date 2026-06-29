@@ -2,7 +2,8 @@
 
 ## Download The macOS Preview
 
-Apple Silicon users can download the current v0.5.6 developer DMGs from:
+Apple Silicon users can download the current packaged v0.5.6 developer DMGs
+from:
 
 - https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-v0.5.6-aarch64.dmg
 - https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-Partner-v0.5.6-aarch64.dmg
@@ -11,6 +12,10 @@ Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. Windows and Linux binary distributions are not
 available yet.
+
+The current source tree is v0.6.1. Run from source to test Verified ATP
+independent-verifier enforcement, Source Gateway fallback, and the local
+pinned-source GitHub cache before a packaged v0.6.1 DMG is cut.
 
 - **CYPHES** opens into the autonomous guardian cockpit. Select a local LM
   Studio or Ollama model and the node watches targets, creates non-duplicate
@@ -37,6 +42,21 @@ printf '%s' 'github_pat_...' > ~/.cyphes/github.token
 
 The app does not include a shared CYPHES GitHub token. A shared token in a DMG
 would be public the moment the app ships.
+
+v0.6.1 also caches immutable pinned GitHub tree and raw-file reads under
+`~/.cyphes/source-cache/github/`. This reduces repeat quota burn for the same
+repo/commit/path, but it is not a substitute for deploying the CYPHES Source
+Gateway at `source.cyphes.com` for public-scale 24/7 operation.
+
+For local Source Gateway QA:
+
+```bash
+export CYPHES_SOURCE_GATEWAY_URL=http://127.0.0.1:8080
+cargo run --manifest-path source-gateway/Cargo.toml
+```
+
+When unset, CYPHES nodes try `https://source.cyphes.com` first and fall back to
+direct GitHub reads if the gateway is unavailable.
 
 ## Native Development
 

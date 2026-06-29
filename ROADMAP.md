@@ -37,7 +37,7 @@ signed ATP envelopes or portable artifacts.
   ATP Credit allocations to the contributing worker, with idempotent resend on
   reconnect.
 - Desktop operator UI now presents an autonomous cockpit as the primary
-  surface: local model telemetry, tokens/sec, pending/earned ATP, peers,
+  surface: local model telemetry, tokens/sec, pending/Verified ATP, peers,
   progress, active protocol context, Guardian Index metadata, and live receipt
   events. Manual work-order controls are removed from the main node app.
 - `campaign.html` separates protocol/admin campaign creation, network stats,
@@ -51,6 +51,17 @@ signed ATP envelopes or portable artifacts.
   GitHub tokens; pauses visibly on GitHub rate limits; suppresses duplicate
   campaign persistence; and resends existing verification/credit receipts
   idempotently on reconnect.
+- v0.5.7 source preview makes Verified ATP receipt-derived rather than
+  SQLite-trusted: independent verifier identity is required for earned ATP,
+  self-verification cannot mint credits, and the credit summary ignores
+  tampered local SQLite allocation rows unless they match signed contribution
+  and verifier receipts. It also adds a local pinned-source cache for immutable
+  GitHub tree and raw-file reads.
+- v0.6.1 source preview adds the first Source Gateway binary for
+  `source.cyphes.com`: server-side GitHub token or GitHub App installation
+  token support, read-through disk cache, ETag/Last-Modified revalidation,
+  signed source manifest headers, Dockerfile/compose deployment files, and
+  desktop-node gateway-first/direct-fallback source reads.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
@@ -71,6 +82,10 @@ Status: **Partial**
 
 - Persist remote campaign/work-unit discovery in a durable searchable work-order
   index instead of only online peer broadcast.
+- Deploy the v0.6.1 CYPHES Source Gateway at `source.cyphes.com`, install the
+  CYPHES GitHub App, add production secrets, metrics, cache limits, and
+  per-node quotas so the public network does not treat GitHub as the live
+  database.
 - Split verification and challenge handling across independently claimable
   verifier work units.
 - Add OpenClaw/Hermes runtime adapters for nodes that want advanced tool
@@ -136,6 +151,8 @@ Status: **Planned**
 - Release, refund, timeout, and dispute against `contractHash`, `eventRoot`, and
   `receiptHash`.
 - Keep ATP envelopes, leases, artifacts, and private context off-chain.
+- Define the first on-chain adapter for Verified ATP so public balances derive
+  from accepted independent receipts instead of local SQLite state.
 
 ## 7. Distribution
 
@@ -158,8 +175,9 @@ Status: **Partial**
   claims, and contributions when peers are not simultaneously online.
   Verification/credit result resend is now implemented for reconnecting
   workers.
-- Expand the Autonomous Guardian Loop from requester-owned auto-verification to
-  independent verifier queues, challenge windows, and revision policies.
+- Expand the Autonomous Guardian Loop from receipt-derived local Verified ATP
+  to independent verifier queues, challenge windows, revision policies, and
+  public settlement adapters.
 - Harden the worker boundary without changing the receipt profile.
 - Add deterministic negative fixtures for invalid leases and worker results.
 - Add peer persistence and reliable resend.

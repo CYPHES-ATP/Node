@@ -367,6 +367,10 @@ pub struct CreditAllocation {
 pub struct CreditSummary {
     pub total: u32,
     pub allocations: Vec<CreditAllocation>,
+    #[serde(default)]
+    pub provisional_total: u32,
+    #[serde(default)]
+    pub provisional_allocations: Vec<CreditAllocation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -668,6 +672,21 @@ pub fn allocate_credits(
     contribution: &NodeContribution,
     verification: &VerificationResult,
 ) -> Result<Vec<CreditAllocation>, String> {
+    allocate_credits_with_policy(contribution, verification, true)
+}
+
+pub fn allocate_provisional_credits(
+    contribution: &NodeContribution,
+    verification: &VerificationResult,
+) -> Result<Vec<CreditAllocation>, String> {
+    allocate_credits_with_policy(contribution, verification, false)
+}
+
+fn allocate_credits_with_policy(
+    contribution: &NodeContribution,
+    verification: &VerificationResult,
+    require_independent_verifier: bool,
+) -> Result<Vec<CreditAllocation>, String> {
     verify_signed_contribution(contribution)?;
     verify_signed_verification(verification)?;
     if verification.target_contribution_id != contribution.contribution_id
@@ -677,6 +696,11 @@ pub fn allocate_credits(
     }
     if verification.decision != "accepted" {
         return Err("credits require an accepted verification result".to_string());
+    }
+    if require_independent_verifier
+        && verification.verifier_agent_id == contribution.worker_agent_id
+    {
+        return Err("credits require an independent verifier".to_string());
     }
     if contribution.receipt_hash.trim().is_empty() || !is_sha256_ref(&contribution.receipt_hash) {
         return Err("credits require a signed contribution receipt hash".to_string());
@@ -1431,6 +1455,40 @@ mod tests {
         let credits = allocate_credits(&contribution, &accepted).unwrap();
         assert_eq!(credits.len(), 2);
         assert!(credits.iter().all(|credit| credit.total > 0));
+    }
+
+    #[test]
+    fn credits_require_an_independent_verifier() {
+        let worker = identity::Keypair::generate_ed25519();
+        let contribution = signed_contribution(
+            &worker,
+            "campaign-1".to_string(),
+            "campaign-1-02-repository-inventory".to_string(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped repository inventory with bounded evidence.".to_string(),
+            vec![],
+            vec![artifact("inventory.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["No repository code execution.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        let self_verification = signed_verification(
+            &worker,
+            "campaign-1".to_string(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "SELF_ACCEPTED".to_string(),
+            "Self-verification is useful for local preview but cannot issue earned ATP."
+                .to_string(),
+            vec![],
+            vec![artifact("verification.md")],
+        )
+        .unwrap();
+        assert!(allocate_credits(&contribution, &self_verification).is_err());
     }
 
     #[test]

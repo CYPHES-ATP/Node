@@ -188,7 +188,7 @@ function CampaignConsole() {
     campaigns: [],
     jobs: [],
     peers: [],
-    credits: { total: 0, allocations: [] },
+    credits: { total: 0, allocations: [], provisionalTotal: 0, provisionalAllocations: [] },
     networkInfo: null,
     snapshots: {},
     targets: [],
@@ -397,7 +397,7 @@ function CampaignConsole() {
             <strong>{admin.campaigns.length}</strong>
           </div>
           <div>
-            <small>ATP</small>
+            <small>Verified ATP</small>
             <strong>{admin.credits.total}</strong>
           </div>
           <div>

@@ -1,0 +1,20 @@
+services:
+  source-gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      CYPHES_SOURCE_GATEWAY_BIND: "0.0.0.0:8080"
+      CYPHES_SOURCE_GATEWAY_CACHE_DIR: "/data/cache"
+      # Use either a server-side token:
+      # CYPHES_GITHUB_TOKEN: "${CYPHES_GITHUB_TOKEN}"
+      # Or GitHub App credentials:
+      # CYPHES_GITHUB_APP_ID: "${CYPHES_GITHUB_APP_ID}"
+      # CYPHES_GITHUB_INSTALLATION_ID: "${CYPHES_GITHUB_INSTALLATION_ID}"
+      # CYPHES_GITHUB_PRIVATE_KEY_PEM: "${CYPHES_GITHUB_PRIVATE_KEY_PEM}"
+    volumes:
+      - source-gateway-data:/data
+
+volumes:
+  source-gateway-data:
+

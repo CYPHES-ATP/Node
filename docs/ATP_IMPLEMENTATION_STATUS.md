@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-Last reviewed: June 26, 2026
+Last reviewed: June 28, 2026
 
 ## Conformance Position
 
@@ -28,6 +28,22 @@ workers after requester-owned verification, pauses visibly when GitHub rate
 limits the node, and supports a local GitHub token for higher API quota.
 External disclosure, protocol contact, payout claims, and settlement remain
 human-gated and not implemented.
+
+v0.5.7 source preview tightens the credit trust boundary. Verified ATP now
+requires an accepted verifier receipt from an ATP identity different from the
+worker identity, and the displayed credit summary is derived from signed
+contribution/verifier records instead of trusting raw SQLite allocation rows.
+Self-verification remains useful for local QA, but it cannot mint earned ATP.
+v0.5.7 also adds a local pinned-source cache for immutable GitHub tree and
+raw-file reads.
+
+v0.6.1 source preview adds the Source Gateway MVP. `source-gateway/` builds a
+standalone `cyphes-source-gateway` service with server-side GitHub token or
+GitHub App installation-token support, shared read-through disk cache,
+ETag/Last-Modified revalidation, signed source manifest headers, and Docker
+deployment files. Desktop nodes try the Source Gateway first and fall back to
+direct GitHub reads if unavailable. Deploying it at `source.cyphes.com` and
+binding it to production GitHub App secrets remains an operations step.
 
 The verified path is:
 
@@ -82,7 +98,7 @@ an ATP v0.3 wire verb.
 | Combined deployable relay/rendezvous service | Implemented |
 | Signed rendezvous registration and automatic peer discovery | Implemented and externally smoke tested |
 | Default network manifest and runtime overrides | Implemented |
-| Manual direct/relay multiaddress dialing | Command implemented; hidden from main v0.5.6 UI |
+| Manual direct/relay multiaddress dialing | Command implemented; hidden from main v0.6.1 UI |
 | DCUtR behavior | Implemented |
 | CYPHES-hosted public endpoint | `relay.cyphes.com` is live on a dedicated IPv4 and externally smoke tested; redundancy pending |
 | Durable public work index | Not implemented |
@@ -103,7 +119,9 @@ an ATP v0.3 wire verb.
 | Remote claimed work-unit execution and contribution return | Implemented |
 | Signed node contribution object | Implemented |
 | Signed verifier result object | Implemented locally |
-| ATP Credit allocation from accepted receipts | Implemented locally |
+| ATP Credit allocation from accepted independent receipts | Implemented locally |
+| Verified ATP recomputed from signed receipts instead of trusted SQLite rows | Implemented locally |
+| Self-verification blocked from earned ATP issuance | Implemented locally |
 | Rejected/duplicate/non-reportable lead appendix | Implemented locally |
 | v0.5 local/remote audit skill execution | Implemented |
 | Professional markdown report bundle export | Implemented locally |
@@ -111,6 +129,12 @@ an ATP v0.3 wire verb.
 | Guardian Index v2 with 100 structured public targets | Implemented |
 | Commit-diff watch and duplicate target/path/commit suppression | Implemented locally |
 | GitHub authenticated reads and rate-limit backoff | Implemented locally |
+| Local pinned-source cache for GitHub tree/raw-file reads | Implemented locally |
+| Source Gateway binary | Implemented |
+| Server-side GitHub App installation-token minting | Implemented in Source Gateway |
+| Shared read-through source cache | Implemented in Source Gateway |
+| ETag and Last-Modified revalidation | Implemented in Source Gateway |
+| Signed source manifest headers | Implemented in Source Gateway |
 | Duplicate campaign persistence suppression | Implemented locally |
 | Verification-result idempotent resend | Implemented locally |
 | Stale Guardian target quarantine | Implemented locally |
@@ -120,9 +144,12 @@ an ATP v0.3 wire verb.
 | Runtime progress and tokens/sec events | Implemented locally |
 | Effective skill hash in contribution runtime | Implemented locally |
 | Durable network-wide campaign/work index | Not implemented |
+| Deployed `source.cyphes.com` production service | Not implemented |
+| Source manifest hash embedded directly in contribution receipts | Not implemented |
+| Per-node Source Gateway quota keyed by ATP identity | Not implemented |
 | OpenClaw/Hermes runtime adapter | Not implemented |
 | External report submission or payout claim | Not implemented |
-| ERC-20 or escrow settlement | Intentionally deferred |
+| ERC-20, ERC-8004, or escrow settlement | Intentionally deferred |
 
 ## Verified Evidence
 

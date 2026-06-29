@@ -334,6 +334,7 @@ function AppContent() {
     }, 0);
   }, [campaignSnapshots]);
   const projectedPendingCredits = pendingVerificationCount * 35 + pendingReceiptMeter;
+  const provisionalCreditTotal = creditSummary.provisionalTotal || 0;
   const activeNodeCount = nodeStatus === "online" ? peerCount + 1 : peerCount;
   const autoModeArmed = true;
   const sortedCampaigns = useMemo(
@@ -418,7 +419,7 @@ function AppContent() {
     const eventListeners: Array<[string, string, CockpitEvent["tone"]]> = [
       ["audit:contribution_acknowledged", "Requester acknowledged receipt", "success"],
       ["audit:contribution_received", "Inbound contribution received", "success"],
-      ["audit:verification_received", "Receipt verified; ATP earned", "success"],
+      ["audit:verification_received", "Receipt verified; Verified ATP updated", "success"],
       ["audit:verification_acknowledged", "Credit receipt delivered", "success"],
       ["atp:delivery_failed", "Network delivery pending", "warn"],
     ];
@@ -795,9 +796,19 @@ function AppContent() {
         (await refreshCampaignSnapshot(campaign.campaignId));
       const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
       const pending = snapshot.contributions.filter(
-        (item) => !verifiedIds.has(item.contributionId),
+        (item) => !verifiedIds.has(item.contributionId) && item.workerAgentId !== agentId,
       );
-      if (pending.length === 0) continue;
+      const selfPending = snapshot.contributions.filter(
+        (item) => !verifiedIds.has(item.contributionId) && item.workerAgentId === agentId,
+      );
+      if (pending.length === 0) {
+        if (selfPending.length > 0) {
+          pushAutoPulse("Awaiting independent verifier", "warn");
+          setNotice("Signed contribution submitted; Verified ATP requires another node to verify it.");
+          return false;
+        }
+        continue;
+      }
       pushAutoPulse(`Auto verifier checking ${campaign.protocolName}`, "info");
       const issued: number[] = [];
       for (const contribution of pending) {
@@ -994,9 +1005,9 @@ function AppContent() {
                 </div>
                 <div>
                   <Trophy size={16} />
-                  <small>ATP earned</small>
+                  <small>Verified ATP</small>
                   <strong>{creditSummary.total}</strong>
-                  <span>receipt-backed</span>
+                  <span>{provisionalCreditTotal > 0 ? `${provisionalCreditTotal} provisional` : "independent receipts"}</span>
                 </div>
                 <div>
                   <Clock3 size={16} />

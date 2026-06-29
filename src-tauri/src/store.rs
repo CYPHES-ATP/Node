@@ -15,9 +15,9 @@ use crate::{
         ATP_GENESIS_HASH,
     },
     audit_labor::{
-        allocate_credits, default_work_units, validate_campaign, verify_signed_contribution,
-        verify_signed_verification, verify_signed_work_unit_claim, AuditWorkUnit,
-        AuditWorkUnitClaim, CampaignReportSnapshot, CreditAllocation, CreditSummary,
+        allocate_credits, allocate_provisional_credits, default_work_units, validate_campaign,
+        verify_signed_contribution, verify_signed_verification, verify_signed_work_unit_claim,
+        AuditWorkUnit, AuditWorkUnitClaim, CampaignReportSnapshot, CreditAllocation, CreditSummary,
         NodeContribution, ProtocolAuditCampaign, VerificationResult,
     },
     audit_profile::{
@@ -573,11 +573,7 @@ impl AtpStore {
     ) -> Result<Vec<CreditAllocation>, String> {
         verify_signed_verification(verification)?;
         let contribution = self.get_contribution(&verification.target_contribution_id)?;
-        let allocations = if verification.decision == "accepted" {
-            allocate_credits(&contribution, verification)?
-        } else {
-            Vec::new()
-        };
+        let allocations = credit_allocations_for_verification(&contribution, verification)?;
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
         if let Some((_, existing_allocations)) = verification_bundle_for_contribution_in_connection(
             &connection,
@@ -661,18 +657,7 @@ impl AtpStore {
         if verification.campaign_id != contribution.campaign_id {
             return Err("verification campaign does not match contribution".to_string());
         }
-        if verification.decision != "accepted" && !allocations.is_empty() {
-            return Err("non-accepted verification cannot carry credit allocations".to_string());
-        }
-        for allocation in allocations {
-            if allocation.campaign_id != contribution.campaign_id
-                || allocation.contribution_id != contribution.contribution_id
-                || allocation.verification_id != verification.verification_id
-                || allocation.contribution_receipt_hash != contribution.receipt_hash
-            {
-                return Err("credit allocation does not match verification bundle".to_string());
-            }
-        }
+        validate_credit_allocation_bundle(&contribution, verification, allocations)?;
 
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
         if let Some((_, existing_allocations)) = verification_bundle_for_contribution_in_connection(
@@ -772,14 +757,32 @@ impl AtpStore {
         let rows = statement
             .query_map(params![receiver_agent_id], |row| row.get::<_, String>(0))
             .map_err(|error| error.to_string())?;
-        let allocations = rows
+        let candidate_allocations = rows
             .map(|row| {
                 let json = row.map_err(|error| error.to_string())?;
                 serde_json::from_str(&json).map_err(|error| error.to_string())
             })
             .collect::<Result<Vec<CreditAllocation>, String>>()?;
+        let mut allocations = Vec::new();
+        let mut provisional_allocations = Vec::new();
+        for allocation in candidate_allocations {
+            match credit_allocation_trust(&connection, &allocation)? {
+                CreditAllocationTrust::Verified => allocations.push(allocation),
+                CreditAllocationTrust::Provisional => provisional_allocations.push(allocation),
+                CreditAllocationTrust::Invalid => {}
+            }
+        }
         let total = allocations.iter().map(|allocation| allocation.total).sum();
-        Ok(CreditSummary { total, allocations })
+        let provisional_total = provisional_allocations
+            .iter()
+            .map(|allocation| allocation.total)
+            .sum();
+        Ok(CreditSummary {
+            total,
+            allocations,
+            provisional_total,
+            provisional_allocations,
+        })
     }
 
     pub fn verification_bundles_for_worker(
@@ -2500,6 +2503,154 @@ fn verification_bundle_for_contribution_in_connection(
     Ok(Some((verification, allocations)))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreditAllocationTrust {
+    Verified,
+    Provisional,
+    Invalid,
+}
+
+fn credit_allocations_for_verification(
+    contribution: &NodeContribution,
+    verification: &VerificationResult,
+) -> Result<Vec<CreditAllocation>, String> {
+    if verification.decision != "accepted" {
+        return Ok(Vec::new());
+    }
+    if verification.verifier_agent_id == contribution.worker_agent_id {
+        return Ok(Vec::new());
+    }
+    allocate_credits(contribution, verification)
+}
+
+fn validate_credit_allocation_bundle(
+    contribution: &NodeContribution,
+    verification: &VerificationResult,
+    allocations: &[CreditAllocation],
+) -> Result<(), String> {
+    if verification.decision != "accepted" && !allocations.is_empty() {
+        return Err("non-accepted verification cannot carry credit allocations".to_string());
+    }
+    if verification.decision == "accepted"
+        && verification.verifier_agent_id == contribution.worker_agent_id
+    {
+        if allocations.is_empty() {
+            return Ok(());
+        }
+        return Err("self-verification cannot carry earned ATP allocations".to_string());
+    }
+    let expected = credit_allocations_for_verification(contribution, verification)?;
+    if !credit_allocation_terms_match_set(allocations, &expected) {
+        return Err("credit allocation does not match verification bundle".to_string());
+    }
+    Ok(())
+}
+
+fn credit_allocation_trust(
+    connection: &Connection,
+    allocation: &CreditAllocation,
+) -> Result<CreditAllocationTrust, String> {
+    let contribution_json = connection
+        .query_row(
+            "SELECT contribution_json FROM audit_contributions WHERE contribution_id = ?1",
+            params![allocation.contribution_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some(contribution_json) = contribution_json else {
+        return Ok(CreditAllocationTrust::Invalid);
+    };
+    let contribution: NodeContribution =
+        serde_json::from_str(&contribution_json).map_err(|error| error.to_string())?;
+
+    let verification_json = connection
+        .query_row(
+            "SELECT verification_json FROM audit_verifications WHERE verification_id = ?1",
+            params![allocation.verification_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some(verification_json) = verification_json else {
+        return Ok(CreditAllocationTrust::Invalid);
+    };
+    let verification: VerificationResult =
+        serde_json::from_str(&verification_json).map_err(|error| error.to_string())?;
+
+    if verification.target_contribution_id != contribution.contribution_id
+        || verification.campaign_id != contribution.campaign_id
+        || allocation.campaign_id != contribution.campaign_id
+        || allocation.contribution_receipt_hash != contribution.receipt_hash
+    {
+        return Ok(CreditAllocationTrust::Invalid);
+    }
+    if verification.verifier_agent_id == contribution.worker_agent_id {
+        let expected = match allocate_provisional_credits(&contribution, &verification) {
+            Ok(expected) => expected,
+            Err(_) => return Ok(CreditAllocationTrust::Invalid),
+        };
+        return if expected.iter().any(|expected_allocation| {
+            credit_allocation_terms_match(allocation, expected_allocation)
+        }) {
+            Ok(CreditAllocationTrust::Provisional)
+        } else {
+            Ok(CreditAllocationTrust::Invalid)
+        };
+    }
+    let expected = match allocate_credits(&contribution, &verification) {
+        Ok(expected) => expected,
+        Err(_) => return Ok(CreditAllocationTrust::Invalid),
+    };
+    if expected
+        .iter()
+        .any(|expected_allocation| credit_allocation_terms_match(allocation, expected_allocation))
+    {
+        Ok(CreditAllocationTrust::Verified)
+    } else {
+        Ok(CreditAllocationTrust::Invalid)
+    }
+}
+
+fn credit_allocation_terms_match_set(
+    actual: &[CreditAllocation],
+    expected: &[CreditAllocation],
+) -> bool {
+    if actual.len() != expected.len() {
+        return false;
+    }
+    let mut matched = vec![false; expected.len()];
+    actual.iter().all(|actual_allocation| {
+        if let Some((index, _)) =
+            expected
+                .iter()
+                .enumerate()
+                .find(|(index, expected_allocation)| {
+                    !matched[*index]
+                        && credit_allocation_terms_match(actual_allocation, expected_allocation)
+                })
+        {
+            matched[index] = true;
+            true
+        } else {
+            false
+        }
+    })
+}
+
+fn credit_allocation_terms_match(actual: &CreditAllocation, expected: &CreditAllocation) -> bool {
+    actual.profile == expected.profile
+        && actual.profile_version == expected.profile_version
+        && actual.campaign_id == expected.campaign_id
+        && actual.contribution_id == expected.contribution_id
+        && actual.verification_id == expected.verification_id
+        && actual.receiver_agent_id == expected.receiver_agent_id
+        && actual.contribution_receipt_hash == expected.contribution_receipt_hash
+        && actual.buckets == expected.buckets
+        && actual.total == expected.total
+        && actual.formula == expected.formula
+}
+
 fn millis_from_rfc3339(value: &str) -> Result<i64, String> {
     DateTime::parse_from_rfc3339(value)
         .map(|time| time.timestamp_millis())
@@ -2529,7 +2680,7 @@ mod tests {
         atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
         audit_labor::{
             allocate_credits, signed_contribution, signed_verification, signed_work_unit_claim,
-            AuditFinding, ContributionArtifact, CoverageItem, RuntimeDescriptor,
+            AuditFinding, ContributionArtifact, CoverageItem, CreditBuckets, RuntimeDescriptor,
             VerificationEvidence,
         },
         audit_profile::{contract_hash, AuditContract, ReceiptApproval, RepositoryTarget},
@@ -3160,6 +3311,185 @@ mod tests {
             .unwrap();
         let duplicate_summary = store.credit_summary(&worker_agent).unwrap();
         assert_eq!(duplicate_summary.total, worker_total);
+    }
+
+    #[test]
+    fn self_verification_records_no_earned_credit() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+        let contribution = signed_contribution(
+            &requester,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id,
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped repository inventory locally.".to_string(),
+            vec![],
+            vec![labor_artifact("inventory.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["No repository code execution.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution).unwrap();
+        let verification = signed_verification(
+            &requester,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "SELF_PREVIEW_ACCEPTED".to_string(),
+            "Self-verification is a local preview and cannot mint earned ATP.".to_string(),
+            vec![],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+
+        let allocations = store.record_verification(&verification).unwrap();
+        assert!(allocations.is_empty());
+        let summary = store
+            .credit_summary(&agent_id(&requester.public()))
+            .unwrap();
+        assert_eq!(summary.total, 0);
+        assert_eq!(summary.provisional_total, 0);
+
+        let forged = CreditAllocation {
+            profile: "cyphes.credit-ledger".to_string(),
+            profile_version: "0.1".to_string(),
+            allocation_id: "credit_forged_self_preview".to_string(),
+            campaign_id: campaign.campaign_id.clone(),
+            contribution_id: contribution.contribution_id.clone(),
+            verification_id: verification.verification_id.clone(),
+            receiver_agent_id: agent_id(&requester.public()),
+            contribution_receipt_hash: contribution.receipt_hash.clone(),
+            buckets: CreditBuckets {
+                participation: 1_000_000,
+                verification: 0,
+                coverage: 0,
+                finding: 0,
+                bonus_allocation_placeholder: 0,
+            },
+            total: 1_000_000,
+            formula: "forged local sqlite edit".to_string(),
+            issued_at: now_rfc3339(),
+        };
+        let connection = store.connection.lock().unwrap();
+        connection
+            .execute(
+                "INSERT INTO credit_allocations
+                    (allocation_id, campaign_id, contribution_id, verification_id,
+                     receiver_agent_id, total, allocation_json, issued_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    forged.allocation_id,
+                    forged.campaign_id,
+                    forged.contribution_id,
+                    forged.verification_id,
+                    forged.receiver_agent_id,
+                    forged.total as i64,
+                    serde_json::to_string(&forged).unwrap(),
+                    millis_from_rfc3339(&forged.issued_at).unwrap(),
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let summary = store
+            .credit_summary(&agent_id(&requester.public()))
+            .unwrap();
+        assert_eq!(summary.total, 0);
+        assert_eq!(summary.provisional_total, 0);
+    }
+
+    #[test]
+    fn credit_summary_ignores_tampered_sqlite_allocations() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "dependency-config-review")
+            .unwrap();
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id,
+            RuntimeDescriptor::deterministic_fixture(),
+            "Reviewed dependency and configuration posture with bounded evidence.".to_string(),
+            vec![],
+            vec![labor_artifact("dependency-review.md")],
+            vec![CoverageItem {
+                area: "dependency and config review".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["No repository code execution.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution).unwrap();
+        let verification = signed_verification(
+            &requester,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Contribution is bounded, signed, and useful.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+        let allocations = store.record_verification(&verification).unwrap();
+        let worker_agent = agent_id(&worker.public());
+        let verified_total = store.credit_summary(&worker_agent).unwrap().total;
+        assert!(verified_total > 0);
+
+        let mut forged = allocations
+            .iter()
+            .find(|allocation| allocation.receiver_agent_id == worker_agent)
+            .unwrap()
+            .clone();
+        forged.allocation_id = "credit_forged_local_sqlite_row".to_string();
+        forged.total = 1_000_000;
+        let connection = store.connection.lock().unwrap();
+        connection
+            .execute(
+                "INSERT INTO credit_allocations
+                    (allocation_id, campaign_id, contribution_id, verification_id,
+                     receiver_agent_id, total, allocation_json, issued_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    forged.allocation_id,
+                    forged.campaign_id,
+                    forged.contribution_id,
+                    forged.verification_id,
+                    forged.receiver_agent_id,
+                    forged.total as i64,
+                    serde_json::to_string(&forged).unwrap(),
+                    millis_from_rfc3339(&forged.issued_at).unwrap(),
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let summary = store.credit_summary(&worker_agent).unwrap();
+        assert_eq!(summary.total, verified_total);
+        assert!(summary.total < 1_000_000);
     }
 
     #[tokio::test]

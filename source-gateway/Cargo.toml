@@ -1,0 +1,21 @@
+[package]
+name = "cyphes-source-gateway"
+version = "0.6.1"
+edition = "2021"
+license = "MIT"
+description = "Read-through source gateway for CYPHES autonomous labor nodes"
+
+[dependencies]
+axum = "0.7"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+jsonwebtoken = "9"
+rand_core = { version = "0.6", features = ["getrandom"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tower-http = { version = "0.6", features = ["trace"] }
+

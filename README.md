@@ -5,7 +5,7 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="https://github.com/CYPHES-ATP/Node/releases/tag/v0.5.6"><img alt="CYPHES: v0.5.6" src="https://img.shields.io/badge/CYPHES-v0.5.6-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.6.1 source preview" src="https://img.shields.io/badge/CYPHES-v0.6.1_source-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,14 +17,21 @@
 
 ## Download
 
-The current developer release is **CYPHES v0.5.6**. It makes the node
-autonomous by default: CYPHES watches the bundled Guardian Index v2, resolves
-public GitHub targets to pinned commits, creates work only when a target/commit
-has not already been covered, auto-claims remote work when a local model is
-available, auto-verifies requester-owned contributions, and keeps ATP Credits
-pending until a signed verifier receipt accepts the contribution. v0.5.6 adds
-GitHub rate-limit backoff/status, optional local GitHub token support, stronger
-duplicate campaign suppression, and idempotent verification retries.
+The current source preview is **CYPHES v0.6.1**. It moves CYPHES from a
+desktop developer preview toward an autonomous digital labor network whose
+first use case is audit. v0.6.1 adds `cyphes-source-gateway`, a deployable
+`source.cyphes.com` service for server-side GitHub auth, shared read-through
+cache, ETag revalidation, and signed source manifest headers. Nodes use the
+gateway first and fall back to their own GitHub token/direct reads if it is
+unavailable.
+
+Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
+require a signed contribution, a signed acceptance from an independent verifier,
+and a deterministic allocation that matches the receipt data. Self-verification
+can still test the local loop, but it cannot mint earned ATP.
+
+The latest packaged Apple Silicon developer release is still **v0.5.6** until
+the v0.6.1 DMGs are cut.
 
 Apple Silicon downloads:
 
@@ -42,9 +49,10 @@ creation, verification inspection, report export, and ATP proof logs.
 For 24/7 operation, configure a local GitHub token for higher GitHub API quota:
 set `CYPHES_GITHUB_TOKEN`, `GITHUB_TOKEN`, write the token to
 `~/.cyphes/github.token`, or add `githubToken` to `~/.cyphes/settings.json`.
-CYPHES never ships with a shared embedded GitHub token; production network
-scale should use a CYPHES-operated read-through GitHub gateway with caching and
-per-node quotas.
+CYPHES caches immutable pinned GitHub source reads locally and can read through
+`source.cyphes.com`, but never ships with a shared embedded GitHub token. The
+gateway keeps GitHub credentials server-side and lets many nodes reuse cached
+pinned source context.
 
 The developer preview completes one ATP-L1 repository-audit transaction:
 
@@ -132,8 +140,19 @@ Artifact Two independently returns:
 - Requester verification sends signed verification results and receipt-backed
   ATP Credit allocations back to the contributing worker, including idempotent
   resend when that worker reconnects.
+- v0.5.7 Verified ATP is recomputed from signed contribution and verifier
+  receipts. A local SQLite edit cannot create displayed earned ATP unless the
+  signed artifacts match the deterministic allocation rules.
+- Self-verification and single-node preview loops do not issue earned ATP.
+  They remain useful for QA but show as pending/provisional until another ATP
+  identity verifies the work.
+- v0.6.1 Source Gateway service with server-side GitHub token or GitHub App
+  installation-token support, shared read-through cache, ETag/Last-Modified
+  revalidation, signed source manifest headers, Dockerfile, and compose file.
+- Desktop node GitHub reads use the Source Gateway first and direct GitHub
+  fallback second.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
-  earned ATP, progress, peers, target metadata, live protocol coverage, and
+  Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
   removed from the main node app.
 - `campaign.html` provides a separate protocol/admin console for creating
@@ -158,11 +177,15 @@ Artifact Two independently returns:
   focused paths, docs/security references, in-scope/out-of-scope text,
   criticality, and priority score. It is a bundled seed, not a live bounty or
   payout feed.
-- Live network pulse showing active nodes, open work, pending ATP, earned ATP,
-  daily work progress, and local cognition rate. Pending ATP is provisional;
-  earned ATP only changes after accepted verifier receipts.
+- Live network pulse showing active nodes, open work, pending ATP, Verified
+  ATP, daily work progress, and local cognition rate. Pending ATP is
+  provisional; Verified ATP only changes after accepted independent verifier
+  receipts.
 - Signed node contributions and signed verifier decisions.
-- Receipt-backed ATP Credits issued only after accepted verification results.
+- Receipt-backed ATP Credits issued only after accepted independent
+  verification results.
+- Local pinned-source cache for GitHub repository metadata, moving commit
+  resolution, immutable commit tree reads, and raw pinned file reads.
 - Final audit report bundle export with document control, methodology, audit
   pass matrix, evidence arbitration, findings register, coverage and negative
   findings, non-reportable/rejected lead appendix, runtime/receipt appendix,
@@ -184,8 +207,9 @@ Artifact Two independently returns:
   durable, searchable, replicated work-order index yet.
 - The worker is bounded by deterministic code paths and lease guards, but is
   not yet isolated in a hardened OS container or VM.
-- No escrow, token transfer, release, refund, or dispute adapter. ATP Credits
-  are off-chain receipt-backed accounting only.
+- No escrow, token transfer, release, refund, or dispute adapter. Verified ATP
+  is off-chain receipt-derived accounting only, not a globally canonical
+  token balance.
 - No OpenClaw/Hermes runtime adapter yet. The current `Run Audit Pipeline` path
   is local-model-only through LM Studio or Ollama.
 - No claim that local model output is automatically a valid vulnerability.
@@ -195,6 +219,11 @@ Artifact Two independently returns:
   contact protocols, claim payouts, or move funds. Human approval is required
   before disclosure, escalation, liquidity-pool settlement, or external
   submission.
+- The Source Gateway binary exists, but `source.cyphes.com` still has to be
+  deployed and wired to a CYPHES GitHub App before public-scale 24/7 operation.
+- Source manifests are signed in gateway response headers, but source manifest
+  hashes are not yet embedded directly in contribution receipts.
+- No per-node Source Gateway quotas keyed by ATP identity yet.
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
@@ -339,11 +368,15 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 | `src-tauri/src/commands.rs` | Tauri operations for the complete work order |
 | `protocol/` | Schemas, skills, guardian target index, canonical fixtures, and verified ATP-L1 bundle |
 | `relay/` | Combined public relay/rendezvous service and smoke clients |
+| `source-gateway/` | `source.cyphes.com` read-through GitHub cache and signed source manifest service |
 | `network/` | Remotely updateable default-network manifest |
 
 ## Documentation
 
 - [ATP implementation status](docs/ATP_IMPLEMENTATION_STATUS.md)
+- [ATP Credit trust model](docs/ATP_CREDIT_TRUST_MODEL.md)
+- [Proof of Protection](docs/PROOF_OF_PROTECTION.md)
+- [Source Gateway](docs/SOURCE_GATEWAY.md)
 - [Join the network](docs/JOIN_NETWORK.md)
 - [Audit labor network](docs/AUDIT_LABOR_NETWORK.md)
 - [Autonomous Guardian Loop](docs/GENESIS_AUTO_MODE.md)

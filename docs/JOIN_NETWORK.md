@@ -121,9 +121,10 @@ The script does not commit the manifest for you.
 8. Both nodes show `ATTESTED` and export a receipt under
    `~/.cyphes/receipts/<transaction-id>/`.
 
-ATP Credits are not a token transfer or payout. The current repository-audit
-contract settles at zero value; ATP Credits are issued only by the local audit
-labor layer when signed contributions receive accepted verifier receipts.
+Verified ATP is not a token transfer or payout. The current repository-audit
+contract settles at zero value; v0.6.1 derives displayed earned credits only
+from signed contributions that receive accepted verifier receipts from an
+independent ATP identity.
 
 ## State Meaning
 

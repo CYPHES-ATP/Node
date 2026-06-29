@@ -1,6 +1,6 @@
 # CYPHES Audit Labor Network
 
-Status: v0.5 developer preview
+Status: v0.6.1 source preview
 
 CYPHES is a protocol-facing autonomous audit labor network built on ATP. The
 network coordinates scoped security work, records useful labor as signed
@@ -37,7 +37,8 @@ or verifiable artifact.
 6. Claimed workers run the audit skill with their local model and submit signed
    contributions back to the requester.
 7. Verifier nodes accept, reject, reproduce, challenge, or request revision.
-8. ATP Credits are issued only for accepted signed work with a verifier receipt.
+8. Verified ATP is issued only for accepted signed work with an independent
+   verifier receipt.
 9. The final audit report bundle is exported from accepted contributions plus an
    appendix of rejected, duplicate, and non-reportable leads.
 
@@ -64,26 +65,29 @@ protocol-specific checklist items.
 
 ## Autonomous Guardian Loop
 
-v0.5.6 makes the main CYPHES node autonomous by default:
+v0.6.1 makes the main CYPHES node autonomous by default:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
   model, enforces the configured runtime limit, signs the contribution, and
   submits the receipt to the requester.
 - **Auto Verifier** accepts pending signed contributions only for campaigns
-  this node requested, then returns signed verification and ATP Credit receipts
-  to the contributing worker.
+  this node requested and only when the worker is a different ATP identity, then
+  returns signed verification and ATP Credit receipts to the contributing
+  worker.
 - **Quest Seeder** watches Guardian Index v2 at
   `protocol/targets/guardian-target-index.json`, resolves targets to pinned
   commits, and creates work only when the same target/path/commit is not
   already active locally.
 - **GitHub backoff** pauses repository reads when GitHub rate-limits the node,
   surfaces the reset window in the UI, and resumes without killing peer
-  networking. Nodes can set a local GitHub token for higher quota.
+  networking. Nodes can set a local GitHub token for higher quota. v0.6.1 also
+  routes source reads through the optional Source Gateway first, then falls back
+  to direct GitHub reads and local pinned-source cache.
 
 The Autonomous Guardian Loop does not submit external vulnerability reports,
 contact protocol teams, claim payouts, or move funds. It makes the network feel
-alive while preserving the rule that earned ATP requires accepted verifier
-receipts.
+alive while preserving the rule that Verified ATP requires accepted independent
+verifier receipts.
 
 ## Structured Customization
 
@@ -145,14 +149,14 @@ Every decision includes verifier identity, target contribution id, reason code,
 optional reproduction evidence, optional artifact hashes, and verifier
 signature.
 
-Accepted verification results make the contribution eligible for ATP Credits
-and final-report findings. Rejected, duplicate, or non-reportable leads remain
-visible only in the appendix.
+Accepted independent verification results make the contribution eligible for
+Verified ATP and final-report findings. Rejected, duplicate, self-verified, or
+non-reportable leads remain visible only in the appendix or provisional state.
 
 ## Credit Issuance Rules
 
-ATP Credits are off-chain, receipt-backed accounting. They are not ERC-20
-tokens, escrow balances, or payout promises.
+Verified ATP is off-chain, receipt-derived accounting. It is not an ERC-20
+token, escrow balance, or payout promise.
 
 Credits are issued only when all of the following are true:
 
@@ -160,8 +164,14 @@ Credits are issued only when all of the following are true:
 - contribution targets an existing campaign and work unit;
 - verifier result is signed;
 - verifier decision accepts the contribution;
+- verifier identity is different from the worker identity;
 - verifier receipt hash is present;
 - the credit allocation references the accepted contribution and verification.
+
+v0.5.7 derives the displayed verified total from signed contribution and
+verifier records. If a node operator edits local SQLite and inserts a fake
+allocation, CYPHES ignores it unless it matches the deterministic allocation
+that can be recomputed from the signed receipts.
 
 Credit buckets:
 
@@ -183,7 +193,7 @@ but it does not integrate with external submission portals or direct protocol
 payout systems yet.
 
 Confirmed findings can later receive bonus allocation or split logic through a
-settlement adapter, but v0.5.6 only records the placeholder. No UI should imply
+settlement adapter, but v0.6.1 only records the placeholder. No UI should imply
 that ATP Credits are redeemable payouts.
 
 ## Final Report Bundle

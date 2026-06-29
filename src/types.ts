@@ -181,6 +181,8 @@ export interface CreditAllocation {
 export interface CreditSummary {
   total: number;
   allocations: CreditAllocation[];
+  provisionalTotal: number;
+  provisionalAllocations: CreditAllocation[];
 }
 
 export interface CampaignReportSnapshot {

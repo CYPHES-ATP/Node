@@ -53,7 +53,7 @@ export const useCyphesStore = create<CyphesState>((set) => ({
   networkInfo: null,
   jobs: [],
   campaigns: [],
-  creditSummary: { total: 0, allocations: [] },
+  creditSummary: { total: 0, allocations: [], provisionalTotal: 0, provisionalAllocations: [] },
   notice: null,
 
   setNodeOnline: (peerId, agentId) =>

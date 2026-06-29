@@ -7,6 +7,12 @@ use reqwest::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+const MAX_CACHE_BODY_BYTES: usize = 12 * 1024 * 1024;
+const SHORT_LIVED_CACHE_MS: i64 = 5 * 60 * 1000;
+const REPOSITORY_METADATA_CACHE_MS: i64 = 60 * 60 * 1000;
+const PINNED_SOURCE_CACHE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +30,15 @@ struct GitHubBackoff {
     message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceCacheMetadata {
+    url: String,
+    cached_at_ms: i64,
+    expires_at_ms: i64,
+    body_sha256: String,
+}
+
 pub fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -32,6 +47,7 @@ pub fn client() -> Result<reqwest::Client, String> {
 }
 
 pub fn github_access_status() -> GitHubAccessStatus {
+    let gateway = source_gateway_base_url();
     match read_backoff() {
         Some(backoff) if backoff.retry_after_ms > now_ms() => GitHubAccessStatus {
             authenticated: github_token().is_some(),
@@ -44,9 +60,19 @@ pub fn github_access_status() -> GitHubAccessStatus {
             paused: false,
             retry_at: None,
             message: if github_token().is_some() {
-                "GitHub reads are authenticated for higher quota.".to_string()
+                match gateway {
+                    Some(gateway) => format!(
+                        "Source Gateway enabled at {gateway}; local GitHub token is available as fallback."
+                    ),
+                    None => "GitHub reads are authenticated for higher quota.".to_string(),
+                }
             } else {
-                "GitHub reads are unauthenticated; public API quota is limited.".to_string()
+                match gateway {
+                    Some(gateway) => format!(
+                        "Source Gateway enabled at {gateway}; direct GitHub fallback is unauthenticated."
+                    ),
+                    None => "GitHub reads are unauthenticated; public API quota is limited.".to_string(),
+                }
             },
         },
     }
@@ -57,6 +83,15 @@ pub async fn get_json<T: DeserializeOwned>(
     url: impl AsRef<str>,
 ) -> Result<T, String> {
     let url = url.as_ref();
+    if let Some(body) = read_source_cache(url) {
+        return serde_json::from_str(&body)
+            .map_err(|error| format!("cached GitHub response was not valid JSON: {error}"));
+    }
+    if let Some(body) = get_via_source_gateway(client, url).await {
+        write_source_cache(url, &body);
+        return serde_json::from_str::<T>(&body)
+            .map_err(|error| format!("Source Gateway response was not valid JSON: {error}"));
+    }
     ensure_not_paused()?;
     let mut request = client
         .get(url)
@@ -75,14 +110,24 @@ pub async fn get_json<T: DeserializeOwned>(
         let body = response.text().await.unwrap_or_default();
         return Err(handle_failure(status, retry_after_ms, &body));
     }
-    response
-        .json::<T>()
+    let body = response
+        .text()
         .await
+        .map_err(|error| format!("GitHub response body read failed: {error}"))?;
+    write_source_cache(url, &body);
+    serde_json::from_str::<T>(&body)
         .map_err(|error| format!("GitHub response was not valid JSON: {error}"))
 }
 
 pub async fn get_text(client: &reqwest::Client, url: impl AsRef<str>) -> Result<String, String> {
     let url = url.as_ref();
+    if let Some(body) = read_source_cache(url) {
+        return Ok(body);
+    }
+    if let Some(body) = get_via_source_gateway(client, url).await {
+        write_source_cache(url, &body);
+        return Ok(body);
+    }
     ensure_not_paused()?;
     let mut request = client
         .get(url)
@@ -100,10 +145,12 @@ pub async fn get_text(client: &reqwest::Client, url: impl AsRef<str>) -> Result<
         let body = response.text().await.unwrap_or_default();
         return Err(handle_failure(status, retry_after_ms, &body));
     }
-    response
+    let body = response
         .text()
         .await
-        .map_err(|error| format!("GitHub response body read failed: {error}"))
+        .map_err(|error| format!("GitHub response body read failed: {error}"))?;
+    write_source_cache(url, &body);
+    Ok(body)
 }
 
 fn ensure_not_paused() -> Result<(), String> {
@@ -186,6 +233,242 @@ fn github_token() -> Option<String> {
         .filter(|token| !token.is_empty())
 }
 
+async fn get_via_source_gateway(client: &reqwest::Client, url: &str) -> Option<String> {
+    let gateway_url = source_gateway_url_for_github_url(url)?;
+    let response = client
+        .get(gateway_url)
+        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+        .ok()?;
+    response.status().is_success().then_some(())?;
+    response.text().await.ok()
+}
+
+fn source_gateway_url_for_github_url(url: &str) -> Option<String> {
+    let base = source_gateway_base_url()?;
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let segments = parsed
+        .path_segments()
+        .map(|segments| segments.collect::<Vec<_>>())
+        .unwrap_or_default();
+    if host == "api.github.com" && segments.len() >= 3 && segments[0] == "repos" {
+        let repo = format!(
+            "{}/{}",
+            decode_segment(segments[1]),
+            decode_segment(segments[2])
+        );
+        if segments.len() == 3 {
+            return gateway_url(&base, "/v1/github/repository", &[("repo", repo)]);
+        }
+        if segments.get(3) == Some(&"commits") && segments.len() >= 5 {
+            let reference = segments[4..]
+                .iter()
+                .map(|segment| decode_segment(segment))
+                .collect::<Vec<_>>()
+                .join("/");
+            return gateway_url(
+                &base,
+                "/v1/github/resolve",
+                &[("repo", repo), ("ref", reference)],
+            );
+        }
+        if segments.len() >= 6
+            && segments.get(3) == Some(&"git")
+            && segments.get(4) == Some(&"trees")
+            && segments.get(5).is_some_and(|value| is_sha(value))
+        {
+            return gateway_url(
+                &base,
+                "/v1/github/tree",
+                &[
+                    ("repo", repo),
+                    ("commit", decode_segment(segments[5]).to_ascii_lowercase()),
+                ],
+            );
+        }
+    }
+    if host == "raw.githubusercontent.com" && segments.len() >= 4 {
+        let commit = decode_segment(segments[2]).to_ascii_lowercase();
+        if !is_sha(&commit) {
+            return None;
+        }
+        let repo = format!(
+            "{}/{}",
+            decode_segment(segments[0]),
+            decode_segment(segments[1])
+        );
+        let path = segments[3..]
+            .iter()
+            .map(|segment| decode_segment(segment))
+            .collect::<Vec<_>>()
+            .join("/");
+        return gateway_url(
+            &base,
+            "/v1/github/file",
+            &[("repo", repo), ("commit", commit), ("path", path)],
+        );
+    }
+    None
+}
+
+fn source_gateway_base_url() -> Option<String> {
+    if std::env::var("CYPHES_DISABLE_SOURCE_GATEWAY")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    Some(
+        std::env::var("CYPHES_SOURCE_GATEWAY_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "https://source.cyphes.com".to_string())
+            .trim_end_matches('/')
+            .to_string(),
+    )
+}
+
+fn gateway_url(base: &str, path: &str, pairs: &[(&str, String)]) -> Option<String> {
+    let mut url = reqwest::Url::parse(base).ok()?;
+    url.set_path(path);
+    url.set_query(None);
+    {
+        let mut query = url.query_pairs_mut();
+        for (key, value) in pairs {
+            query.append_pair(key, value);
+        }
+    }
+    Some(url.to_string())
+}
+
+fn decode_segment(value: &str) -> String {
+    let mut output = String::new();
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = &value[index + 1..index + 3];
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                output.push(byte as char);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index] as char);
+        index += 1;
+    }
+    output
+}
+
+fn read_source_cache(url: &str) -> Option<String> {
+    if source_cache_disabled() {
+        return None;
+    }
+    let policy = source_cache_policy_ms(url)?;
+    let (metadata_path, body_path) = source_cache_paths(url).ok()?;
+    let metadata = fs::read_to_string(metadata_path).ok()?;
+    let metadata = serde_json::from_str::<SourceCacheMetadata>(&metadata).ok()?;
+    if metadata.url != url || metadata.expires_at_ms <= now_ms() {
+        return None;
+    }
+    if metadata.cached_at_ms + policy < now_ms() {
+        return None;
+    }
+    let body = fs::read_to_string(body_path).ok()?;
+    (metadata.body_sha256 == sha256_hex(body.as_bytes())).then_some(body)
+}
+
+fn write_source_cache(url: &str, body: &str) {
+    if source_cache_disabled()
+        || body.len() > MAX_CACHE_BODY_BYTES
+        || source_cache_policy_ms(url).is_none()
+    {
+        return;
+    }
+    let Some(policy_ms) = source_cache_policy_ms(url) else {
+        return;
+    };
+    let Ok((metadata_path, body_path)) = source_cache_paths(url) else {
+        return;
+    };
+    let now = now_ms();
+    let metadata = SourceCacheMetadata {
+        url: url.to_string(),
+        cached_at_ms: now,
+        expires_at_ms: now + policy_ms,
+        body_sha256: sha256_hex(body.as_bytes()),
+    };
+    if let Some(parent) = metadata_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(metadata) = serde_json::to_string_pretty(&metadata) {
+        let _ = fs::write(&body_path, body);
+        let _ = fs::write(metadata_path, metadata);
+    }
+}
+
+fn source_cache_policy_ms(url: &str) -> Option<i64> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let segments = parsed
+        .path_segments()
+        .map(|segments| segments.collect::<Vec<_>>())
+        .unwrap_or_default();
+    if host == "raw.githubusercontent.com" && segments.get(2).is_some_and(|value| is_sha(value)) {
+        return Some(PINNED_SOURCE_CACHE_MS);
+    }
+    if host == "api.github.com" && segments.len() >= 3 && segments[0] == "repos" {
+        if segments.len() >= 6
+            && segments.get(3) == Some(&"git")
+            && segments.get(4) == Some(&"trees")
+            && segments.get(5).is_some_and(|value| is_sha(value))
+        {
+            return Some(PINNED_SOURCE_CACHE_MS);
+        }
+        if segments.get(3) == Some(&"commits") {
+            return if segments.get(4).is_some_and(|value| is_sha(value)) {
+                Some(PINNED_SOURCE_CACHE_MS)
+            } else {
+                Some(SHORT_LIVED_CACHE_MS)
+            };
+        }
+        if segments.len() == 3 {
+            return Some(REPOSITORY_METADATA_CACHE_MS);
+        }
+    }
+    None
+}
+
+fn source_cache_paths(url: &str) -> Result<(PathBuf, PathBuf), String> {
+    let digest = sha256_hex(url.as_bytes());
+    let root = data_dir()?.join("source-cache").join("github");
+    Ok((
+        root.join(format!("{digest}.json")),
+        root.join(format!("{digest}.body")),
+    ))
+}
+
+fn source_cache_disabled() -> bool {
+    std::env::var("CYPHES_DISABLE_SOURCE_CACHE")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
+fn is_sha(value: &str) -> bool {
+    value.len() == 40 && value.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+}
+
 fn read_token_file() -> Result<String, String> {
     fs::read_to_string(data_dir()?.join("github.token")).map_err(|error| error.to_string())
 }
@@ -247,4 +530,59 @@ fn format_ms(ms: i64) -> String {
         .single()
         .unwrap_or_else(Utc::now)
         .to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        source_cache_policy_ms, source_gateway_url_for_github_url, PINNED_SOURCE_CACHE_MS,
+        REPOSITORY_METADATA_CACHE_MS, SHORT_LIVED_CACHE_MS,
+    };
+
+    #[test]
+    fn cache_policy_prefers_pinned_source_context() {
+        assert_eq!(
+            source_cache_policy_ms("https://raw.githubusercontent.com/owner/repo/0123456789abcdef0123456789abcdef01234567/contracts/A.sol"),
+            Some(PINNED_SOURCE_CACHE_MS)
+        );
+        assert_eq!(
+            source_cache_policy_ms("https://api.github.com/repos/owner/repo/git/trees/0123456789abcdef0123456789abcdef01234567?recursive=1"),
+            Some(PINNED_SOURCE_CACHE_MS)
+        );
+    }
+
+    #[test]
+    fn cache_policy_keeps_moving_refs_short_lived() {
+        assert_eq!(
+            source_cache_policy_ms("https://api.github.com/repos/owner/repo/commits/main"),
+            Some(SHORT_LIVED_CACHE_MS)
+        );
+        assert_eq!(
+            source_cache_policy_ms("https://api.github.com/repos/owner/repo"),
+            Some(REPOSITORY_METADATA_CACHE_MS)
+        );
+    }
+
+    #[test]
+    fn maps_github_urls_to_source_gateway_urls() {
+        assert_eq!(
+            source_gateway_url_for_github_url("https://api.github.com/repos/aave/aave-v3-origin")
+                .unwrap(),
+            "https://source.cyphes.com/v1/github/repository?repo=aave%2Faave-v3-origin"
+        );
+        assert_eq!(
+            source_gateway_url_for_github_url(
+                "https://api.github.com/repos/aave/aave-v3-origin/git/trees/0123456789abcdef0123456789abcdef01234567?recursive=1"
+            )
+            .unwrap(),
+            "https://source.cyphes.com/v1/github/tree?repo=aave%2Faave-v3-origin&commit=0123456789abcdef0123456789abcdef01234567"
+        );
+        assert_eq!(
+            source_gateway_url_for_github_url(
+                "https://raw.githubusercontent.com/aave/aave-v3-origin/0123456789abcdef0123456789abcdef01234567/contracts/protocol/pool/Pool.sol"
+            )
+            .unwrap(),
+            "https://source.cyphes.com/v1/github/file?repo=aave%2Faave-v3-origin&commit=0123456789abcdef0123456789abcdef01234567&path=contracts%2Fprotocol%2Fpool%2FPool.sol"
+        );
+    }
 }

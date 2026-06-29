@@ -152,7 +152,7 @@ export function useP2P() {
 
   async function refreshCreditSummary() {
     if (!isTauriRuntime()) {
-      const empty = { total: 0, allocations: [] };
+      const empty = { total: 0, allocations: [], provisionalTotal: 0, provisionalAllocations: [] };
       setCreditSummary(empty);
       return empty;
     }
