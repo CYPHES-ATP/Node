@@ -1,8 +1,10 @@
 # Source Gateway
 
-Status: v0.6.1 source preview
+Status: v0.6.1 testnet seed
 
-`source-gateway/` contains the MVP service for `source.cyphes.com`.
+`source-gateway/` contains the MVP service for `source.cyphes.com`. The
+CYPHES-operated gateway is live with GitHub App credentials stored server-side
+on Fly.io.
 
 ```text
 CYPHES nodes
@@ -41,7 +43,7 @@ Default:
 CYPHES_SOURCE_GATEWAY_URL=https://source.cyphes.com
 ```
 
-Until DNS is fully pointed, v0.6.1 also has a built-in seed fallback:
+v0.6.1 also has a built-in Fly seed fallback:
 
 ```text
 https://cyphes-source-gateway.fly.dev
@@ -62,6 +64,12 @@ export CYPHES_DISABLE_SOURCE_GATEWAY=1
 If the gateway is down, CYPHES falls back to local GitHub token/direct reads.
 
 ## Gateway Deployment
+
+Live CYPHES-operated gateway:
+
+```text
+https://source.cyphes.com/healthz
+```
 
 Fast token-backed run:
 
@@ -88,9 +96,6 @@ docker compose up --build
 
 ## Still Needed
 
-- deploy the service at `source.cyphes.com`;
-- create/install the CYPHES GitHub App;
-- store secrets in the deployment environment;
 - add operational logs, metrics, and cache size limits;
 - include source manifest hashes directly in contribution receipts;
 - add per-node quotas keyed by ATP identity.

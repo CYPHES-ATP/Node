@@ -1,6 +1,6 @@
 # Autonomous Guardian Loop
 
-Status: v0.6.1 source preview
+Status: v0.6.1 testnet seed
 
 The v0.6.1 main CYPHES app is autonomous by default. Users open the app,
 select a local LM Studio or Ollama model, and watch CYPHES coordinate public
@@ -54,9 +54,9 @@ Nodes can increase quota by configuring a local GitHub token through
 `githubToken` in `~/.cyphes/settings.json`. CYPHES does not ship with an
 embedded network-wide GitHub token.
 
-For public-scale 24/7 operation, v0.6.1 includes the Source Gateway binary.
-The remaining operations step is deploying it at `source.cyphes.com` with a
-CYPHES GitHub App, cache limits, metrics, and per-node quotas.
+For public-scale 24/7 operation, v0.6.1 includes the live Source Gateway at
+`source.cyphes.com` with server-side CYPHES GitHub App credentials. The
+remaining gateway work is cache limits, metrics, and per-node quotas.
 
 ## Guardian Index v2
 

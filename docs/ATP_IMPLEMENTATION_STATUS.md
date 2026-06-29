@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-Last reviewed: June 28, 2026
+Last reviewed: June 29, 2026
 
 ## Conformance Position
 
@@ -37,13 +37,14 @@ Self-verification remains useful for local QA, but it cannot mint earned ATP.
 v0.5.7 also adds a local pinned-source cache for immutable GitHub tree and
 raw-file reads.
 
-v0.6.1 source preview adds the Source Gateway MVP. `source-gateway/` builds a
-standalone `cyphes-source-gateway` service with server-side GitHub token or
-GitHub App installation-token support, shared read-through disk cache,
-ETag/Last-Modified revalidation, signed source manifest headers, and Docker
-deployment files. Desktop nodes try the Source Gateway first and fall back to
-direct GitHub reads if unavailable. Deploying it at `source.cyphes.com` and
-binding it to production GitHub App secrets remains an operations step.
+v0.6.1 adds the Source Gateway MVP and live testnet seed infrastructure.
+`source-gateway/` builds a standalone `cyphes-source-gateway` service with
+server-side GitHub token or GitHub App installation-token support, shared
+read-through disk cache, ETag/Last-Modified revalidation, signed source
+manifest headers, and Docker deployment files. The CYPHES-operated
+`source.cyphes.com` gateway is deployed on Fly.io with GitHub App credentials
+stored server-side. Desktop nodes try the Source Gateway first and fall back to
+direct GitHub reads if unavailable.
 
 The verified path is:
 
@@ -144,7 +145,7 @@ an ATP v0.3 wire verb.
 | Runtime progress and tokens/sec events | Implemented locally |
 | Effective skill hash in contribution runtime | Implemented locally |
 | Durable network-wide campaign/work index | Not implemented |
-| Deployed `source.cyphes.com` production service | Not implemented |
+| Deployed `source.cyphes.com` testnet seed service | Implemented |
 | Source manifest hash embedded directly in contribution receipts | Not implemented |
 | Per-node Source Gateway quota keyed by ATP identity | Not implemented |
 | OpenClaw/Hermes runtime adapter | Not implemented |

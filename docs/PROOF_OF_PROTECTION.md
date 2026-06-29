@@ -1,6 +1,6 @@
 # Proof Of Protection
 
-Status: v0.6.1 source preview
+Status: v0.6.1 testnet seed
 
 CYPHES is moving toward an autonomous digital labor network. Audit is the first
 use case because security work is high-value, evidence-heavy, and naturally
@@ -88,4 +88,3 @@ fall back to their own GitHub token or unauthenticated GitHub reads.
 This is the first credible 24/7 foundation. The next infrastructure layer is a
 durable work index and offline mailbox so work keeps moving even when the
 requester/verifier app is not online at the same time as the worker.
-

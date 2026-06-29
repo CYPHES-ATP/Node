@@ -1,6 +1,6 @@
 # ATP Credit Trust Model
 
-Status: v0.6.1 source preview
+Status: v0.6.1 testnet seed
 
 CYPHES has two different trust layers. They should not be confused.
 

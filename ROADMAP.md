@@ -57,11 +57,11 @@ signed ATP envelopes or portable artifacts.
   tampered local SQLite allocation rows unless they match signed contribution
   and verifier receipts. It also adds a local pinned-source cache for immutable
   GitHub tree and raw-file reads.
-- v0.6.1 source preview adds the first Source Gateway binary for
+- v0.6.1 adds the first Source Gateway binary and live testnet seed at
   `source.cyphes.com`: server-side GitHub token or GitHub App installation
   token support, read-through disk cache, ETag/Last-Modified revalidation,
-  signed source manifest headers, Dockerfile/compose deployment files, and
-  desktop-node gateway-first/direct-fallback source reads.
+  signed source manifest headers, Dockerfile/compose deployment files, Fly.io
+  deployment, and desktop-node gateway-first/direct-fallback source reads.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
@@ -82,8 +82,7 @@ Status: **Partial**
 
 - Persist remote campaign/work-unit discovery in a durable searchable work-order
   index instead of only online peer broadcast.
-- Deploy the v0.6.1 CYPHES Source Gateway at `source.cyphes.com`, install the
-  CYPHES GitHub App, add production secrets, metrics, cache limits, and
+- Harden the live v0.6.1 CYPHES Source Gateway with metrics, cache limits, and
   per-node quotas so the public network does not treat GitHub as the live
   database.
 - Split verification and challenge handling across independently claimable

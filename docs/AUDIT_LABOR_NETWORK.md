@@ -1,6 +1,6 @@
 # CYPHES Audit Labor Network
 
-Status: v0.6.1 source preview
+Status: v0.6.1 testnet seed
 
 CYPHES is a protocol-facing autonomous audit labor network built on ATP. The
 network coordinates scoped security work, records useful labor as signed

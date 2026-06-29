@@ -5,55 +5,51 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.6.1 source preview" src="https://img.shields.io/badge/CYPHES-v0.6.1_source-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.6.1 testnet seed" src="https://img.shields.io/badge/CYPHES-v0.6.1_testnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES v0.5.6 desktop node" src="docs/images/CYPHES%20v0.5.6.png" width="100%">
+  <img alt="CYPHES v0.6.1 autonomous node cockpit" src="docs/images/CYPHES%20v0.6.1.png" width="100%">
 </p>
 
 ## Download
 
-The current source preview is **CYPHES v0.6.1**. It moves CYPHES from a
-desktop developer preview toward an autonomous digital labor network whose
-first use case is audit. v0.6.1 adds `cyphes-source-gateway`, a deployable
-`source.cyphes.com` service for server-side GitHub auth, shared read-through
-cache, ETag revalidation, and signed source manifest headers. Nodes use the
-gateway first and fall back to their own GitHub token/direct reads if it is
-unavailable.
+The current testnet seed is **CYPHES v0.6.1**. It moves CYPHES from a desktop
+developer preview toward an autonomous digital labor network whose first use
+case is audit. v0.6.1 ships `cyphes-source-gateway`, and the CYPHES-operated
+`source.cyphes.com` service is live with server-side GitHub App auth, shared
+read-through cache, ETag revalidation, and signed source manifest headers.
+Nodes use the gateway first and fall back to their own GitHub token/direct
+reads if it is unavailable.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
 and a deterministic allocation that matches the receipt data. Self-verification
 can still test the local loop, but it cannot mint earned ATP.
 
-The latest packaged Apple Silicon developer release is still **v0.5.6** until
-the v0.6.1 DMGs are cut.
+Apple Silicon download:
 
-Apple Silicon downloads:
-
-- [Download CYPHES v0.5.6](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-v0.5.6-aarch64.dmg)
-- [Download CYPHES Partner v0.5.6](https://github.com/CYPHES-ATP/Node/releases/download/v0.5.6/CYPHES-Partner-v0.5.6-aarch64.dmg)
+- [Download CYPHES v0.6.1](https://github.com/CYPHES-ATP/Node/releases/download/v0.6.1/CYPHES_0.6.1_aarch64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
 confirm **Open**. Windows and Linux users should run from source for now.
 
 Use **CYPHES** to connect a local model and watch the autonomous guardian loop
-run. Use **CYPHES Partner** as the admin/protocol console for manual campaign
-creation, verification inspection, report export, and ATP proof logs.
+run. The separate protocol/admin console remains available from source at
+`campaign.html` for manual campaign creation, verification inspection, report
+export, and ATP proof logs.
 
-For 24/7 operation, configure a local GitHub token for higher GitHub API quota:
-set `CYPHES_GITHUB_TOKEN`, `GITHUB_TOKEN`, write the token to
-`~/.cyphes/github.token`, or add `githubToken` to `~/.cyphes/settings.json`.
-CYPHES caches immutable pinned GitHub source reads locally and can read through
-`source.cyphes.com`, with `https://cyphes-source-gateway.fly.dev` as the
-temporary seed fallback until DNS is pointed. CYPHES never ships with a shared
-embedded GitHub token. The gateway keeps GitHub credentials server-side and
-lets many nodes reuse cached pinned source context.
+For 24/7 operation, CYPHES reads public GitHub source through
+`source.cyphes.com`, where GitHub App credentials live server-side. CYPHES also
+caches immutable pinned GitHub source reads locally. Serious node operators can
+still configure a local fallback token with `CYPHES_GITHUB_TOKEN`,
+`GITHUB_TOKEN`, `~/.cyphes/github.token`, or `githubToken` in
+`~/.cyphes/settings.json`, but CYPHES never ships a shared embedded GitHub
+token.
 
 The developer preview completes one ATP-L1 repository-audit transaction:
 
@@ -220,8 +216,9 @@ Artifact Two independently returns:
   contact protocols, claim payouts, or move funds. Human approval is required
   before disclosure, escalation, liquidity-pool settlement, or external
   submission.
-- The Source Gateway binary exists, but `source.cyphes.com` still has to be
-  deployed and wired to a CYPHES GitHub App before public-scale 24/7 operation.
+- `source.cyphes.com` is live with server-side CYPHES GitHub App credentials,
+  but gateway hardening still needs metrics, cache limits, per-node quotas, and
+  source manifest hashes embedded directly in contribution receipts.
 - Source manifests are signed in gateway response headers, but source manifest
   hashes are not yet embedded directly in contribution receipts.
 - No per-node Source Gateway quotas keyed by ATP identity yet.
