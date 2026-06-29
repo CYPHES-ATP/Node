@@ -1,6 +1,6 @@
 # Source Gateway
 
-Status: v0.6.1 testnet seed
+Status: v0.6.2 testnet seed
 
 `source-gateway/` contains the MVP service for `source.cyphes.com`. The
 CYPHES-operated gateway is live with GitHub App credentials stored server-side

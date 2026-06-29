@@ -122,7 +122,7 @@ The script does not commit the manifest for you.
    `~/.cyphes/receipts/<transaction-id>/`.
 
 Verified ATP is not a token transfer or payout. The current repository-audit
-contract settles at zero value; v0.6.1 derives displayed earned credits only
+contract settles at zero value; v0.6.2 derives displayed earned credits only
 from signed contributions that receive accepted verifier receipts from an
 independent ATP identity.
 

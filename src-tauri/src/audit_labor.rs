@@ -28,6 +28,7 @@ pub const DEFAULT_SKILL_PACK_LABEL: &str = "CYPHES audit methodology v0.4";
 
 const DEFAULT_AUDIT_SKILL_TEXT: &str =
     include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
+const PARSER_FALLBACK_CREDIT_MULTIPLIER: f64 = 0.10;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -716,16 +717,23 @@ fn allocate_credits_with_policy(
         .iter()
         .filter(|coverage| !coverage.evidence.is_empty())
         .count() as u32;
+    let quality_multiplier = contribution_quality_multiplier(contribution);
     let participation = credit_score(CreditScoreInput {
         base_points: 100.0,
         difficulty_multiplier: work_unit_difficulty(&contribution.work_unit_id),
         verification_multiplier: 1.0,
-        model_multiplier: contribution.runtime.model_multiplier,
+        model_multiplier: contribution.runtime.model_multiplier * quality_multiplier,
         requester_approval: 1.0,
         penalty_points: 0.0,
     })?;
-    let coverage = high_quality_coverage.saturating_mul(15);
-    let finding = reportable_findings.saturating_mul(75);
+    let coverage =
+        scaled_credit_bucket(high_quality_coverage.saturating_mul(15), quality_multiplier);
+    let finding = scaled_credit_bucket(reportable_findings.saturating_mul(75), quality_multiplier);
+    let formula = if is_parser_fallback_contribution(contribution) {
+        "base * difficulty * verification * model * requesterApproval * quality(0.10 parser fallback) - penalties"
+    } else {
+        "base * difficulty * verification * model * requesterApproval - penalties"
+    };
     let mut allocations = vec![CreditAllocation {
         profile: CREDIT_PROFILE.to_string(),
         profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
@@ -743,13 +751,13 @@ fn allocate_credits_with_policy(
             bonus_allocation_placeholder: if reportable_findings > 0 { 1 } else { 0 },
         },
         total: 0,
-        formula: "base * difficulty * verification * model * requesterApproval - penalties"
-            .to_string(),
+        formula: formula.to_string(),
         issued_at: now_rfc3339(),
     }];
     allocations[0].total = allocations[0].buckets.total();
 
     if verification.verifier_agent_id != contribution.worker_agent_id {
+        let verification_credit = scaled_credit_bucket(40, quality_multiplier);
         let mut verifier_allocation = CreditAllocation {
             profile: CREDIT_PROFILE.to_string(),
             profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
@@ -761,19 +769,51 @@ fn allocate_credits_with_policy(
             contribution_receipt_hash: contribution.receipt_hash.clone(),
             buckets: CreditBuckets {
                 participation: 0,
-                verification: 40,
+                verification: verification_credit,
                 coverage: 0,
                 finding: 0,
                 bonus_allocation_placeholder: 0,
             },
             total: 0,
-            formula: "accepted peer verification credit".to_string(),
+            formula: if is_parser_fallback_contribution(contribution) {
+                "accepted peer verification credit * quality(0.10 parser fallback)".to_string()
+            } else {
+                "accepted peer verification credit".to_string()
+            },
             issued_at: now_rfc3339(),
         };
         verifier_allocation.total = verifier_allocation.buckets.total();
         allocations.push(verifier_allocation);
     }
     Ok(allocations)
+}
+
+fn contribution_quality_multiplier(contribution: &NodeContribution) -> f64 {
+    if is_parser_fallback_contribution(contribution) {
+        PARSER_FALLBACK_CREDIT_MULTIPLIER
+    } else {
+        1.0
+    }
+}
+
+fn is_parser_fallback_contribution(contribution: &NodeContribution) -> bool {
+    contribution.findings.is_empty()
+        && (contribution
+            .notes_markdown
+            .contains("CYPHES parser note: model output was not valid structured JSON")
+            || contribution.commands.iter().any(|command| {
+                command
+                    .to_ascii_lowercase()
+                    .contains("structured parse failed")
+            })
+            || contribution.coverage.iter().any(|coverage| {
+                coverage.area.eq_ignore_ascii_case("local model output")
+                    && coverage.status.eq_ignore_ascii_case("needs_review")
+            }))
+}
+
+fn scaled_credit_bucket(points: u32, multiplier: f64) -> u32 {
+    ((points as f64) * multiplier).max(0.0).round() as u32
 }
 
 pub fn final_report_markdown(snapshot: &CampaignReportSnapshot) -> String {
@@ -1455,6 +1495,88 @@ mod tests {
         let credits = allocate_credits(&contribution, &accepted).unwrap();
         assert_eq!(credits.len(), 2);
         assert!(credits.iter().all(|credit| credit.total > 0));
+    }
+
+    #[test]
+    fn parser_fallback_contributions_receive_quality_deduction() {
+        let worker = identity::Keypair::generate_ed25519();
+        let verifier = identity::Keypair::generate_ed25519();
+        let structured = signed_contribution(
+            &worker,
+            "campaign-1".to_string(),
+            "campaign-1-02-repository-inventory".to_string(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Structured negative coverage with evidence.".to_string(),
+            vec![],
+            vec![artifact("inventory.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["README.md reviewed at pinned commit.".to_string()],
+            }],
+            vec!["local model audit skill completed".to_string()],
+        )
+        .unwrap();
+        let fallback = signed_contribution(
+            &worker,
+            "campaign-1".to_string(),
+            "campaign-1-02-repository-inventory".to_string(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Raw notes.\n\n> CYPHES parser note: model output was not valid structured JSON: no JSON object start found".to_string(),
+            vec![],
+            vec![artifact("audit-skill-output.md")],
+            vec![CoverageItem {
+                area: "local model output".to_string(),
+                status: "needs_review".to_string(),
+                evidence: vec![
+                    "Model returned unstructured output; no reportable finding accepted.".to_string(),
+                ],
+            }],
+            vec![
+                "local model audit skill response captured; structured parse failed".to_string(),
+            ],
+        )
+        .unwrap();
+        let structured_verification = signed_verification(
+            &verifier,
+            "campaign-1".to_string(),
+            structured.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Structured evidence is bounded and useful.".to_string(),
+            vec![],
+            vec![artifact("verification.md")],
+        )
+        .unwrap();
+        let fallback_verification = signed_verification(
+            &verifier,
+            "campaign-1".to_string(),
+            fallback.contribution_id.clone(),
+            "accepted".to_string(),
+            "PARSER_FALLBACK_ACCEPTED".to_string(),
+            "Fallback notes are accepted with reduced credit.".to_string(),
+            vec![],
+            vec![artifact("verification.md")],
+        )
+        .unwrap();
+
+        let structured_worker_total = allocate_credits(&structured, &structured_verification)
+            .unwrap()
+            .into_iter()
+            .find(|credit| credit.receiver_agent_id == structured.worker_agent_id)
+            .unwrap()
+            .total;
+        let fallback_worker_credit = allocate_credits(&fallback, &fallback_verification)
+            .unwrap()
+            .into_iter()
+            .find(|credit| credit.receiver_agent_id == fallback.worker_agent_id)
+            .unwrap();
+
+        assert_eq!(structured_worker_total, 35);
+        assert_eq!(fallback_worker_credit.total, 4);
+        assert!(fallback_worker_credit
+            .formula
+            .contains("quality(0.10 parser fallback)"));
     }
 
     #[test]

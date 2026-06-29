@@ -1,6 +1,6 @@
 # CYPHES Audit Labor Network
 
-Status: v0.6.1 testnet seed
+Status: v0.6.2 testnet seed
 
 CYPHES is a protocol-facing autonomous audit labor network built on ATP. The
 network coordinates scoped security work, records useful labor as signed
@@ -65,7 +65,7 @@ protocol-specific checklist items.
 
 ## Autonomous Guardian Loop
 
-v0.6.1 makes the main CYPHES node autonomous by default:
+v0.6.2 makes the main CYPHES node autonomous by default:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
   model, enforces the configured runtime limit, signs the contribution, and
@@ -80,9 +80,13 @@ v0.6.1 makes the main CYPHES node autonomous by default:
   already active locally.
 - **GitHub backoff** pauses repository reads when GitHub rate-limits the node,
   surfaces the reset window in the UI, and resumes without killing peer
-  networking. Nodes can set a local GitHub token for higher quota. v0.6.1 also
+  networking. Nodes can set a local GitHub token for higher quota. v0.6.2 also
   routes source reads through the optional Source Gateway first, then falls back
   to direct GitHub reads and local pinned-source cache.
+- **Daily caps** default to 2880 Guardian observations/day and 2880 model-audit
+  work-unit runs/day for long-running testnet participation.
+- **Quality deductions** reduce parser-fallback, zero-structured-finding
+  contributions by 90% and show the deduction in red runtime telemetry.
 
 The Autonomous Guardian Loop does not submit external vulnerability reports,
 contact protocol teams, claim payouts, or move funds. It makes the network feel
@@ -193,7 +197,7 @@ but it does not integrate with external submission portals or direct protocol
 payout systems yet.
 
 Confirmed findings can later receive bonus allocation or split logic through a
-settlement adapter, but v0.6.1 only records the placeholder. No UI should imply
+settlement adapter, but v0.6.2 only records the placeholder. No UI should imply
 that ATP Credits are redeemable payouts.
 
 ## Final Report Bundle

@@ -46,6 +46,11 @@ manifest headers, and Docker deployment files. The CYPHES-operated
 stored server-side. Desktop nodes try the Source Gateway first and fall back to
 direct GitHub reads if unavailable.
 
+v0.6.2 raises the autonomous observation/model-audit caps to 2880/day each and
+reduces parser-fallback contributions by 90% in the deterministic ATP scoring
+formula. The cockpit shows the fallback deduction as a red telemetry event while
+the signed artifact is still preserved for review.
+
 The verified path is:
 
 ```text

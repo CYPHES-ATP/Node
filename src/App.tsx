@@ -206,6 +206,7 @@ function shortCommit(commitSha: string) {
 
 function cockpitEventLabel(phase: string) {
   const normalized = phase.toLowerCase();
+  if (normalized.includes("quality deduction") || normalized.includes("parser fallback")) return phase;
   if (normalized.includes("reading pinned github")) return "Fetched scoped files";
   if (normalized.includes("building model prompt")) return "Built audit prompt";
   if (normalized.includes("running local model")) return "Prompted local model";
@@ -214,6 +215,12 @@ function cockpitEventLabel(phase: string) {
   if (normalized.includes("complete")) return "Audit skill complete";
   if (normalized.includes("preparing")) return "Loaded audit skill";
   return phase;
+}
+
+function cockpitEventTone(phase: string): CockpitEvent["tone"] {
+  const normalized = phase.toLowerCase();
+  if (normalized.includes("quality deduction") || normalized.includes("parser fallback")) return "danger";
+  return "info";
 }
 
 function formatClock(ms: number) {
@@ -411,7 +418,7 @@ function AppContent() {
       const phaseKey = `${event.payload.campaignId}:${event.payload.workUnitId}:${event.payload.phase}`;
       if (lastPhaseRef.current !== phaseKey) {
         lastPhaseRef.current = phaseKey;
-        pushCockpitEvent(cockpitEventLabel(event.payload.phase));
+        pushCockpitEvent(cockpitEventLabel(event.payload.phase), cockpitEventTone(event.payload.phase));
       }
     }).then((cleanup) => {
       cleanups.push(cleanup);
@@ -865,7 +872,7 @@ function AppContent() {
       return false;
     }
     if (normalizedAutoCounters.workUnits >= autoMode.maxDailyWorkUnits) {
-      pushAutoPulse("Daily work limit reached", "warn");
+      pushAutoPulse(`Model audit cap reached (${autoMode.maxDailyWorkUnits}/day)`, "warn");
       return false;
     }
 
@@ -918,6 +925,10 @@ function AppContent() {
         if (worked) return;
       }
       if (autoMode.questSeeder) {
+        if (normalizedAutoCounters.targetsObserved >= autoMode.maxDailyObservations) {
+          pushAutoPulse(`Observation cap reached (${autoMode.maxDailyObservations}/day)`, "warn");
+          return;
+        }
         const selection = selectNextGuardianTarget();
         if (selection) {
           try {

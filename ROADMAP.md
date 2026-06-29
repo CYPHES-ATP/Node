@@ -62,6 +62,9 @@ signed ATP envelopes or portable artifacts.
   token support, read-through disk cache, ETag/Last-Modified revalidation,
   signed source manifest headers, Dockerfile/compose deployment files, Fly.io
   deployment, and desktop-node gateway-first/direct-fallback source reads.
+- v0.6.2 raises default autonomous observation/model-audit caps to 2880/day
+  each and applies a deterministic 90% ATP quality deduction to parser-fallback
+  contributions with zero structured findings.
 - Professional audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
@@ -82,7 +85,7 @@ Status: **Partial**
 
 - Persist remote campaign/work-unit discovery in a durable searchable work-order
   index instead of only online peer broadcast.
-- Harden the live v0.6.1 CYPHES Source Gateway with metrics, cache limits, and
+- Harden the live CYPHES Source Gateway with metrics, cache limits, and
   per-node quotas so the public network does not treat GitHub as the live
   database.
 - Split verification and challenge handling across independently claimable

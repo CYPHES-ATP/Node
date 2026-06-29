@@ -1,6 +1,6 @@
 # ATP Credit Trust Model
 
-Status: v0.6.1 testnet seed
+Status: v0.6.2 testnet seed
 
 CYPHES has two different trust layers. They should not be confused.
 
@@ -16,7 +16,7 @@ This is the strong part of the system today.
 
 ## Verified ATP
 
-v0.6.1 treats ATP Credits as a derived view over signed receipts, not as a
+v0.6.2 treats ATP Credits as a derived view over signed receipts, not as a
 trusted SQLite balance.
 
 Credits count as **Verified ATP** only when all of these are true:
@@ -29,6 +29,10 @@ Credits count as **Verified ATP** only when all of these are true:
   campaign id, worker identity, and contribution receipt hash;
 - the allocation matches the deterministic CYPHES scoring formula.
 
+v0.6.2 reduces parser-fallback contributions by 90%. Raw model prose with zero
+structured findings and a parser-fallback marker can still be preserved as an
+artifact, but it earns only 10% of the normal worker/verifier allocation.
+
 The UI displays only independently verified, receipt-derived credits as earned
 ATP. If someone edits `~/.cyphes/atp.sqlite3` and inserts a fake allocation,
 the credit summary recomputes trust from the signed contribution and verifier
@@ -38,7 +42,7 @@ records and ignores the forged row.
 
 Pending or projected ATP can move while a local model is running, but it is not
 earned. Self-verification and single-node preview loops are useful for testing
-the pipeline, but they cannot mint Verified ATP in v0.6.1.
+the pipeline, but they cannot mint Verified ATP in v0.6.2.
 
 The honest status for single-node or offline work is:
 

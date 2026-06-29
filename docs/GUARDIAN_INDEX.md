@@ -1,6 +1,6 @@
 # Guardian Index
 
-Status: v0.6.1 testnet seed
+Status: v0.6.2 testnet seed
 
 `protocol/targets/guardian-target-index.json` is the bundled work seed for the
 Autonomous Guardian Loop. It gives CYPHES enough structured public targets to

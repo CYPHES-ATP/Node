@@ -2,17 +2,17 @@
 
 ## Download The macOS Preview
 
-Apple Silicon users can download the current packaged v0.6.1 developer DMG
+Apple Silicon users can download the current packaged v0.6.2 developer DMG
 from:
 
-- https://github.com/CYPHES-ATP/Node/releases/download/v0.6.1/CYPHES_0.6.1_aarch64.dmg
+- https://github.com/CYPHES-ATP/Node/releases/download/v0.6.2/CYPHES_0.6.2_aarch64.dmg
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. Windows and Linux binary distributions are not
 available yet.
 
-The current source tree is v0.6.1. Run from source to test Verified ATP
+The current source tree is v0.6.2. Run from source to test Verified ATP
 independent-verifier enforcement, the separate `campaign.html` admin console,
 and the local pinned-source GitHub cache.
 
@@ -43,7 +43,7 @@ printf '%s' 'github_pat_...' > ~/.cyphes/github.token
 The app does not include a shared CYPHES GitHub token. A shared token in a DMG
 would be public the moment the app ships.
 
-v0.6.1 also caches immutable pinned GitHub tree and raw-file reads under
+v0.6.2 also caches immutable pinned GitHub tree and raw-file reads under
 `~/.cyphes/source-cache/github/`. For public-scale 24/7 operation, CYPHES nodes
 read through the live Source Gateway at `source.cyphes.com`, where GitHub App
 credentials stay server-side.

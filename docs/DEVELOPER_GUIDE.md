@@ -79,7 +79,7 @@ The Rust backend:
 - stores protocol audit campaigns, work units, claims, contributions,
   verifier decisions, ATP Credit allocations, and final report bundles;
 - exposes Guardian Index v2;
-- enforces Auto Worker runtime limits when the v0.6.1 autonomous loop runs
+- enforces Auto Worker runtime limits when the v0.6.2 autonomous loop runs
   claimed work units.
 
 Current audit transaction uses:

@@ -275,6 +275,16 @@ pub async fn run_local_audit_skill(
     );
 
     let parsed = parse_model_output(&model_output.content);
+    if parsed.parser_fallback {
+        emit_progress(
+            app,
+            campaign,
+            work_unit,
+            "ATP quality deduction: parser fallback, 0 structured findings, -90% projected reward",
+            80,
+            tokens_per_second,
+        );
+    }
     let output_hash = sha256_ref(model_output.content.as_bytes());
     let runtime_json = serde_json::to_vec_pretty(&json!({
         "provider": provider,
@@ -285,6 +295,10 @@ pub async fn run_local_audit_skill(
         "inputHash": input_hash,
         "outputHash": output_hash,
         "tokensPerSecond": tokens_per_second,
+        "parserFallback": parsed.parser_fallback,
+        "structuredFindingCount": parsed.findings.len(),
+        "structuredReportableFindingCount": parsed.findings.iter().filter(|finding| finding.reportable).count(),
+        "creditQualityMultiplier": if parsed.parser_fallback { 0.10 } else { 1.0 },
         "repository": campaign.repository,
         "workUnitId": work_unit.work_unit_id,
         "selectedFiles": context.selected_files.iter().map(|file| &file.path).collect::<Vec<_>>(),
@@ -1126,6 +1140,7 @@ struct ParsedModelOutput {
     findings: Vec<AuditFinding>,
     coverage: Vec<CoverageItem>,
     commands: Vec<String>,
+    parser_fallback: bool,
 }
 
 fn parse_model_output(content: &str) -> ParsedModelOutput {
@@ -1147,6 +1162,7 @@ fn parse_model_output(content: &str) -> ParsedModelOutput {
         commands: vec![
             "local model audit skill response captured; structured parse failed".to_string(),
         ],
+        parser_fallback: true,
     })
 }
 
@@ -1210,6 +1226,7 @@ fn parse_json_output(value: &Value) -> Result<ParsedModelOutput, String> {
         findings,
         coverage,
         commands,
+        parser_fallback: false,
     })
 }
 
@@ -1376,6 +1393,7 @@ mod tests {
         let output = parse_model_output("I looked around and it seems okay.");
         assert!(output.findings.is_empty());
         assert_eq!(output.coverage[0].status, "needs_review");
+        assert!(output.parser_fallback);
     }
 
     #[test]

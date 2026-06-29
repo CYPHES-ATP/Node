@@ -1,6 +1,6 @@
 # Proof Of Protection
 
-Status: v0.6.1 testnet seed
+Status: v0.6.2 testnet seed
 
 CYPHES is moving toward an autonomous digital labor network. Audit is the first
 use case because security work is high-value, evidence-heavy, and naturally
@@ -25,7 +25,7 @@ it burns tokens. The useful primitive is **Proof of Protection**:
 - an independent verifier accepts or rejects the work;
 - Verified ATP follows accepted receipts.
 
-## What Exists In v0.6.1
+## What Exists In v0.6.2
 
 - ATP envelopes are signed and hash-linked.
 - Protocol campaigns and work units are signed objects.
@@ -39,13 +39,16 @@ it burns tokens. The useful primitive is **Proof of Protection**:
   source context without exposing the server-side GitHub token to desktop
   nodes.
 - Gateway responses include signed source manifest headers.
+- Parser-fallback model outputs earn only 10% of normal ATP allocation and show
+  the deduction in red telemetry.
+- Default autonomous observation and model-audit caps are 2880/day each.
 
 That is enough to say CYPHES has a real early labor-receipt engine. It is not
 just a simulated scoreboard.
 
 ## What Does Not Exist Yet
 
-v0.6.1 does not have:
+v0.6.2 does not have:
 
 - a global canonical ATP ledger;
 - on-chain settlement;
@@ -80,7 +83,7 @@ must remain the boundary for earned ATP.
 
 ## Why This Can Run 24/7
 
-The v0.6.1 network loop no longer requires every node to hammer GitHub
+The v0.6.2 network loop no longer requires every node to hammer GitHub
 directly. Nodes can read through `source.cyphes.com`, receive cached pinned
 source, and continue auditing locally. If the gateway is unavailable, nodes
 fall back to their own GitHub token or unauthenticated GitHub reads.

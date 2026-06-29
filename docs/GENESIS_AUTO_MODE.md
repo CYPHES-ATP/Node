@@ -1,8 +1,8 @@
 # Autonomous Guardian Loop
 
-Status: v0.6.1 testnet seed
+Status: v0.6.2 testnet seed
 
-The v0.6.1 main CYPHES app is autonomous by default. Users open the app,
+The v0.6.2 main CYPHES app is autonomous by default. Users open the app,
 select a local LM Studio or Ollama model, and watch CYPHES coordinate public
 audit work. There are no Auto Worker, Auto Verifier, Quest Seeder, or Work
 Order controls in the main node UI.
@@ -36,6 +36,11 @@ Guardian Index v2
 
 The runtime limit remains enforced by Rust for autonomous worker runs. If a local
 model exceeds the limit, CYPHES does not create a signed contribution.
+
+v0.6.2 raises the default autonomous caps to support long-running testnet nodes:
+
+- **Observation cap**: 2880 Guardian target observations per day.
+- **Model audit cap**: 2880 local-model work-unit runs per day.
 
 ## GitHub Backoff
 
@@ -104,6 +109,13 @@ ERC-20, escrow balance, payout claim, or transferable token in this release.
 v0.5.7 recomputes the displayed verified total from signed contribution and
 verifier records. Local SQLite edits that do not match those receipts are
 ignored by the credit summary.
+
+v0.6.2 adds a quality deduction for parser fallback output. If a local model
+returns unstructured prose that cannot be parsed into the CYPHES findings and
+coverage schema, the contribution can still be signed and verified, but its ATP
+allocation is multiplied by 0.10. The cockpit shows this as a red telemetry
+event: `ATP quality deduction: parser fallback, 0 structured findings, -90%
+projected reward`.
 
 ## What It Does Not Do
 

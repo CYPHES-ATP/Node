@@ -2,6 +2,7 @@ export interface GenesisAutoModeSettings {
   autoWorker: boolean;
   autoVerifier: boolean;
   questSeeder: boolean;
+  maxDailyObservations: number;
   maxDailyWorkUnits: number;
   maxRuntimeMinutes: number;
   modelRequirement: "local-model-required" | "any-local-model";
@@ -41,7 +42,8 @@ export const DEFAULT_GENESIS_AUTO_MODE: GenesisAutoModeSettings = {
   autoWorker: true,
   autoVerifier: true,
   questSeeder: true,
-  maxDailyWorkUnits: 24,
+  maxDailyObservations: 2880,
+  maxDailyWorkUnits: 2880,
   maxRuntimeMinutes: 8,
   modelRequirement: "local-model-required",
 };
@@ -78,7 +80,14 @@ export function readGenesisAutoModeSettings() {
     autoWorker: true,
     autoVerifier: true,
     questSeeder: true,
-    maxDailyWorkUnits: Math.max(1, stored.maxDailyWorkUnits || DEFAULT_GENESIS_AUTO_MODE.maxDailyWorkUnits),
+    maxDailyObservations: Math.max(
+      DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
+      stored.maxDailyObservations || DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
+    ),
+    maxDailyWorkUnits: Math.max(
+      DEFAULT_GENESIS_AUTO_MODE.maxDailyWorkUnits,
+      stored.maxDailyWorkUnits || DEFAULT_GENESIS_AUTO_MODE.maxDailyWorkUnits,
+    ),
     maxRuntimeMinutes: Math.max(1, stored.maxRuntimeMinutes || DEFAULT_GENESIS_AUTO_MODE.maxRuntimeMinutes),
   };
 }
@@ -116,7 +125,7 @@ export function writeGenesisAutoCounters(counters: GenesisAutoCounters) {
 
 export function defaultGuardianObservationLedger(): GuardianObservationLedger {
   return {
-    version: "0.5.6",
+    version: "0.6.2",
     targets: {},
   };
 }
@@ -155,7 +164,7 @@ export function recordGuardianObservation(
   }
   const updated = {
     ...ledger,
-    version: "0.5.6",
+    version: "0.6.2",
     targets: {
       ...ledger.targets,
       [targetId]: next,
@@ -176,7 +185,7 @@ export function recordGuardianFailure(
   };
   const updated = {
     ...ledger,
-    version: "0.5.6",
+    version: "0.6.2",
     targets: {
       ...ledger.targets,
       [targetId]: {
