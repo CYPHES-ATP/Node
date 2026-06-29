@@ -20,8 +20,9 @@ and the local pinned-source GitHub cache.
   Studio or Ollama model and the node watches targets, creates non-duplicate
   work, auto-claims remote work, runs bounded audit skill passes, and receives
   receipt-backed ATP Credits after verifier acceptance.
-- **CYPHES Partner** is the admin/protocol console for manual campaign
-  creation, verification inspection, ATP proof logs, and final report export.
+- The separate `campaign.html` admin/protocol console is available from source
+  for manual campaign creation, verification inspection, ATP proof logs, and
+  final report export.
 - The Autonomous Guardian Loop does not submit external reports or claim
   payouts; ATP Credits become earned only after accepted verifier receipts.
 
