@@ -55,8 +55,9 @@ export CYPHES_SOURCE_GATEWAY_URL=http://127.0.0.1:8080
 cargo run --manifest-path source-gateway/Cargo.toml
 ```
 
-When unset, CYPHES nodes try `https://source.cyphes.com` first and fall back to
-direct GitHub reads if the gateway is unavailable.
+When unset, CYPHES nodes try `https://source.cyphes.com` first, then the
+temporary Fly seed gateway at `https://cyphes-source-gateway.fly.dev`, then
+direct GitHub reads if gateways are unavailable.
 
 ## Native Development
 

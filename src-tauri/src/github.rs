@@ -47,7 +47,7 @@ pub fn client() -> Result<reqwest::Client, String> {
 }
 
 pub fn github_access_status() -> GitHubAccessStatus {
-    let gateway = source_gateway_base_url();
+    let gateway = source_gateway_base_urls().into_iter().next();
     match read_backoff() {
         Some(backoff) if backoff.retry_after_ms > now_ms() => GitHubAccessStatus {
             authenticated: github_token().is_some(),
@@ -234,20 +234,38 @@ fn github_token() -> Option<String> {
 }
 
 async fn get_via_source_gateway(client: &reqwest::Client, url: &str) -> Option<String> {
-    let gateway_url = source_gateway_url_for_github_url(url)?;
-    let response = client
-        .get(gateway_url)
-        .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(6))
-        .send()
-        .await
-        .ok()?;
-    response.status().is_success().then_some(())?;
-    response.text().await.ok()
+    for gateway_url in source_gateway_urls_for_github_url(url) {
+        let Ok(response) = client
+            .get(gateway_url)
+            .header(USER_AGENT, format!("CYPHES/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(Duration::from_secs(6))
+            .send()
+            .await
+        else {
+            continue;
+        };
+        if response.status().is_success() {
+            if let Ok(body) = response.text().await {
+                return Some(body);
+            }
+        }
+    }
+    None
 }
 
+#[cfg(test)]
 fn source_gateway_url_for_github_url(url: &str) -> Option<String> {
-    let base = source_gateway_base_url()?;
+    source_gateway_urls_for_github_url(url).into_iter().next()
+}
+
+fn source_gateway_urls_for_github_url(url: &str) -> Vec<String> {
+    source_gateway_base_urls()
+        .into_iter()
+        .filter_map(|base| source_gateway_url_for_github_url_with_base(&base, url))
+        .collect()
+}
+
+fn source_gateway_url_for_github_url_with_base(base: &str, url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
     let host = parsed.host_str()?;
     let segments = parsed
@@ -314,21 +332,23 @@ fn source_gateway_url_for_github_url(url: &str) -> Option<String> {
     None
 }
 
-fn source_gateway_base_url() -> Option<String> {
+fn source_gateway_base_urls() -> Vec<String> {
     if std::env::var("CYPHES_DISABLE_SOURCE_GATEWAY")
         .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
     {
-        return None;
+        return Vec::new();
     }
-    Some(
-        std::env::var("CYPHES_SOURCE_GATEWAY_URL")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "https://source.cyphes.com".to_string())
-            .trim_end_matches('/')
-            .to_string(),
-    )
+    if let Ok(value) = std::env::var("CYPHES_SOURCE_GATEWAY_URL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return vec![trimmed.trim_end_matches('/').to_string()];
+        }
+    }
+    vec![
+        "https://source.cyphes.com".to_string(),
+        "https://cyphes-source-gateway.fly.dev".to_string(),
+    ]
 }
 
 fn gateway_url(base: &str, path: &str, pairs: &[(&str, String)]) -> Option<String> {

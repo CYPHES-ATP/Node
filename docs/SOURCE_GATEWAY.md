@@ -41,6 +41,12 @@ Default:
 CYPHES_SOURCE_GATEWAY_URL=https://source.cyphes.com
 ```
 
+Until DNS is fully pointed, v0.6.1 also has a built-in seed fallback:
+
+```text
+https://cyphes-source-gateway.fly.dev
+```
+
 Local QA:
 
 ```bash
@@ -88,4 +94,3 @@ docker compose up --build
 - add operational logs, metrics, and cache size limits;
 - include source manifest hashes directly in contribution receipts;
 - add per-node quotas keyed by ATP identity.
-

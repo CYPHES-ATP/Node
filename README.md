@@ -50,9 +50,10 @@ For 24/7 operation, configure a local GitHub token for higher GitHub API quota:
 set `CYPHES_GITHUB_TOKEN`, `GITHUB_TOKEN`, write the token to
 `~/.cyphes/github.token`, or add `githubToken` to `~/.cyphes/settings.json`.
 CYPHES caches immutable pinned GitHub source reads locally and can read through
-`source.cyphes.com`, but never ships with a shared embedded GitHub token. The
-gateway keeps GitHub credentials server-side and lets many nodes reuse cached
-pinned source context.
+`source.cyphes.com`, with `https://cyphes-source-gateway.fly.dev` as the
+temporary seed fallback until DNS is pointed. CYPHES never ships with a shared
+embedded GitHub token. The gateway keeps GitHub credentials server-side and
+lets many nodes reuse cached pinned source context.
 
 The developer preview completes one ATP-L1 repository-audit transaction:
 
