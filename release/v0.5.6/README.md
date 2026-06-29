@@ -1,5 +1,9 @@
 # CYPHES v0.5.6 Developer Preview
 
+Historical archive. The current public testnet seed is CYPHES v0.6.2; use the
+current download in the root [README](../../README.md#download) unless you are
+verifying this older release.
+
 Release date: 2026-06-26
 
 ## Downloads

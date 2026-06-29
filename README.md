@@ -62,13 +62,14 @@ code, writes five audit artifacts inside the granted namespace, and returns a
 signed result. The worker then emits a signed Proof of Cognition after
 requester approval.
 
-The desktop app also includes the v0.5 audit labor network: protocols can
-create a pinned audit campaign with an audit brief, hashed reference
-attachments, and an optional custom `SKILL.md` overlay; CYPHES decomposes it
-into professional audit passes; remote worker nodes can claim individual work
-units, run the local-model audit skill, and return signed contributions;
-verifiers accept or reject signed work; and the app exports a final report
-bundle generated only from accepted receipts.
+The v0.6.2 desktop app also retains the receipt-backed audit labor network
+introduced during the v0.5 preview series: protocols can create a pinned audit
+campaign with an audit brief, hashed reference attachments, and an optional
+custom `SKILL.md` overlay; CYPHES decomposes it into professional audit passes;
+remote worker nodes can claim individual work units, run the local-model audit
+skill, and return signed contributions; verifiers accept or reject signed work;
+and the app exports a final report bundle generated only from accepted
+receipts.
 
 ## Verified Transaction
 
