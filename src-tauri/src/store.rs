@@ -1515,6 +1515,8 @@ impl AtpStore {
                  );
                  CREATE INDEX IF NOT EXISTS audit_work_units_campaign
                     ON audit_work_units(campaign_id, created_at);
+                 CREATE INDEX IF NOT EXISTS audit_work_units_campaign_status
+                    ON audit_work_units(campaign_id, status, created_at, work_unit_id);
 
                  CREATE TABLE IF NOT EXISTS audit_work_unit_claims (
                     claim_id TEXT PRIMARY KEY,
@@ -1538,6 +1540,12 @@ impl AtpStore {
                     WHERE status = 'claimed';
                  CREATE INDEX IF NOT EXISTS audit_work_unit_claims_campaign
                     ON audit_work_unit_claims(campaign_id, created_at);
+                 CREATE INDEX IF NOT EXISTS audit_work_unit_claims_requester
+                    ON audit_work_unit_claims(requester_agent_id, created_at, claim_id);
+                 CREATE INDEX IF NOT EXISTS audit_work_unit_claims_status
+                    ON audit_work_unit_claims(status, created_at, claim_id);
+                 CREATE INDEX IF NOT EXISTS audit_work_unit_claims_worker_unit_status
+                    ON audit_work_unit_claims(campaign_id, work_unit_id, worker_agent_id, status);
 
                  CREATE TABLE IF NOT EXISTS audit_contributions (
                     contribution_id TEXT PRIMARY KEY,
@@ -1557,6 +1565,12 @@ impl AtpStore {
                  );
                  CREATE INDEX IF NOT EXISTS audit_contributions_campaign
                     ON audit_contributions(campaign_id, created_at);
+                 CREATE INDEX IF NOT EXISTS audit_contributions_created
+                    ON audit_contributions(created_at, contribution_id);
+                 CREATE INDEX IF NOT EXISTS audit_contributions_worker
+                    ON audit_contributions(worker_agent_id, created_at, contribution_id);
+                 CREATE INDEX IF NOT EXISTS audit_contributions_work_unit
+                    ON audit_contributions(campaign_id, work_unit_id, created_at, contribution_id);
 
                  CREATE TABLE IF NOT EXISTS audit_verifications (
                     verification_id TEXT PRIMARY KEY,
@@ -1577,6 +1591,8 @@ impl AtpStore {
                     ON audit_verifications(campaign_id, created_at);
                  CREATE UNIQUE INDEX IF NOT EXISTS audit_verifications_target_contribution
                     ON audit_verifications(target_contribution_id);
+                 CREATE INDEX IF NOT EXISTS audit_verifications_verifier
+                    ON audit_verifications(verifier_agent_id, created_at, verification_id);
 
                  CREATE TABLE IF NOT EXISTS credit_allocations (
                     allocation_id TEXT PRIMARY KEY,
@@ -1596,7 +1612,17 @@ impl AtpStore {
                     FOREIGN KEY(verification_id)
                         REFERENCES audit_verifications(verification_id)
                         ON DELETE CASCADE
-                 );",
+                 );
+                 CREATE INDEX IF NOT EXISTS credit_allocations_campaign_issued
+                    ON credit_allocations(campaign_id, issued_at, allocation_id);
+                 CREATE INDEX IF NOT EXISTS credit_allocations_verification_issued
+                    ON credit_allocations(verification_id, issued_at, allocation_id);
+                 CREATE INDEX IF NOT EXISTS credit_allocations_contribution
+                    ON credit_allocations(contribution_id, issued_at, allocation_id);
+                 CREATE INDEX IF NOT EXISTS deliveries_transaction_updated
+                    ON deliveries(transaction_id, updated_at);
+                 CREATE INDEX IF NOT EXISTS protocol_audit_campaigns_requester_created
+                    ON protocol_audit_campaigns(requester_agent_id, created_at);",
             )
             .map_err(|error| error.to_string())?;
 

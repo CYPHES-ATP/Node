@@ -5,8 +5,8 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.6.5 network hotfix" src="https://img.shields.io/badge/CYPHES-v0.6.5_hotfix-c7ff47"></a>
-    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP envelopes: v0.3" src="https://img.shields.io/badge/ATP_envelopes-v0.3-00f6ff"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.7.1 testnet" src="https://img.shields.io/badge/CYPHES-v0.7.1_testnet-c7ff47"></a>
+    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.7.1" src="https://img.shields.io/badge/ATP_wire-v0.7.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
@@ -17,12 +17,13 @@
 
 ## Download
 
-The current testnet seed is **CYPHES v0.6.5**. It moves CYPHES from a desktop
+The current testnet seed is **CYPHES v0.7.1**. It moves CYPHES from a desktop
 developer preview toward an autonomous digital labor network whose first use
 case is audit. Nodes use the CYPHES-operated `source.cyphes.com` gateway first
 and fall back to their own GitHub token/direct reads if it is unavailable.
-v0.6.5 carries the v0.6.3 audit ingest hardening and adds network liveness
-hotfixes for independent verifier duty, claim resync, and worker backpressure.
+v0.7.1 starts a fresh isolated testnet with the v0.6.3-v0.6.5 audit and
+network liveness hardening, a new ATP wire protocol, a new rendezvous
+namespace, and SQLite indexes for the hot pending, credit, and sync queries.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -31,8 +32,8 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.6.5](https://github.com/CYPHES-ATP/Node/releases/download/v0.6.5/CYPHES_0.6.5_aarch64.dmg)
-- [Download CYPHES v0.6.5 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.6.5/CYPHES_0.6.5_x64.dmg)
+- [Download CYPHES v0.7.1](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_aarch64.dmg)
+- [Download CYPHES v0.7.1 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_x64.dmg)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -165,6 +166,9 @@ Artifact Two independently returns:
   claim prerequisites heal before contribution verification, and pauses new
   worker submissions when self-authored pending receipts outrun verifier
   settlement.
+- v0.7.1 cuts a fresh isolated testnet using `/cyphes/atp/0.7.1` and
+  `cyphes.repository-audit.v0.7.1`, and adds SQLite indexes for pending queue,
+  claim sync, verifier duty, credit summary, and campaign snapshot queries.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally

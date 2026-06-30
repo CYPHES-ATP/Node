@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "network": "cyphes-dev",
+  "network": "cyphes-dev-v0.7.1",
   "operator": "CYPHES-ATP",
   "status": "online",
   "relayAddr": "/dns4/relay.cyphes.com/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
   "rendezvousAddr": "/dns4/relay.cyphes.com/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
-  "rendezvousNamespace": "cyphes.repository-audit.v0.1",
-  "updatedAt": "2026-06-13T20:37:06Z"
+  "rendezvousNamespace": "cyphes.repository-audit.v0.7.1",
+  "updatedAt": "2026-06-30T18:30:00Z"
 }
