@@ -1019,16 +1019,20 @@ impl AtpStore {
         .collect()
     }
 
-    pub fn pending_network_verification_count(&self) -> Result<usize, String> {
+    pub fn pending_network_verification_count_for_verifier(
+        &self,
+        verifier_agent_id: &str,
+    ) -> Result<usize, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let count = connection
             .query_row(
                 "SELECT COUNT(*) FROM audit_contributions c
-                 WHERE NOT EXISTS (
+                 WHERE c.worker_agent_id != ?1
+                   AND NOT EXISTS (
                     SELECT 1 FROM audit_verifications v
                     WHERE v.target_contribution_id = c.contribution_id
                  )",
-                [],
+                params![verifier_agent_id],
                 |row| row.get::<_, i64>(0),
             )
             .map_err(|error| error.to_string())?;
@@ -3441,7 +3445,18 @@ mod tests {
         .unwrap();
         claim_work_unit(&store, &worker, &campaign, &work_units[0]);
         store.record_contribution(&contribution).unwrap();
-        assert_eq!(store.pending_network_verification_count().unwrap(), 1);
+        assert_eq!(
+            store
+                .pending_network_verification_count_for_verifier(&worker_agent)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .pending_network_verification_count_for_verifier(&verifier_agent)
+                .unwrap(),
+            1
+        );
 
         assert!(store
             .network_verification_candidates(&worker_agent, 10)
@@ -3484,7 +3499,12 @@ mod tests {
             .unverified_contributions_for_network(10)
             .unwrap()
             .is_empty());
-        assert_eq!(store.pending_network_verification_count().unwrap(), 0);
+        assert_eq!(
+            store
+                .pending_network_verification_count_for_verifier(&verifier_agent)
+                .unwrap(),
+            0
+        );
         let bundles = store.verification_bundles_for_network(10).unwrap();
         assert_eq!(bundles.len(), 1);
         assert_eq!(bundles[0].0.verification_id, verification.verification_id);

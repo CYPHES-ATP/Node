@@ -1513,34 +1513,21 @@ fn verify_network_contributions(
     local_agent_id: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let verifier_roster = network_verifier_roster(state, local_agent_id);
-    let scan_limit =
-        LABOR_AUTO_VERIFY_SCAN_LIMIT.max(LABOR_AUTO_VERIFY_LIMIT * verifier_roster.len().max(1));
-    let candidates = match store.network_verification_candidates(local_agent_id, scan_limit) {
-        Ok(candidates) => candidates,
-        Err(reason) => {
-            let _ = app.emit(
-                "atp:delivery_failed",
-                serde_json::json!({
-                    "reason": format!("network verifier scan failed: {reason}"),
-                }),
-            );
-            return;
-        }
-    };
+    let candidates =
+        match store.network_verification_candidates(local_agent_id, LABOR_AUTO_VERIFY_SCAN_LIMIT) {
+            Ok(candidates) => candidates,
+            Err(reason) => {
+                let _ = app.emit(
+                    "atp:delivery_failed",
+                    serde_json::json!({
+                        "reason": format!("network verifier scan failed: {reason}"),
+                    }),
+                );
+                return;
+            }
+        };
 
-    for contribution in candidates
-        .into_iter()
-        .filter(|contribution| {
-            assigned_to_verifier(
-                &contribution.contribution_id,
-                local_agent_id,
-                &verifier_roster,
-                &contribution.worker_agent_id,
-            )
-        })
-        .take(LABOR_AUTO_VERIFY_LIMIT)
-    {
+    for contribution in candidates.into_iter().take(LABOR_AUTO_VERIFY_LIMIT) {
         let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
         let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
         let evidence_size = evidence_ref.len() as u64;
@@ -1840,53 +1827,6 @@ fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-fn network_verifier_roster(state: &P2pState, local_agent_id: &str) -> Vec<String> {
-    let mut roster = state
-        .inner
-        .lock()
-        .map(|inner| {
-            inner
-                .peers
-                .keys()
-                .map(|peer| format!("urn:libp2p:{peer}"))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    roster.push(local_agent_id.to_string());
-    roster.sort();
-    roster.dedup();
-    roster
-}
-
-fn assigned_to_verifier(
-    contribution_id: &str,
-    verifier_agent_id: &str,
-    roster: &[String],
-    worker_agent_id: &str,
-) -> bool {
-    let eligible_roster = roster
-        .iter()
-        .filter(|agent| agent.as_str() != worker_agent_id)
-        .collect::<Vec<_>>();
-    if eligible_roster.is_empty() {
-        return true;
-    }
-    eligible_roster[assignment_index(contribution_id, eligible_roster.len())].as_str()
-        == verifier_agent_id
-}
-
-fn assignment_index(value: &str, modulo: usize) -> usize {
-    if modulo <= 1 {
-        return 0;
-    }
-    let mut hash = 0x811c9dc5_u32;
-    for byte in value.as_bytes() {
-        hash ^= u32::from(*byte);
-        hash = hash.wrapping_mul(0x01000193);
-    }
-    (hash as usize) % modulo
 }
 
 fn touch_peer(state: &P2pState, peer_id: PeerId) {
@@ -2217,45 +2157,6 @@ mod tests {
         assert!(address
             .to_string()
             .ends_with(&format!("/p2p-circuit/p2p/{local_peer_id}")));
-    }
-
-    #[test]
-    fn verifier_assignment_is_stable_and_partitioned() {
-        let roster = vec![
-            "urn:libp2p:12D3KooA".to_string(),
-            "urn:libp2p:12D3KooB".to_string(),
-            "urn:libp2p:12D3KooC".to_string(),
-        ];
-        let contribution_id = "contribution_partition_fixture";
-        let assigned = roster
-            .iter()
-            .filter(|agent| assigned_to_verifier(contribution_id, agent, &roster, ""))
-            .count();
-
-        assert_eq!(assigned, 1);
-        assert_eq!(
-            assignment_index(contribution_id, roster.len()),
-            assignment_index(contribution_id, roster.len())
-        );
-        assert!(
-            assigned_to_verifier(
-                contribution_id,
-                "urn:libp2p:12D3KooA",
-                &roster,
-                "urn:libp2p:12D3KooB"
-            ) || assigned_to_verifier(
-                contribution_id,
-                "urn:libp2p:12D3KooC",
-                &roster,
-                "urn:libp2p:12D3KooB"
-            )
-        );
-        assert!(!assigned_to_verifier(
-            contribution_id,
-            "urn:libp2p:12D3KooB",
-            &roster,
-            "urn:libp2p:12D3KooB"
-        ));
     }
 
     #[test]

@@ -472,7 +472,7 @@ pub async fn claim_campaign_work_unit(
 ) -> Result<AuditWorkUnitClaim, String> {
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
-    ensure_verification_pool_clear(&store)?;
+    ensure_verification_pool_clear(&store, &worker_agent_id)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     if snapshot.campaign.requester_agent_id == worker_agent_id {
         return Err(
@@ -513,7 +513,7 @@ pub async fn run_claimed_work_unit(
 ) -> Result<NodeContribution, String> {
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
-    ensure_verification_pool_clear(&store)?;
+    ensure_verification_pool_clear(&store, &worker_agent_id)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     let campaign = snapshot.campaign;
     if campaign.requester_agent_id == worker_agent_id {
@@ -1372,13 +1372,13 @@ fn node_runtime(
     Ok((keypair, sender))
 }
 
-fn ensure_verification_pool_clear(store: &AtpStore) -> Result<(), String> {
-    let pending = store.pending_network_verification_count()?;
+fn ensure_verification_pool_clear(store: &AtpStore, local_agent_id: &str) -> Result<(), String> {
+    let pending = store.pending_network_verification_count_for_verifier(local_agent_id)?;
     if pending == 0 {
         return Ok(());
     }
     Err(format!(
-        "Verifier duty active: clear {pending} pending receipt{} before claiming or running new audit work.",
+        "Verifier duty active: clear {pending} independently verifiable pending receipt{} before claiming or running new audit work.",
         if pending == 1 { "" } else { "s" }
     ))
 }

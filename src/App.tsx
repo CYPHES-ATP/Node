@@ -37,7 +37,6 @@ import { isTauriRuntime } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
 import type {
   AuditRuntimeProgress,
-  BackendPeerInfo,
   CampaignReportSnapshot,
   GitHubAccessStatus,
   GuardianTarget,
@@ -103,6 +102,8 @@ interface NetworkProgressStats {
   totalContributions: number;
   verifiedContributions: number;
   pendingContributions: number;
+  independentlyVerifiablePendingContributions: number;
+  selfPendingContributions: number;
   pendingGrossCredits: number;
   pendingPenaltyCredits: number;
   parserFallbackPendingContributions: number;
@@ -277,34 +278,6 @@ function pendingPenaltyForContribution(contribution: NodeContribution) {
   return PENDING_CONTRIBUTION_BASE_CREDIT * (1 - PARSER_FALLBACK_PENDING_MULTIPLIER);
 }
 
-function verifierRoster(agentId: string, peers: BackendPeerInfo[]) {
-  return Array.from(new Set([
-    agentId,
-    ...peers.map((peer) => `urn:libp2p:${peer.peer_id}`),
-  ].filter(Boolean))).sort();
-}
-
-function assignmentIndex(value: string, modulo: number) {
-  if (modulo <= 1) return 0;
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index) & 0xff;
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash % modulo;
-}
-
-function assignedToVerifier(
-  contributionId: string,
-  agentId: string,
-  peers: BackendPeerInfo[],
-  workerAgentId: string,
-) {
-  const roster = verifierRoster(agentId, peers).filter((verifierAgentId) => verifierAgentId !== workerAgentId);
-  if (roster.length === 0) return true;
-  return roster[assignmentIndex(contributionId, roster.length)] === agentId;
-}
-
 function repositoryFullNameFromGitHubUrl(value: string) {
   const target = parseGitHubInput(value);
   if (!target) return "";
@@ -419,6 +392,12 @@ function AppContent() {
       const pendingContributions = snapshot.contributions.filter(
         (item) => !verified.has(item.contributionId),
       );
+      const independentlyVerifiablePendingContributions = pendingContributions.filter(
+        (item) => item.workerAgentId !== agentId,
+      );
+      const selfPendingContributions = pendingContributions.filter(
+        (item) => item.workerAgentId === agentId,
+      );
       const pendingPenaltyCredits = pendingContributions.reduce(
         (sum, contribution) => sum + pendingPenaltyForContribution(contribution),
         0,
@@ -433,6 +412,10 @@ function AppContent() {
         totalContributions: stats.totalContributions + totalContributions,
         verifiedContributions: stats.verifiedContributions + verifiedContributions,
         pendingContributions: stats.pendingContributions + pendingContributions.length,
+        independentlyVerifiablePendingContributions:
+          stats.independentlyVerifiablePendingContributions +
+          independentlyVerifiablePendingContributions.length,
+        selfPendingContributions: stats.selfPendingContributions + selfPendingContributions.length,
         pendingGrossCredits: stats.pendingGrossCredits + pendingContributions.length * PENDING_CONTRIBUTION_BASE_CREDIT,
         pendingPenaltyCredits: stats.pendingPenaltyCredits + pendingPenaltyCredits,
         parserFallbackPendingContributions: stats.parserFallbackPendingContributions + parserFallbackPendingContributions,
@@ -450,14 +433,16 @@ function AppContent() {
       totalContributions: 0,
       verifiedContributions: 0,
       pendingContributions: 0,
+      independentlyVerifiablePendingContributions: 0,
+      selfPendingContributions: 0,
       pendingGrossCredits: 0,
       pendingPenaltyCredits: 0,
       parserFallbackPendingContributions: 0,
       workPercent: 0,
       settlementPercent: 0,
     });
-  }, [campaignSnapshots]);
-  const pendingVerificationCount = networkProgress.pendingContributions;
+  }, [agentId, campaignSnapshots]);
+  const pendingVerificationCount = networkProgress.independentlyVerifiablePendingContributions;
   const visibleProgress = runtimeActive || runtimeRecentlyFinished ? currentProgress : networkProgress.settlementPercent;
   const projectedPendingCredits = Math.max(
     0,
@@ -924,15 +909,13 @@ function AppContent() {
   }
 
   async function autoVerifyNextContribution() {
-    const peers = await p2p.refreshPeers().catch(() => [] as BackendPeerInfo[]);
     for (const campaign of campaigns) {
       const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
       const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
       const pending = snapshot.contributions.filter(
         (item) =>
           !verifiedIds.has(item.contributionId) &&
-          item.workerAgentId !== agentId &&
-          assignedToVerifier(item.contributionId, agentId, peers, item.workerAgentId),
+          item.workerAgentId !== agentId,
       );
       const selfPending = snapshot.contributions.filter(
         (item) => !verifiedIds.has(item.contributionId) && item.workerAgentId === agentId,
@@ -967,7 +950,7 @@ function AppContent() {
       return true;
     }
     if (pendingVerificationCount > 0) {
-      pushAutoPulse("Verification pool assigned across online nodes", "info");
+      pushAutoPulse("Verification pool available", "info");
     }
     return false;
   }
