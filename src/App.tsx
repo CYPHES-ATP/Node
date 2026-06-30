@@ -37,10 +37,12 @@ import { isTauriRuntime } from "@/lib/utils";
 import { useCyphesStore } from "@/store/useCyphesStore";
 import type {
   AuditRuntimeProgress,
+  BackendPeerInfo,
   CampaignReportSnapshot,
   GitHubAccessStatus,
   GuardianTarget,
   LocalModelList,
+  NodeContribution,
   ProtocolAuditCampaign,
   RepositorySummary,
 } from "@/types";
@@ -51,6 +53,11 @@ const AUDIT_SCOPE = [
   "CI workflow and repository security posture",
   "Prioritized findings with reproducible evidence",
 ];
+const AUTO_TICK_INTERVAL_MS = 12_000;
+const TELEMETRY_TICK_INTERVAL_MS = 1_000;
+const MAX_AUTO_CAMPAIGNS_PER_DAY = 24;
+const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
+const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
 
 interface GitHubRepository {
   full_name: string;
@@ -88,6 +95,19 @@ interface CockpitEvent {
   label: string;
   at: number;
   tone?: "info" | "success" | "warn" | "danger";
+}
+
+interface NetworkProgressStats {
+  totalWorkUnits: number;
+  clearedWorkUnits: number;
+  totalContributions: number;
+  verifiedContributions: number;
+  pendingContributions: number;
+  pendingGrossCredits: number;
+  pendingPenaltyCredits: number;
+  parserFallbackPendingContributions: number;
+  workPercent: number;
+  settlementPercent: number;
 }
 
 const GITHUB_REPOSITORY_URL_ERROR =
@@ -229,6 +249,62 @@ function formatClock(ms: number) {
   return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function percentComplete(done: number, total: number) {
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+}
+
+function formatCreditAmount(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function isParserFallbackContribution(contribution: NodeContribution) {
+  if (contribution.findings.length > 0) return false;
+  const notes = contribution.notesMarkdown || "";
+  if (notes.includes("CYPHES parser note: model output was not valid structured JSON")) return true;
+  if (contribution.commands?.some((command) => command.toLowerCase().includes("structured parse failed"))) {
+    return true;
+  }
+  return Boolean(contribution.coverage?.some(
+    (coverage) =>
+      coverage.area.toLowerCase() === "local model output" &&
+      coverage.status.toLowerCase() === "needs_review",
+  ));
+}
+
+function pendingPenaltyForContribution(contribution: NodeContribution) {
+  if (!isParserFallbackContribution(contribution)) return 0;
+  return PENDING_CONTRIBUTION_BASE_CREDIT * (1 - PARSER_FALLBACK_PENDING_MULTIPLIER);
+}
+
+function verifierRoster(agentId: string, peers: BackendPeerInfo[]) {
+  return Array.from(new Set([
+    agentId,
+    ...peers.map((peer) => `urn:libp2p:${peer.peer_id}`),
+  ].filter(Boolean))).sort();
+}
+
+function assignmentIndex(value: string, modulo: number) {
+  if (modulo <= 1) return 0;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index) & 0xff;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % modulo;
+}
+
+function assignedToVerifier(
+  contributionId: string,
+  agentId: string,
+  peers: BackendPeerInfo[],
+  workerAgentId: string,
+) {
+  const roster = verifierRoster(agentId, peers).filter((verifierAgentId) => verifierAgentId !== workerAgentId);
+  if (roster.length === 0) return true;
+  return roster[assignmentIndex(contributionId, roster.length)] === agentId;
+}
+
 function repositoryFullNameFromGitHubUrl(value: string) {
   const target = parseGitHubInput(value);
   if (!target) return "";
@@ -305,6 +381,7 @@ function AppContent() {
   const runtimeStartedAtRef = useRef<number | null>(null);
   const lastPhaseRef = useRef("");
   const autoBusyRef = useRef(false);
+  const lastAutoTickAtRef = useRef(0);
   const lastAutoPulseRef = useRef("");
   const lastGitHubPauseRef = useRef("");
 
@@ -334,13 +411,58 @@ function AppContent() {
   const hasPendingCredit = runtimeActive || runtimeRecentlyFinished;
   const pendingReceiptMeter = hasPendingCredit ? Math.min(35, Math.max(1, Math.round(currentProgress * 0.35))) : 0;
   const normalizedAutoCounters = normalizeGenesisAutoCounters(autoCounters);
-  const pendingVerificationCount = useMemo(() => {
-    return Object.values(campaignSnapshots).reduce((sum, snapshot) => {
+  const networkProgress = useMemo<NetworkProgressStats>(() => {
+    return Object.values(campaignSnapshots).reduce((stats, snapshot) => {
       const verified = new Set(snapshot.verifications.map((item) => item.targetContributionId));
-      return sum + snapshot.contributions.filter((item) => !verified.has(item.contributionId)).length;
-    }, 0);
+      const totalContributions = snapshot.contributions.length;
+      const verifiedContributions = snapshot.contributions.filter((item) => verified.has(item.contributionId)).length;
+      const pendingContributions = snapshot.contributions.filter(
+        (item) => !verified.has(item.contributionId),
+      );
+      const pendingPenaltyCredits = pendingContributions.reduce(
+        (sum, contribution) => sum + pendingPenaltyForContribution(contribution),
+        0,
+      );
+      const parserFallbackPendingContributions = pendingContributions.filter(isParserFallbackContribution).length;
+      const clearedWorkUnits = snapshot.workUnits.filter(
+        (unit) => !["open", "claimed"].includes(unit.status),
+      ).length;
+      const next = {
+        totalWorkUnits: stats.totalWorkUnits + snapshot.workUnits.length,
+        clearedWorkUnits: stats.clearedWorkUnits + clearedWorkUnits,
+        totalContributions: stats.totalContributions + totalContributions,
+        verifiedContributions: stats.verifiedContributions + verifiedContributions,
+        pendingContributions: stats.pendingContributions + pendingContributions.length,
+        pendingGrossCredits: stats.pendingGrossCredits + pendingContributions.length * PENDING_CONTRIBUTION_BASE_CREDIT,
+        pendingPenaltyCredits: stats.pendingPenaltyCredits + pendingPenaltyCredits,
+        parserFallbackPendingContributions: stats.parserFallbackPendingContributions + parserFallbackPendingContributions,
+        workPercent: 0,
+        settlementPercent: 0,
+      };
+      return {
+        ...next,
+        workPercent: percentComplete(next.clearedWorkUnits, next.totalWorkUnits),
+        settlementPercent: percentComplete(next.verifiedContributions, next.totalContributions),
+      };
+    }, {
+      totalWorkUnits: 0,
+      clearedWorkUnits: 0,
+      totalContributions: 0,
+      verifiedContributions: 0,
+      pendingContributions: 0,
+      pendingGrossCredits: 0,
+      pendingPenaltyCredits: 0,
+      parserFallbackPendingContributions: 0,
+      workPercent: 0,
+      settlementPercent: 0,
+    });
   }, [campaignSnapshots]);
-  const projectedPendingCredits = pendingVerificationCount * 35 + pendingReceiptMeter;
+  const pendingVerificationCount = networkProgress.pendingContributions;
+  const visibleProgress = runtimeActive || runtimeRecentlyFinished ? currentProgress : networkProgress.settlementPercent;
+  const projectedPendingCredits = Math.max(
+    0,
+    networkProgress.pendingGrossCredits + pendingReceiptMeter - networkProgress.pendingPenaltyCredits,
+  );
   const provisionalCreditTotal = creditSummary.provisionalTotal || 0;
   const activeNodeCount = nodeStatus === "online" ? peerCount + 1 : peerCount;
   const autoModeArmed = true;
@@ -445,7 +567,7 @@ function AppContent() {
 
   useEffect(() => {
     if (!runtimeActive && !runtimeRecentlyFinished) return;
-    const timer = window.setInterval(() => setTelemetryTick(Date.now()), 200);
+    const timer = window.setInterval(() => setTelemetryTick(Date.now()), TELEMETRY_TICK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [runtimeActive, runtimeRecentlyFinished]);
 
@@ -546,10 +668,16 @@ function AppContent() {
 
   useEffect(() => {
     if (!isTauriRuntime() || !autoModeArmed) return;
-    void runGenesisAutoTick();
-    const timer = window.setInterval(() => {
+    function runThrottledAutoTick() {
+      const now = Date.now();
+      if (now - lastAutoTickAtRef.current < AUTO_TICK_INTERVAL_MS) return;
+      lastAutoTickAtRef.current = now;
       void runGenesisAutoTick();
-    }, 12_000);
+    }
+    runThrottledAutoTick();
+    const timer = window.setInterval(() => {
+      runThrottledAutoTick();
+    }, AUTO_TICK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [
     agentId,
@@ -796,14 +924,15 @@ function AppContent() {
   }
 
   async function autoVerifyNextContribution() {
+    const peers = await p2p.refreshPeers().catch(() => [] as BackendPeerInfo[]);
     for (const campaign of campaigns) {
-      if (!requestedByLocalNode(campaign, agentId)) continue;
-      const snapshot =
-        campaignSnapshots[campaign.campaignId] ||
-        (await refreshCampaignSnapshot(campaign.campaignId));
+      const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
       const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
       const pending = snapshot.contributions.filter(
-        (item) => !verifiedIds.has(item.contributionId) && item.workerAgentId !== agentId,
+        (item) =>
+          !verifiedIds.has(item.contributionId) &&
+          item.workerAgentId !== agentId &&
+          assignedToVerifier(item.contributionId, agentId, peers, item.workerAgentId),
       );
       const selfPending = snapshot.contributions.filter(
         (item) => !verifiedIds.has(item.contributionId) && item.workerAgentId === agentId,
@@ -811,19 +940,19 @@ function AppContent() {
       if (pending.length === 0) {
         if (selfPending.length > 0) {
           pushAutoPulse("Awaiting independent verifier", "warn");
-          setNotice("Signed contribution submitted; Verified ATP requires another node to verify it.");
+          setNotice("Signed contribution submitted; Verified ATP requires an independent network verifier.");
           return false;
         }
         continue;
       }
-      pushAutoPulse(`Auto verifier checking ${campaign.protocolName}`, "info");
+      pushAutoPulse(`Network verifier checking ${campaign.protocolName}`, "info");
       const issued: number[] = [];
       for (const contribution of pending) {
         const credits = await p2p.verifyCampaignContribution(
           contribution.contributionId,
           "accepted",
-          "AUTO_GUARDIAN_COVERAGE_ACCEPTED",
-          "Autonomous verifier accepted a signed, bounded contribution for requester-owned campaign coverage.",
+          "NETWORK_SIGNED_RECEIPT_ACCEPTED",
+          "Independent network verifier accepted a signed contribution receipt for ATP settlement.",
         );
         issued.push(...credits.map((credit) => credit.total));
       }
@@ -833,9 +962,12 @@ function AppContent() {
         verifications: current.verifications + pending.length,
       }));
       const total = issued.reduce((sum, value) => sum + value, 0);
-      pushAutoPulse(`Auto verifier issued +${total} ATP`, "success");
-      setNotice(`${pending.length} contribution${pending.length === 1 ? "" : "s"} auto-verified; ${total} ATP Credits returned to worker.`);
+      pushAutoPulse(`Network verifier issued +${total} ATP`, "success");
+      setNotice(`${pending.length} contribution${pending.length === 1 ? "" : "s"} network-verified; ${total} ATP Credits issued.`);
       return true;
+    }
+    if (pendingVerificationCount > 0) {
+      pushAutoPulse("Verification pool assigned across online nodes", "info");
     }
     return false;
   }
@@ -920,6 +1052,10 @@ function AppContent() {
         const verified = await autoVerifyNextContribution();
         if (verified) return;
       }
+      if (pendingVerificationCount > 0) {
+        pushAutoPulse(`Verifier duty active: ${pendingVerificationCount} receipt${pendingVerificationCount === 1 ? "" : "s"} pending`, "warn");
+        return;
+      }
       if (autoMode.autoWorker) {
         const worked = await autoWorkerNextUnit();
         if (worked) return;
@@ -927,6 +1063,10 @@ function AppContent() {
       if (autoMode.questSeeder) {
         if (normalizedAutoCounters.targetsObserved >= autoMode.maxDailyObservations) {
           pushAutoPulse(`Observation cap reached (${autoMode.maxDailyObservations}/day)`, "warn");
+          return;
+        }
+        if (normalizedAutoCounters.campaignsSeeded >= MAX_AUTO_CAMPAIGNS_PER_DAY) {
+          pushAutoPulse(`Campaign seed cap reached (${MAX_AUTO_CAMPAIGNS_PER_DAY}/day)`, "warn");
           return;
         }
         const selection = selectNextGuardianTarget();
@@ -1023,8 +1163,19 @@ function AppContent() {
                 <div>
                   <Clock3 size={16} />
                   <small>Pending</small>
-                  <strong>+{projectedPendingCredits}</strong>
-                  <span>{runtimeActive ? `${currentProgress}% active` : "awaiting receipts"}</span>
+                  <strong className={networkProgress.pendingPenaltyCredits > 0 ? "pending-credit has-penalty" : "pending-credit"}>
+                    <span>+{formatCreditAmount(networkProgress.pendingGrossCredits + pendingReceiptMeter)}</span>
+                    {networkProgress.pendingPenaltyCredits > 0 ? (
+                      <em>-{formatCreditAmount(networkProgress.pendingPenaltyCredits)}</em>
+                    ) : null}
+                  </strong>
+                  <span>
+                    {networkProgress.pendingPenaltyCredits > 0
+                      ? `${formatCreditAmount(projectedPendingCredits)} expected after parser penalty`
+                      : runtimeActive
+                        ? `${currentProgress}% active`
+                        : "awaiting receipts"}
+                  </span>
                 </div>
                 <div>
                   <Activity size={16} />
@@ -1034,7 +1185,7 @@ function AppContent() {
                 </div>
               </div>
               <div className="terminal-progress intelligence-progress" aria-label="Audit skill progress">
-                <span style={{ width: `${currentProgress}%` } as CSSProperties} />
+                <span style={{ width: `${visibleProgress}%` } as CSSProperties} />
               </div>
               <div className="cockpit-events intelligence-events" aria-label="Live runtime event stream">
                 {githubAccessStatus?.paused ? (
@@ -1062,6 +1213,28 @@ function AppContent() {
                   <small>{latestRuntimeProgress.tokensPerSecond ? `${latestRuntimeProgress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
                 </div>
               ) : null}
+              <div className="network-progress" aria-label="Network progress">
+                <div className="network-progress-row">
+                  <div>
+                    <span>Network settlement</span>
+                    <strong>{networkProgress.settlementPercent}%</strong>
+                  </div>
+                  <div className="progress-track">
+                    <span style={{ width: `${networkProgress.settlementPercent}%` }} />
+                  </div>
+                  <small>{networkProgress.verifiedContributions}/{networkProgress.totalContributions} receipts verified</small>
+                </div>
+                <div className="network-progress-row">
+                  <div>
+                    <span>Work cleared</span>
+                    <strong>{networkProgress.workPercent}%</strong>
+                  </div>
+                  <div className="progress-track">
+                    <span style={{ width: `${networkProgress.workPercent}%` }} />
+                  </div>
+                  <small>{networkProgress.clearedWorkUnits}/{networkProgress.totalWorkUnits} work units moved</small>
+                </div>
+              </div>
             </article>
           ) : (
             <div className="empty-state compact">

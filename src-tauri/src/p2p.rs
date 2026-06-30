@@ -14,8 +14,8 @@ use tokio::{select, sync::mpsc, time::MissedTickBehavior};
 use crate::{
     atp::{agent_id, create_signed_envelope, AtpAck, AtpEnvelope, AtpVerb},
     audit_labor::{
-        AuditWorkUnitClaim, CreditAllocation, NodeContribution, ProtocolAuditCampaign,
-        VerificationResult,
+        signed_verification, AuditWorkUnitClaim, ContributionArtifact, CreditAllocation,
+        NodeContribution, ProtocolAuditCampaign, VerificationEvidence, VerificationResult,
     },
     bundle::export_receipt_bundle,
     state::{P2pState, PeerInfo},
@@ -33,6 +33,12 @@ const INFRASTRUCTURE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(30);
+const LABOR_SYNC_CAMPAIGN_LIMIT: usize = 64;
+const LABOR_SYNC_CONTRIBUTION_LIMIT: usize = 128;
+const LABOR_SYNC_VERIFICATION_LIMIT: usize = 128;
+const LABOR_AUTO_VERIFY_LIMIT: usize = 4;
+const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 128;
 
 #[derive(Debug, Clone)]
 struct InfrastructureTarget {
@@ -135,7 +141,10 @@ enum WireResponse {
 #[derive(Debug)]
 enum PendingOutbound {
     Envelope(String),
-    Campaign(String),
+    Campaign {
+        campaign_id: String,
+        silent: bool,
+    },
     WorkUnitClaim {
         campaign_id: String,
         work_unit_id: String,
@@ -149,12 +158,25 @@ enum PendingOutbound {
         campaign_id: String,
         contribution_id: String,
         receipt_hash: String,
+        silent: bool,
     },
     VerificationResult {
         campaign_id: String,
         verification_id: String,
         credit_total: u32,
+        silent: bool,
     },
+}
+
+impl PendingOutbound {
+    fn is_silent(&self) -> bool {
+        match self {
+            Self::Campaign { silent, .. }
+            | Self::Contribution { silent, .. }
+            | Self::VerificationResult { silent, .. } => *silent,
+            _ => false,
+        }
+    }
 }
 
 #[derive(NetworkBehaviour)]
@@ -369,6 +391,8 @@ pub async fn spawn_swarm(
         registration_interval.tick().await;
         let mut infrastructure_interval = tokio::time::interval(INFRASTRUCTURE_RETRY_INTERVAL);
         infrastructure_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut labor_sync_interval = tokio::time::interval(LABOR_NETWORK_SYNC_INTERVAL);
+        labor_sync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             select! {
                 maybe_command = rx.recv() => {
@@ -454,6 +478,17 @@ pub async fn spawn_swarm(
                 }
                 _ = infrastructure_interval.tick() => {
                     ensure_infrastructure_connections(&mut swarm, &network);
+                }
+                _ = labor_sync_interval.tick() => {
+                    sync_audit_labor_network(
+                        &mut swarm,
+                        &app,
+                        &state,
+                        &store,
+                        &runtime_keypair,
+                        &local_agent_id,
+                        &mut outbound,
+                    );
                 }
                 event = swarm.select_next_some() => {
                     handle_swarm_event(
@@ -546,16 +581,19 @@ fn handle_swarm_event(
                     }
                     WireRequest::Campaign(campaign) => {
                         let campaign_id = campaign.campaign_id.clone();
+                        let was_known = store.campaign_report_snapshot(&campaign_id).is_ok();
                         match store.upsert_protocol_campaign(&campaign) {
                             Ok(_) => {
-                                let _ = app.emit("audit:labor_changed", ());
-                                let _ = app.emit(
-                                    "audit:campaign_received",
-                                    serde_json::json!({
-                                        "campaignId": campaign_id,
-                                        "protocolName": campaign.protocol_name,
-                                    }),
-                                );
+                                if !was_known {
+                                    let _ = app.emit("audit:labor_changed", ());
+                                    let _ = app.emit(
+                                        "audit:campaign_received",
+                                        serde_json::json!({
+                                            "campaignId": campaign_id,
+                                            "protocolName": campaign.protocol_name,
+                                        }),
+                                    );
+                                }
                                 WireResponse::Campaign {
                                     accepted: true,
                                     campaign_id,
@@ -633,17 +671,20 @@ fn handle_swarm_event(
                         let campaign_id = contribution.campaign_id.clone();
                         let contribution_id = contribution.contribution_id.clone();
                         let receipt_hash = contribution.receipt_hash.clone();
+                        let was_known = store.get_contribution(&contribution_id).is_ok();
                         match store.record_contribution(&contribution) {
                             Ok(_) => {
-                                let _ = app.emit("audit:labor_changed", ());
-                                let _ = app.emit(
-                                    "audit:contribution_received",
-                                    serde_json::json!({
-                                        "campaignId": campaign_id,
-                                        "contributionId": contribution_id,
-                                        "receiptHash": receipt_hash,
-                                    }),
-                                );
+                                if !was_known {
+                                    let _ = app.emit("audit:labor_changed", ());
+                                    let _ = app.emit(
+                                        "audit:contribution_received",
+                                        serde_json::json!({
+                                            "campaignId": campaign_id,
+                                            "contributionId": contribution_id,
+                                            "receiptHash": receipt_hash,
+                                        }),
+                                    );
+                                }
                                 WireResponse::Contribution {
                                     accepted: true,
                                     campaign_id,
@@ -667,21 +708,30 @@ fn handle_swarm_event(
                     } => {
                         let campaign_id = verification.campaign_id.clone();
                         let verification_id = verification.verification_id.clone();
+                        let was_known = store
+                            .verification_bundle_for_contribution(
+                                &verification.target_contribution_id,
+                            )
+                            .ok()
+                            .flatten()
+                            .is_some();
                         let credit_total = allocations
                             .iter()
                             .map(|allocation| allocation.total)
                             .sum::<u32>();
                         match store.record_verification_bundle(&verification, &allocations) {
                             Ok(_) => {
-                                let _ = app.emit("audit:labor_changed", ());
-                                let _ = app.emit(
-                                    "audit:verification_received",
-                                    serde_json::json!({
-                                        "campaignId": campaign_id,
-                                        "verificationId": verification_id,
-                                        "creditTotal": credit_total,
-                                    }),
-                                );
+                                if !was_known {
+                                    let _ = app.emit("audit:labor_changed", ());
+                                    let _ = app.emit(
+                                        "audit:verification_received",
+                                        serde_json::json!({
+                                            "campaignId": campaign_id,
+                                            "verificationId": verification_id,
+                                            "creditTotal": credit_total,
+                                        }),
+                                    );
+                                }
                                 WireResponse::VerificationResult {
                                     accepted: true,
                                     campaign_id,
@@ -711,6 +761,9 @@ fn handle_swarm_event(
             } => {
                 let pending = outbound.remove(&request_id);
                 touch_peer(state, peer);
+                if pending.as_ref().is_some_and(PendingOutbound::is_silent) {
+                    return;
+                }
                 match response {
                     WireResponse::Envelope(ack) => {
                         if let Err(error) = store.mark_delivery(&peer.to_string(), &ack) {
@@ -857,9 +910,14 @@ fn handle_swarm_event(
             },
         )) => {
             let pending = outbound.remove(&request_id);
+            if pending.as_ref().is_some_and(PendingOutbound::is_silent) {
+                return;
+            }
             let (event_hash, transaction_id, result_hash) = match pending {
                 Some(PendingOutbound::Envelope(event_hash)) => (Some(event_hash), None, None),
-                Some(PendingOutbound::Campaign(campaign_id)) => (None, Some(campaign_id), None),
+                Some(PendingOutbound::Campaign { campaign_id, .. }) => {
+                    (None, Some(campaign_id), None)
+                }
                 Some(PendingOutbound::WorkUnitClaim {
                     campaign_id,
                     work_unit_id,
@@ -877,6 +935,7 @@ fn handle_swarm_event(
                     campaign_id,
                     contribution_id,
                     receipt_hash,
+                    ..
                 }) => (
                     None,
                     Some(format!("{campaign_id}:{contribution_id}")),
@@ -886,6 +945,7 @@ fn handle_swarm_event(
                     campaign_id,
                     verification_id,
                     credit_total,
+                    ..
                 }) => (
                     None,
                     Some(format!("{campaign_id}:{verification_id}:{credit_total}")),
@@ -1289,16 +1349,19 @@ fn on_peer_connected(
         }
     }
     if let Ok(campaigns) = store.list_protocol_campaigns() {
-        for campaign in campaigns
-            .into_iter()
-            .filter(|campaign| campaign.requester_agent_id == local_agent_id)
-        {
+        for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
             let campaign_id = campaign.campaign_id.clone();
             let request_id = swarm
                 .behaviour_mut()
                 .request_response
                 .send_request(&peer_id, WireRequest::Campaign(campaign));
-            outbound.insert(request_id, PendingOutbound::Campaign(campaign_id));
+            outbound.insert(
+                request_id,
+                PendingOutbound::Campaign {
+                    campaign_id,
+                    silent: true,
+                },
+            );
         }
     }
     if let Ok(claims) = store.work_unit_claims_for_requester(&peer_agent_id) {
@@ -1329,6 +1392,26 @@ fn on_peer_connected(
                     campaign_id: contribution.campaign_id,
                     contribution_id: contribution.contribution_id,
                     receipt_hash: contribution.receipt_hash,
+                    silent: true,
+                },
+            );
+        }
+    }
+    if let Ok(contributions) =
+        store.unverified_contributions_for_network(LABOR_SYNC_CONTRIBUTION_LIMIT)
+    {
+        for contribution in contributions {
+            let request_id = swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
+            outbound.insert(
+                request_id,
+                PendingOutbound::Contribution {
+                    campaign_id: contribution.campaign_id,
+                    contribution_id: contribution.contribution_id,
+                    receipt_hash: contribution.receipt_hash,
+                    silent: true,
                 },
             );
         }
@@ -1352,6 +1435,31 @@ fn on_peer_connected(
                     campaign_id: verification.campaign_id,
                     verification_id: verification.verification_id,
                     credit_total,
+                    silent: true,
+                },
+            );
+        }
+    }
+    if let Ok(bundles) = store.verification_bundles_for_network(LABOR_SYNC_VERIFICATION_LIMIT) {
+        for (verification, allocations) in bundles {
+            let credit_total = allocations
+                .iter()
+                .map(|allocation| allocation.total)
+                .sum::<u32>();
+            let request_id = swarm.behaviour_mut().request_response.send_request(
+                &peer_id,
+                WireRequest::VerificationResult {
+                    verification: verification.clone(),
+                    allocations,
+                },
+            );
+            outbound.insert(
+                request_id,
+                PendingOutbound::VerificationResult {
+                    campaign_id: verification.campaign_id,
+                    verification_id: verification.verification_id,
+                    credit_total,
+                    silent: true,
                 },
             );
         }
@@ -1360,6 +1468,153 @@ fn on_peer_connected(
         "p2p:peer_connected",
         serde_json::json!({ "peerId": peer_id.to_string() }),
     );
+}
+
+fn sync_audit_labor_network(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    keypair: &identity::Keypair,
+    local_agent_id: &str,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    if target_peers(state, None).is_empty() {
+        return;
+    }
+
+    if let Ok(campaigns) = store.list_protocol_campaigns() {
+        for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
+            broadcast_campaign(swarm, state, campaign, true, outbound);
+        }
+    }
+    if let Ok(contributions) =
+        store.unverified_contributions_for_network(LABOR_SYNC_CONTRIBUTION_LIMIT)
+    {
+        for contribution in contributions {
+            broadcast_contribution(swarm, state, contribution, true, outbound);
+        }
+    }
+    if let Ok(bundles) = store.verification_bundles_for_network(LABOR_SYNC_VERIFICATION_LIMIT) {
+        for (verification, allocations) in bundles {
+            broadcast_verification_result(swarm, state, verification, allocations, true, outbound);
+        }
+    }
+
+    verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
+}
+
+fn verify_network_contributions(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    keypair: &identity::Keypair,
+    local_agent_id: &str,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let verifier_roster = network_verifier_roster(state, local_agent_id);
+    let scan_limit =
+        LABOR_AUTO_VERIFY_SCAN_LIMIT.max(LABOR_AUTO_VERIFY_LIMIT * verifier_roster.len().max(1));
+    let candidates = match store.network_verification_candidates(local_agent_id, scan_limit) {
+        Ok(candidates) => candidates,
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({
+                    "reason": format!("network verifier scan failed: {reason}"),
+                }),
+            );
+            return;
+        }
+    };
+
+    for contribution in candidates
+        .into_iter()
+        .filter(|contribution| {
+            assigned_to_verifier(
+                &contribution.contribution_id,
+                local_agent_id,
+                &verifier_roster,
+                &contribution.worker_agent_id,
+            )
+        })
+        .take(LABOR_AUTO_VERIFY_LIMIT)
+    {
+        let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
+        let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
+        let evidence_size = evidence_ref.len() as u64;
+        let verification = match signed_verification(
+            keypair,
+            contribution.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "NETWORK_SIGNED_RECEIPT_ACCEPTED".to_string(),
+            "Independent network verifier accepted a signed contribution receipt for ATP settlement."
+                .to_string(),
+            vec![VerificationEvidence {
+                label: "signed contribution receipt".to_string(),
+                reference: evidence_ref,
+            }],
+            vec![ContributionArtifact {
+                path: "network-verification.md".to_string(),
+                media_type: "text/markdown".to_string(),
+                sha256: evidence_hash,
+                size_bytes: evidence_size,
+            }],
+        ) {
+            Ok(verification) => verification,
+            Err(reason) => {
+                let _ = app.emit(
+                    "atp:delivery_failed",
+                    serde_json::json!({"reason": format!("network verifier signing failed: {reason}")}),
+                );
+                continue;
+            }
+        };
+        let allocations = match store.record_verification(&verification) {
+            Ok(allocations) => allocations,
+            Err(reason) => {
+                let _ = app.emit(
+                    "atp:delivery_failed",
+                    serde_json::json!({
+                        "campaignId": contribution.campaign_id,
+                        "contributionId": contribution.contribution_id,
+                        "reason": format!("network verification failed: {reason}"),
+                    }),
+                );
+                continue;
+            }
+        };
+        if !allocations
+            .iter()
+            .all(|allocation| allocation.verification_id == verification.verification_id)
+        {
+            continue;
+        }
+        let credit_total = allocations
+            .iter()
+            .map(|allocation| allocation.total)
+            .sum::<u32>();
+        broadcast_verification_result(
+            swarm,
+            state,
+            verification.clone(),
+            allocations,
+            true,
+            outbound,
+        );
+        let _ = app.emit("audit:labor_changed", ());
+        let _ = app.emit(
+            "audit:network_verification_issued",
+            serde_json::json!({
+                "campaignId": verification.campaign_id,
+                "verificationId": verification.verification_id,
+                "targetContributionId": verification.target_contribution_id,
+                "creditTotal": credit_total,
+            }),
+        );
+    }
 }
 
 fn send_envelope(
@@ -1385,6 +1640,16 @@ fn send_campaign(
     campaign: ProtocolAuditCampaign,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
+    broadcast_campaign(swarm, state, campaign, false, outbound);
+}
+
+fn broadcast_campaign(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    campaign: ProtocolAuditCampaign,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
     for peer_id in target_peers(state, None) {
         let request_id = swarm
             .behaviour_mut()
@@ -1392,7 +1657,10 @@ fn send_campaign(
             .send_request(&peer_id, WireRequest::Campaign(campaign.clone()));
         outbound.insert(
             request_id,
-            PendingOutbound::Campaign(campaign.campaign_id.clone()),
+            PendingOutbound::Campaign {
+                campaign_id: campaign.campaign_id.clone(),
+                silent,
+            },
         );
     }
 }
@@ -1462,6 +1730,7 @@ fn send_contribution(
                 campaign_id: contribution.campaign_id.clone(),
                 contribution_id: contribution.contribution_id.clone(),
                 receipt_hash: contribution.receipt_hash.clone(),
+                silent: false,
             },
         );
     }
@@ -1494,6 +1763,63 @@ fn send_verification_result(
                 campaign_id: verification.campaign_id.clone(),
                 verification_id: verification.verification_id.clone(),
                 credit_total,
+                silent: false,
+            },
+        );
+    }
+}
+
+fn broadcast_contribution(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    contribution: NodeContribution,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    for peer_id in target_peers(state, None) {
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
+        outbound.insert(
+            request_id,
+            PendingOutbound::Contribution {
+                campaign_id: contribution.campaign_id.clone(),
+                contribution_id: contribution.contribution_id.clone(),
+                receipt_hash: contribution.receipt_hash.clone(),
+                silent,
+            },
+        );
+    }
+}
+
+fn broadcast_verification_result(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    verification: VerificationResult,
+    allocations: Vec<CreditAllocation>,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let credit_total = allocations
+        .iter()
+        .map(|allocation| allocation.total)
+        .sum::<u32>();
+    for peer_id in target_peers(state, None) {
+        let request_id = swarm.behaviour_mut().request_response.send_request(
+            &peer_id,
+            WireRequest::VerificationResult {
+                verification: verification.clone(),
+                allocations: allocations.clone(),
+            },
+        );
+        outbound.insert(
+            request_id,
+            PendingOutbound::VerificationResult {
+                campaign_id: verification.campaign_id.clone(),
+                verification_id: verification.verification_id.clone(),
+                credit_total,
+                silent,
             },
         );
     }
@@ -1514,6 +1840,53 @@ fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn network_verifier_roster(state: &P2pState, local_agent_id: &str) -> Vec<String> {
+    let mut roster = state
+        .inner
+        .lock()
+        .map(|inner| {
+            inner
+                .peers
+                .keys()
+                .map(|peer| format!("urn:libp2p:{peer}"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    roster.push(local_agent_id.to_string());
+    roster.sort();
+    roster.dedup();
+    roster
+}
+
+fn assigned_to_verifier(
+    contribution_id: &str,
+    verifier_agent_id: &str,
+    roster: &[String],
+    worker_agent_id: &str,
+) -> bool {
+    let eligible_roster = roster
+        .iter()
+        .filter(|agent| agent.as_str() != worker_agent_id)
+        .collect::<Vec<_>>();
+    if eligible_roster.is_empty() {
+        return true;
+    }
+    eligible_roster[assignment_index(contribution_id, eligible_roster.len())].as_str()
+        == verifier_agent_id
+}
+
+fn assignment_index(value: &str, modulo: usize) -> usize {
+    if modulo <= 1 {
+        return 0;
+    }
+    let mut hash = 0x811c9dc5_u32;
+    for byte in value.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    (hash as usize) % modulo
 }
 
 fn touch_peer(state: &P2pState, peer_id: PeerId) {
@@ -1844,6 +2217,45 @@ mod tests {
         assert!(address
             .to_string()
             .ends_with(&format!("/p2p-circuit/p2p/{local_peer_id}")));
+    }
+
+    #[test]
+    fn verifier_assignment_is_stable_and_partitioned() {
+        let roster = vec![
+            "urn:libp2p:12D3KooA".to_string(),
+            "urn:libp2p:12D3KooB".to_string(),
+            "urn:libp2p:12D3KooC".to_string(),
+        ];
+        let contribution_id = "contribution_partition_fixture";
+        let assigned = roster
+            .iter()
+            .filter(|agent| assigned_to_verifier(contribution_id, agent, &roster, ""))
+            .count();
+
+        assert_eq!(assigned, 1);
+        assert_eq!(
+            assignment_index(contribution_id, roster.len()),
+            assignment_index(contribution_id, roster.len())
+        );
+        assert!(
+            assigned_to_verifier(
+                contribution_id,
+                "urn:libp2p:12D3KooA",
+                &roster,
+                "urn:libp2p:12D3KooB"
+            ) || assigned_to_verifier(
+                contribution_id,
+                "urn:libp2p:12D3KooC",
+                &roster,
+                "urn:libp2p:12D3KooB"
+            )
+        );
+        assert!(!assigned_to_verifier(
+            contribution_id,
+            "urn:libp2p:12D3KooB",
+            &roster,
+            "urn:libp2p:12D3KooB"
+        ));
     }
 
     #[test]

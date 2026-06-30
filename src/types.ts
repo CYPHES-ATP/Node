@@ -154,8 +154,15 @@ export interface NodeContribution {
     title: string;
     severity: string;
     status: string;
+    evidence?: string[];
     reportable: boolean;
   }>;
+  coverage?: Array<{
+    area: string;
+    status: string;
+    evidence: string[];
+  }>;
+  commands?: string[];
 }
 
 export interface VerificationResult {
@@ -175,7 +182,15 @@ export interface CreditAllocation {
   verificationId: string;
   receiverAgentId: string;
   contributionReceiptHash: string;
+  buckets?: {
+    participation: number;
+    verification: number;
+    coverage: number;
+    finding: number;
+    bonusAllocationPlaceholder: number;
+  };
   total: number;
+  formula?: string;
 }
 
 export interface CreditSummary {

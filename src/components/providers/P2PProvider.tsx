@@ -61,6 +61,11 @@ export function P2PProvider({ children }: P2PProviderProps) {
             void p2p.refreshCreditSummary();
             setNotice(`Verification received; ${event.payload.creditTotal} ATP Credits recorded.`);
           }),
+          listen<{ verificationId: string; creditTotal: number }>("audit:network_verification_issued", (event) => {
+            void p2p.loadProtocolCampaigns();
+            void p2p.refreshCreditSummary();
+            setNotice(`Network verification issued; ${event.payload.creditTotal} ATP Credits recorded.`);
+          }),
           listen<{ verificationId: string; creditTotal: number }>("audit:verification_acknowledged", (event) => {
             void p2p.loadProtocolCampaigns();
             void p2p.refreshCreditSummary();

@@ -487,8 +487,11 @@ impl AtpStore {
         contribution: &NodeContribution,
     ) -> Result<NodeContribution, String> {
         verify_signed_contribution(contribution)?;
-        let connection = self.connection.lock().map_err(|error| error.to_string())?;
-        let existing = connection
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let existing = transaction
             .query_row(
                 "SELECT contribution_json FROM audit_contributions WHERE contribution_id = ?1",
                 params![contribution.contribution_id],
@@ -499,48 +502,56 @@ impl AtpStore {
         if let Some(json) = existing {
             let existing_contribution: NodeContribution =
                 serde_json::from_str(&json).map_err(|error| error.to_string())?;
-            if existing_contribution.receipt_hash == contribution.receipt_hash
-                && existing_contribution.work_unit_id == contribution.work_unit_id
-                && existing_contribution.worker_agent_id == contribution.worker_agent_id
-            {
+            if existing_contribution == *contribution {
                 return Ok(existing_contribution);
             }
             return Err("contribution id already exists with different signed content".to_string());
         }
-        let campaign: Option<String> = connection
-            .query_row(
-                "SELECT campaign_id FROM protocol_audit_campaigns WHERE campaign_id = ?1",
-                params![contribution.campaign_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-        if campaign.is_none() {
-            return Err("contribution campaign is not known locally".to_string());
-        }
-        let work_unit: Option<String> = connection
-            .query_row(
-                "SELECT work_unit_id FROM audit_work_units
-                 WHERE campaign_id = ?1 AND work_unit_id = ?2",
-                params![contribution.campaign_id, contribution.work_unit_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-        if work_unit.is_none() {
-            return Err("contribution work unit is not known locally".to_string());
-        }
-        let work_unit = work_unit_in_connection(
-            &connection,
+        let campaign = campaign_in_transaction(&transaction, &contribution.campaign_id)
+            .map_err(|_| "contribution campaign is not known locally".to_string())?;
+        let work_unit = work_unit_in_transaction(
+            &transaction,
             &contribution.campaign_id,
             &contribution.work_unit_id,
-        )?;
+        )
+        .map_err(|_| "contribution work unit is not known locally".to_string())?;
+        if is_submitted_or_terminal_work_unit_status(&work_unit.status) {
+            return Err("work unit already has submitted or reviewed work".to_string());
+        }
+        let existing_for_work_unit = transaction
+            .query_row(
+                "SELECT contribution_json FROM audit_contributions
+                 WHERE campaign_id = ?1 AND work_unit_id = ?2
+                 ORDER BY created_at, contribution_id
+                 LIMIT 1",
+                params![contribution.campaign_id, contribution.work_unit_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if existing_for_work_unit.is_some() {
+            return Err("work unit already has a submitted contribution".to_string());
+        }
+        let is_requester_submission = campaign.requester_agent_id == contribution.worker_agent_id;
+        if !is_requester_submission {
+            let claim = active_claim_for_worker_in_connection(
+                &transaction,
+                &contribution.campaign_id,
+                &contribution.work_unit_id,
+                &contribution.worker_agent_id,
+            )?;
+            if claim.is_none() {
+                return Err(
+                    "work unit must be claimed by this worker before submission".to_string()
+                );
+            }
+        }
         if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
             if claimed_by != contribution.worker_agent_id {
                 return Err("work unit is claimed by another worker".to_string());
             }
         }
-        connection
+        let inserted = transaction
             .execute(
                 "INSERT INTO audit_contributions
                     (contribution_id, campaign_id, work_unit_id, worker_agent_id,
@@ -557,13 +568,15 @@ impl AtpStore {
                 ],
             )
             .map_err(|error| error.to_string())?;
+        expect_one_row(inserted, "contribution insert")?;
         update_work_unit_status(
-            &connection,
+            &transaction,
             &contribution.campaign_id,
             &contribution.work_unit_id,
             "submitted",
             Some(contribution.worker_agent_id.as_str()),
         )?;
+        transaction.commit().map_err(|error| error.to_string())?;
         Ok(contribution.clone())
     }
 
@@ -660,18 +673,49 @@ impl AtpStore {
         validate_credit_allocation_bundle(&contribution, verification, allocations)?;
 
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
-        if let Some((_, existing_allocations)) = verification_bundle_for_contribution_in_connection(
-            &connection,
-            &verification.target_contribution_id,
-        )? {
-            return Ok(existing_allocations);
-        }
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
-        transaction
+        let verification_json =
+            serde_json::to_string(verification).map_err(|error| error.to_string())?;
+        let existing_verification_json = transaction
+            .query_row(
+                "SELECT verification_json FROM audit_verifications WHERE verification_id = ?1",
+                params![verification.verification_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(existing_json) = existing_verification_json {
+            if existing_json != verification_json {
+                return Err(
+                    "verification id already exists with different signed content".to_string(),
+                );
+            }
+            let existing_allocations = credit_allocations_for_verification_id_in_connection(
+                &transaction,
+                &verification.verification_id,
+            )?;
+            if !credit_allocation_terms_match_set(&existing_allocations, allocations) {
+                return Err(
+                    "verification id already exists with different credit allocations".to_string(),
+                );
+            }
+            return Ok(existing_allocations);
+        }
+        if let Some((existing_verification, _)) =
+            verification_bundle_for_contribution_in_connection(
+                &transaction,
+                &verification.target_contribution_id,
+            )?
+        {
+            if existing_verification.verification_id != verification.verification_id {
+                return Err("contribution already has a different verification bundle".to_string());
+            }
+        }
+        let inserted = transaction
             .execute(
-                "INSERT OR IGNORE INTO audit_verifications
+                "INSERT INTO audit_verifications
                     (verification_id, campaign_id, target_contribution_id, verifier_agent_id,
                      decision, verification_json, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -681,11 +725,12 @@ impl AtpStore {
                     verification.target_contribution_id,
                     verification.verifier_agent_id,
                     verification.decision,
-                    serde_json::to_string(verification).map_err(|error| error.to_string())?,
+                    verification_json,
                     millis_from_rfc3339(&verification.created_at)?,
                 ],
             )
             .map_err(|error| error.to_string())?;
+        expect_one_row(inserted, "verification insert")?;
         let contribution_status = match verification.decision.as_str() {
             "accepted" | "reproduced" => "accepted",
             "rejected" => "rejected",
@@ -693,7 +738,7 @@ impl AtpStore {
             "revision_requested" => "revision_requested",
             _ => "reviewed",
         };
-        transaction
+        let updated = transaction
             .execute(
                 "UPDATE audit_contributions
                  SET status = ?2
@@ -701,6 +746,7 @@ impl AtpStore {
                 params![verification.target_contribution_id, contribution_status],
             )
             .map_err(|error| error.to_string())?;
+        expect_one_row(updated, "verified contribution status update")?;
         update_work_unit_status(
             &transaction,
             &contribution.campaign_id,
@@ -709,9 +755,9 @@ impl AtpStore {
             None,
         )?;
         for allocation in allocations {
-            transaction
+            let inserted = transaction
                 .execute(
-                    "INSERT OR IGNORE INTO credit_allocations
+                    "INSERT INTO credit_allocations
                         (allocation_id, campaign_id, contribution_id, verification_id,
                          receiver_agent_id, total, allocation_json, issued_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -727,6 +773,7 @@ impl AtpStore {
                     ],
                 )
                 .map_err(|error| error.to_string())?;
+            expect_one_row(inserted, "credit allocation insert")?;
         }
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(allocations.to_vec())
@@ -837,6 +884,39 @@ impl AtpStore {
         Ok(bundles)
     }
 
+    pub fn verification_bundles_for_network(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(VerificationResult, Vec<CreditAllocation>)>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT verification_json FROM audit_verifications
+                 ORDER BY created_at DESC, verification_id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        let verifications = rows
+            .map(|row| {
+                let json = row.map_err(|error| error.to_string())?;
+                serde_json::from_str(&json).map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<VerificationResult>, String>>()?;
+
+        let mut bundles = Vec::new();
+        for verification in verifications {
+            let allocations = credit_allocations_for_verification_id_in_connection(
+                &connection,
+                &verification.verification_id,
+            )?;
+            bundles.push((verification, allocations));
+        }
+        Ok(bundles)
+    }
+
     pub fn work_unit_claims_for_requester(
         &self,
         requester_agent_id: &str,
@@ -883,6 +963,78 @@ impl AtpStore {
         .collect()
     }
 
+    pub fn unverified_contributions_for_network(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<NodeContribution>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT c.contribution_json FROM audit_contributions c
+                 WHERE NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                 )
+                 ORDER BY c.created_at DESC, c.contribution_id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
+    pub fn network_verification_candidates(
+        &self,
+        verifier_agent_id: &str,
+        limit: usize,
+    ) -> Result<Vec<NodeContribution>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT c.contribution_json FROM audit_contributions c
+                 WHERE c.worker_agent_id != ?1
+                   AND NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                   )
+                 ORDER BY c.created_at, c.contribution_id
+                 LIMIT ?2",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![verifier_agent_id, limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
+    pub fn pending_network_verification_count(&self) -> Result<usize, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let count = connection
+            .query_row(
+                "SELECT COUNT(*) FROM audit_contributions c
+                 WHERE NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                 )",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(count.max(0) as usize)
+    }
+
     pub fn campaign_report_snapshot(
         &self,
         campaign_id: &str,
@@ -895,7 +1047,7 @@ impl AtpStore {
             claims: claims_in_connection(&connection, campaign_id)?,
             contributions: contributions_in_connection(&connection, campaign_id)?,
             verifications: verifications_in_connection(&connection, campaign_id)?,
-            credits: credits_in_connection(&connection, campaign_id)?,
+            credits: trusted_credits_in_connection(&connection, campaign_id)?,
         })
     }
 
@@ -1200,7 +1352,9 @@ impl AtpStore {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         connection
             .execute_batch(
-                "CREATE TABLE IF NOT EXISTS atp_events (
+                "PRAGMA foreign_keys = ON;
+
+                 CREATE TABLE IF NOT EXISTS atp_events (
                     event_hash TEXT PRIMARY KEY,
                     transaction_id TEXT NOT NULL,
                     sequence INTEGER NOT NULL,
@@ -1307,7 +1461,10 @@ impl AtpStore {
                     status TEXT NOT NULL,
                     work_unit_json TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id)
+                        REFERENCES protocol_audit_campaigns(campaign_id)
+                        ON DELETE CASCADE
                  );
                  CREATE INDEX IF NOT EXISTS audit_work_units_campaign
                     ON audit_work_units(campaign_id, created_at);
@@ -1321,7 +1478,13 @@ impl AtpStore {
                     status TEXT NOT NULL,
                     claim_json TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id)
+                        REFERENCES protocol_audit_campaigns(campaign_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(work_unit_id)
+                        REFERENCES audit_work_units(work_unit_id)
+                        ON DELETE CASCADE
                  );
                  CREATE UNIQUE INDEX IF NOT EXISTS audit_work_unit_claims_active_unit
                     ON audit_work_unit_claims(campaign_id, work_unit_id)
@@ -1337,7 +1500,13 @@ impl AtpStore {
                     receipt_hash TEXT NOT NULL UNIQUE,
                     contribution_json TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id)
+                        REFERENCES protocol_audit_campaigns(campaign_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(work_unit_id)
+                        REFERENCES audit_work_units(work_unit_id)
+                        ON DELETE CASCADE
                  );
                  CREATE INDEX IF NOT EXISTS audit_contributions_campaign
                     ON audit_contributions(campaign_id, created_at);
@@ -1349,10 +1518,18 @@ impl AtpStore {
                     verifier_agent_id TEXT NOT NULL,
                     decision TEXT NOT NULL,
                     verification_json TEXT NOT NULL,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id)
+                        REFERENCES protocol_audit_campaigns(campaign_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(target_contribution_id)
+                        REFERENCES audit_contributions(contribution_id)
+                        ON DELETE CASCADE
                  );
                  CREATE INDEX IF NOT EXISTS audit_verifications_campaign
                     ON audit_verifications(campaign_id, created_at);
+                 CREATE UNIQUE INDEX IF NOT EXISTS audit_verifications_target_contribution
+                    ON audit_verifications(target_contribution_id);
 
                  CREATE TABLE IF NOT EXISTS credit_allocations (
                     allocation_id TEXT PRIMARY KEY,
@@ -1362,7 +1539,16 @@ impl AtpStore {
                     receiver_agent_id TEXT NOT NULL,
                     total INTEGER NOT NULL,
                     allocation_json TEXT NOT NULL,
-                    issued_at INTEGER NOT NULL
+                    issued_at INTEGER NOT NULL,
+                    FOREIGN KEY(campaign_id)
+                        REFERENCES protocol_audit_campaigns(campaign_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(contribution_id)
+                        REFERENCES audit_contributions(contribution_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(verification_id)
+                        REFERENCES audit_verifications(verification_id)
+                        ON DELETE CASCADE
                  );",
             )
             .map_err(|error| error.to_string())?;
@@ -2198,7 +2384,7 @@ fn update_work_unit_status(
             work_unit.claimed_by_agent_id = Some(worker_agent_id.to_string());
         }
     }
-    connection
+    let updated = connection
         .execute(
             "UPDATE audit_work_units
              SET status = ?3, work_unit_json = ?4, updated_at = ?5
@@ -2212,6 +2398,7 @@ fn update_work_unit_status(
             ],
         )
         .map_err(|error| error.to_string())?;
+    expect_one_row(updated, "work unit status update")?;
     Ok(())
 }
 
@@ -2336,22 +2523,6 @@ fn work_units_in_connection(
     .collect()
 }
 
-fn work_unit_in_connection(
-    connection: &Connection,
-    campaign_id: &str,
-    work_unit_id: &str,
-) -> Result<AuditWorkUnit, String> {
-    let json = connection
-        .query_row(
-            "SELECT work_unit_json FROM audit_work_units
-             WHERE campaign_id = ?1 AND work_unit_id = ?2",
-            params![campaign_id, work_unit_id],
-            |row| row.get::<_, String>(0),
-        )
-        .map_err(|error| error.to_string())?;
-    serde_json::from_str(&json).map_err(|error| error.to_string())
-}
-
 fn work_unit_in_transaction(
     transaction: &Transaction<'_>,
     campaign_id: &str,
@@ -2386,6 +2557,33 @@ fn claims_in_connection(
         serde_json::from_str(&json).map_err(|error| error.to_string())
     })
     .collect()
+}
+
+fn active_claim_for_worker_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+    worker_agent_id: &str,
+) -> Result<Option<AuditWorkUnitClaim>, String> {
+    let claim_json = connection
+        .query_row(
+            "SELECT claim_json FROM audit_work_unit_claims
+             WHERE campaign_id = ?1
+               AND work_unit_id = ?2
+               AND worker_agent_id = ?3
+               AND status = 'claimed'",
+            params![campaign_id, work_unit_id, worker_agent_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some(claim_json) = claim_json else {
+        return Ok(None);
+    };
+    let claim: AuditWorkUnitClaim =
+        serde_json::from_str(&claim_json).map_err(|error| error.to_string())?;
+    verify_signed_work_unit_claim(&claim)?;
+    Ok(Some(claim))
 }
 
 fn contribution_in_connection(
@@ -2462,6 +2660,19 @@ fn credits_in_connection(
     .collect()
 }
 
+fn trusted_credits_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+) -> Result<Vec<CreditAllocation>, String> {
+    let mut credits = Vec::new();
+    for allocation in credits_in_connection(connection, campaign_id)? {
+        if credit_allocation_trust(connection, &allocation)? == CreditAllocationTrust::Verified {
+            credits.push(allocation);
+        }
+    }
+    Ok(credits)
+}
+
 fn verification_bundle_for_contribution_in_connection(
     connection: &Connection,
     contribution_id: &str,
@@ -2482,6 +2693,17 @@ fn verification_bundle_for_contribution_in_connection(
     };
     let verification: VerificationResult =
         serde_json::from_str(&verification_json).map_err(|error| error.to_string())?;
+    let allocations = credit_allocations_for_verification_id_in_connection(
+        connection,
+        &verification.verification_id,
+    )?;
+    Ok(Some((verification, allocations)))
+}
+
+fn credit_allocations_for_verification_id_in_connection(
+    connection: &Connection,
+    verification_id: &str,
+) -> Result<Vec<CreditAllocation>, String> {
     let mut statement = connection
         .prepare(
             "SELECT allocation_json FROM credit_allocations
@@ -2490,17 +2712,13 @@ fn verification_bundle_for_contribution_in_connection(
         )
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(params![verification.verification_id], |row| {
-            row.get::<_, String>(0)
-        })
+        .query_map(params![verification_id], |row| row.get::<_, String>(0))
         .map_err(|error| error.to_string())?;
-    let allocations = rows
-        .map(|row| {
-            let json = row.map_err(|error| error.to_string())?;
-            serde_json::from_str(&json).map_err(|error| error.to_string())
-        })
-        .collect::<Result<Vec<CreditAllocation>, String>>()?;
-    Ok(Some((verification, allocations)))
+    rows.map(|row| {
+        let json = row.map_err(|error| error.to_string())?;
+        serde_json::from_str(&json).map_err(|error| error.to_string())
+    })
+    .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2651,6 +2869,21 @@ fn credit_allocation_terms_match(actual: &CreditAllocation, expected: &CreditAll
         && actual.formula == expected.formula
 }
 
+fn is_submitted_or_terminal_work_unit_status(status: &str) -> bool {
+    matches!(
+        status,
+        "submitted" | "accepted" | "rejected" | "challenged" | "revision_requested"
+    )
+}
+
+fn expect_one_row(rows: usize, context: &str) -> Result<(), String> {
+    if rows == 1 {
+        Ok(())
+    } else {
+        Err(format!("{context} affected {rows} rows"))
+    }
+}
+
 fn millis_from_rfc3339(value: &str) -> Result<i64, String> {
     DateTime::parse_from_rfc3339(value)
         .map(|time| time.timestamp_millis())
@@ -2679,9 +2912,9 @@ mod tests {
     use crate::{
         atp::{agent_id, create_signed_envelope, create_signed_envelope_with_expiry, AtpVerb},
         audit_labor::{
-            allocate_credits, signed_contribution, signed_verification, signed_work_unit_claim,
-            AuditFinding, ContributionArtifact, CoverageItem, CreditBuckets, RuntimeDescriptor,
-            VerificationEvidence,
+            allocate_credits, sha256_ref, signed_contribution, signed_verification,
+            signed_work_unit_claim, AuditFinding, ContributionArtifact, CoverageItem,
+            CreditBuckets, RuntimeDescriptor, VerificationEvidence, VerificationResult,
         },
         audit_profile::{contract_hash, AuditContract, ReceiptApproval, RepositoryTarget},
         bundle::{export_campaign_report_bundle_to, export_receipt_bundle_to},
@@ -2733,6 +2966,28 @@ mod tests {
             requester_agent,
         )
         .unwrap()
+    }
+
+    fn claim_work_unit(
+        store: &AtpStore,
+        worker: &libp2p::identity::Keypair,
+        campaign: &ProtocolAuditCampaign,
+        work_unit: &AuditWorkUnit,
+    ) {
+        let claim = signed_work_unit_claim(worker, campaign, work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+    }
+
+    fn resign_verification(
+        keypair: &libp2p::identity::Keypair,
+        verification: &mut VerificationResult,
+    ) {
+        let mut value = serde_json::to_value(&*verification).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("verificationHash");
+        object.remove("signature");
+        verification.verification_hash = sha256_ref(&serde_jcs::to_vec(&value).unwrap());
+        verification.signature = crate::atp::sign_canonical(keypair, &value).unwrap();
     }
 
     #[test]
@@ -2988,6 +3243,7 @@ mod tests {
             vec!["no repository code execution".to_string()],
         )
         .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_units[3]);
         store.record_contribution(&accepted_contribution).unwrap();
         let submitted_units = store.list_work_units(&campaign.campaign_id).unwrap();
         assert_eq!(
@@ -3096,6 +3352,7 @@ mod tests {
             vec![],
         )
         .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_units[4]);
         store.record_contribution(&rejected_contribution).unwrap();
         let rejected_verification = signed_verification(
             &verifier,
@@ -3145,6 +3402,141 @@ mod tests {
         assert!(report.contains("## Runtime And Receipt Appendix"));
         assert!(!findings_section.contains("Duplicate lead"));
         assert!(report.contains("Duplicate lead"));
+    }
+
+    #[test]
+    fn network_verification_candidates_exclude_self_and_clear_after_verification() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let verifier = libp2p::identity::Keypair::generate_ed25519();
+        let worker_agent = agent_id(&worker.public());
+        let verifier_agent = agent_id(&verifier.public());
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_units[0].work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped signed network verification candidate.".to_string(),
+            vec![AuditFinding {
+                id: "NETWORK-COVERAGE-001".to_string(),
+                title: "Network verification candidate".to_string(),
+                severity: "informational".to_string(),
+                status: "non_reportable".to_string(),
+                impact: None,
+                evidence: vec!["network-candidate.md".to_string()],
+                reportable: false,
+            }],
+            vec![labor_artifact("network-candidate.md")],
+            vec![CoverageItem {
+                area: "network verification queue".to_string(),
+                status: "covered".to_string(),
+                evidence: vec!["Signed contribution is verifier-claimable.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_units[0]);
+        store.record_contribution(&contribution).unwrap();
+        assert_eq!(store.pending_network_verification_count().unwrap(), 1);
+
+        assert!(store
+            .network_verification_candidates(&worker_agent, 10)
+            .unwrap()
+            .is_empty());
+        let candidates = store
+            .network_verification_candidates(&verifier_agent, 10)
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].contribution_id, contribution.contribution_id);
+        assert_eq!(
+            store
+                .unverified_contributions_for_network(10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "NETWORK_SIGNED_RECEIPT_ACCEPTED".to_string(),
+            "Independent verifier accepted the signed contribution.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("network-verification.md")],
+        )
+        .unwrap();
+        let allocations = store.record_verification(&verification).unwrap();
+        assert_eq!(allocations.len(), 2);
+        assert!(store
+            .network_verification_candidates(&verifier_agent, 10)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .unverified_contributions_for_network(10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.pending_network_verification_count().unwrap(), 0);
+        let bundles = store.verification_bundles_for_network(10).unwrap();
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].0.verification_id, verification.verification_id);
+        assert_eq!(bundles[0].1.len(), allocations.len());
+    }
+
+    #[test]
+    fn unclaimed_worker_contributions_are_rejected() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Tried to submit without a signed work-unit claim.".to_string(),
+            vec![],
+            vec![labor_artifact("unclaimed.md")],
+            vec![CoverageItem {
+                area: "claim enforcement".to_string(),
+                status: "attempted".to_string(),
+                evidence: vec!["Unclaimed submission should be rejected.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+
+        let error = store.record_contribution(&contribution).unwrap_err();
+        assert!(error.contains("claimed by this worker"));
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert!(snapshot.contributions.is_empty());
+        assert_eq!(
+            snapshot
+                .work_units
+                .iter()
+                .find(|unit| unit.work_unit_id == work_unit.work_unit_id)
+                .unwrap()
+                .status,
+            "open"
+        );
     }
 
     #[test]
@@ -3203,7 +3595,7 @@ mod tests {
         let claimed_worker_contribution = signed_contribution(
             &worker,
             campaign.campaign_id.clone(),
-            work_unit.work_unit_id,
+            work_unit.work_unit_id.clone(),
             RuntimeDescriptor::deterministic_fixture(),
             "Submitted repo inventory for the claimed work unit.".to_string(),
             vec![],
@@ -3219,6 +3611,23 @@ mod tests {
         store
             .record_contribution(&claimed_worker_contribution)
             .unwrap();
+        let duplicate_submission = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            claimed_worker_contribution.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Attempted to submit a second receipt for the claimed unit.".to_string(),
+            vec![],
+            vec![labor_artifact("repo-map-duplicate.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "duplicate".to_string(),
+                evidence: vec!["Second submission should be rejected.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        assert!(store.record_contribution(&duplicate_submission).is_err());
         let snapshot = store
             .campaign_report_snapshot(&campaign.campaign_id)
             .unwrap();
@@ -3257,7 +3666,7 @@ mod tests {
         let contribution = signed_contribution(
             &worker,
             campaign.campaign_id.clone(),
-            work_unit.work_unit_id,
+            work_unit.work_unit_id.clone(),
             RuntimeDescriptor::deterministic_fixture(),
             "Reviewed dependency and configuration posture with bounded evidence.".to_string(),
             vec![],
@@ -3270,6 +3679,7 @@ mod tests {
             vec!["no code execution".to_string()],
         )
         .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_unit);
         store.record_contribution(&contribution).unwrap();
         let verification = signed_verification(
             &requester,
@@ -3311,6 +3721,124 @@ mod tests {
             .unwrap();
         let duplicate_summary = store.credit_summary(&worker_agent).unwrap();
         assert_eq!(duplicate_summary.total, worker_total);
+    }
+
+    #[test]
+    fn verification_bundle_rejects_verification_id_collision_for_different_target() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        let first_unit = work_units
+            .iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap()
+            .clone();
+        let second_unit = work_units
+            .iter()
+            .find(|unit| unit.kind == "dependency-config-review")
+            .unwrap()
+            .clone();
+
+        let first_contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            first_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped repository inventory for collision fixture.".to_string(),
+            vec![],
+            vec![labor_artifact("inventory.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Inventory was bounded.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &first_unit);
+        store.record_contribution(&first_contribution).unwrap();
+
+        let second_contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            second_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped dependency posture for collision fixture.".to_string(),
+            vec![],
+            vec![labor_artifact("dependency-review.md")],
+            vec![CoverageItem {
+                area: "dependency and config review".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Dependency posture was bounded.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &second_unit);
+        store.record_contribution(&second_contribution).unwrap();
+
+        let first_verification = signed_verification(
+            &requester,
+            campaign.campaign_id.clone(),
+            first_contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COLLISION_FIXTURE_ACCEPTED".to_string(),
+            "First contribution is accepted.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: first_contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification-first.md")],
+        )
+        .unwrap();
+        let first_allocations = allocate_credits(&first_contribution, &first_verification).unwrap();
+        store
+            .record_verification_bundle(&first_verification, &first_allocations)
+            .unwrap();
+
+        let mut colliding_verification = signed_verification(
+            &requester,
+            campaign.campaign_id.clone(),
+            second_contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COLLIDING_VERIFICATION_ID".to_string(),
+            "Second contribution tries to reuse the first verification id.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: second_contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification-second.md")],
+        )
+        .unwrap();
+        colliding_verification.verification_id = first_verification.verification_id.clone();
+        resign_verification(&requester, &mut colliding_verification);
+        let colliding_allocations =
+            allocate_credits(&second_contribution, &colliding_verification).unwrap();
+
+        let error = store
+            .record_verification_bundle(&colliding_verification, &colliding_allocations)
+            .unwrap_err();
+        assert!(error.contains("verification id already exists"));
+        assert!(store
+            .verification_bundle_for_contribution(&second_contribution.contribution_id)
+            .unwrap()
+            .is_none());
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(snapshot.verifications.len(), 1);
+        assert_eq!(
+            snapshot
+                .work_units
+                .iter()
+                .find(|unit| unit.work_unit_id == second_contribution.work_unit_id)
+                .unwrap()
+                .status,
+            "submitted"
+        );
     }
 
     #[test]
@@ -3426,7 +3954,7 @@ mod tests {
         let contribution = signed_contribution(
             &worker,
             campaign.campaign_id.clone(),
-            work_unit.work_unit_id,
+            work_unit.work_unit_id.clone(),
             RuntimeDescriptor::deterministic_fixture(),
             "Reviewed dependency and configuration posture with bounded evidence.".to_string(),
             vec![],
@@ -3439,6 +3967,7 @@ mod tests {
             vec!["no code execution".to_string()],
         )
         .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_unit);
         store.record_contribution(&contribution).unwrap();
         let verification = signed_verification(
             &requester,
@@ -3490,6 +4019,20 @@ mod tests {
         let summary = store.credit_summary(&worker_agent).unwrap();
         assert_eq!(summary.total, verified_total);
         assert!(summary.total < 1_000_000);
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        let snapshot_worker_total = snapshot
+            .credits
+            .iter()
+            .filter(|allocation| allocation.receiver_agent_id == worker_agent)
+            .map(|allocation| allocation.total)
+            .sum::<u32>();
+        assert_eq!(snapshot_worker_total, verified_total);
+        assert!(!snapshot
+            .credits
+            .iter()
+            .any(|allocation| allocation.allocation_id == "credit_forged_local_sqlite_row"));
     }
 
     #[tokio::test]

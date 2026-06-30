@@ -29,6 +29,8 @@ pub const DEFAULT_SKILL_PACK_LABEL: &str = "CYPHES audit methodology v0.4";
 const DEFAULT_AUDIT_SKILL_TEXT: &str =
     include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
 const PARSER_FALLBACK_CREDIT_MULTIPLIER: f64 = 0.10;
+const STANDARD_OUTPUT_MODEL_MULTIPLIER_CAP: f64 = 1.0;
+const EXCELLENT_OUTPUT_COVERAGE_THRESHOLD: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -718,11 +720,17 @@ fn allocate_credits_with_policy(
         .filter(|coverage| !coverage.evidence.is_empty())
         .count() as u32;
     let quality_multiplier = contribution_quality_multiplier(contribution);
+    let model_multiplier = effective_model_multiplier(
+        contribution,
+        quality_multiplier,
+        reportable_findings,
+        high_quality_coverage,
+    );
     let participation = credit_score(CreditScoreInput {
         base_points: 100.0,
         difficulty_multiplier: work_unit_difficulty(&contribution.work_unit_id),
         verification_multiplier: 1.0,
-        model_multiplier: contribution.runtime.model_multiplier * quality_multiplier,
+        model_multiplier,
         requester_approval: 1.0,
         penalty_points: 0.0,
     })?;
@@ -731,8 +739,10 @@ fn allocate_credits_with_policy(
     let finding = scaled_credit_bucket(reportable_findings.saturating_mul(75), quality_multiplier);
     let formula = if is_parser_fallback_contribution(contribution) {
         "base * difficulty * verification * model * requesterApproval * quality(0.10 parser fallback) - penalties"
+    } else if qualifies_for_large_model_bonus(reportable_findings, high_quality_coverage) {
+        "base * difficulty * verification * model(excellent-output bonus) * requesterApproval - penalties"
     } else {
-        "base * difficulty * verification * model * requesterApproval - penalties"
+        "base * difficulty * verification * min(model, 1.0 standard-output cap) * requesterApproval - penalties"
     };
     let mut allocations = vec![CreditAllocation {
         profile: CREDIT_PROFILE.to_string(),
@@ -786,6 +796,26 @@ fn allocate_credits_with_policy(
         allocations.push(verifier_allocation);
     }
     Ok(allocations)
+}
+
+fn effective_model_multiplier(
+    contribution: &NodeContribution,
+    quality_multiplier: f64,
+    reportable_findings: u32,
+    high_quality_coverage: u32,
+) -> f64 {
+    let model_multiplier = contribution.runtime.model_multiplier;
+    if is_parser_fallback_contribution(contribution) {
+        model_multiplier * quality_multiplier
+    } else if qualifies_for_large_model_bonus(reportable_findings, high_quality_coverage) {
+        model_multiplier
+    } else {
+        model_multiplier.min(STANDARD_OUTPUT_MODEL_MULTIPLIER_CAP)
+    }
+}
+
+fn qualifies_for_large_model_bonus(reportable_findings: u32, high_quality_coverage: u32) -> bool {
+    reportable_findings > 0 || high_quality_coverage >= EXCELLENT_OUTPUT_COVERAGE_THRESHOLD
 }
 
 fn contribution_quality_multiplier(contribution: &NodeContribution) -> f64 {
@@ -1577,6 +1607,94 @@ mod tests {
         assert!(fallback_worker_credit
             .formula
             .contains("quality(0.10 parser fallback)"));
+    }
+
+    #[test]
+    fn large_model_bonus_requires_excellent_output() {
+        let worker = identity::Keypair::generate_ed25519();
+        let verifier = identity::Keypair::generate_ed25519();
+        let mut large_model = RuntimeDescriptor::deterministic_fixture();
+        large_model.model = "llama-3.3-70b".to_string();
+        large_model.model_multiplier = 3.0;
+        let ordinary = signed_contribution(
+            &worker,
+            "campaign-1".to_string(),
+            "campaign-1-02-repository-inventory".to_string(),
+            large_model.clone(),
+            "Structured coverage with one evidence-backed area.".to_string(),
+            vec![],
+            vec![artifact("inventory.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["README.md reviewed at pinned commit.".to_string()],
+            }],
+            vec!["local model audit skill completed".to_string()],
+        )
+        .unwrap();
+        let excellent = signed_contribution(
+            &worker,
+            "campaign-1".to_string(),
+            "campaign-1-03-finding-validation".to_string(),
+            large_model,
+            "Validated a reportable candidate with evidence.".to_string(),
+            vec![AuditFinding {
+                id: "CYPHES-001".to_string(),
+                title: "Reportable issue".to_string(),
+                severity: "high".to_string(),
+                status: "candidate".to_string(),
+                impact: Some("fund loss".to_string()),
+                evidence: vec!["src/Vault.sol:42".to_string()],
+                reportable: true,
+            }],
+            vec![artifact("finding.md")],
+            vec![CoverageItem {
+                area: "finding validation".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["PoC reaches impact path.".to_string()],
+            }],
+            vec!["local model audit skill completed".to_string()],
+        )
+        .unwrap();
+        let ordinary_verification = signed_verification(
+            &verifier,
+            "campaign-1".to_string(),
+            ordinary.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Structured evidence is bounded and useful.".to_string(),
+            vec![],
+            vec![artifact("verification.md")],
+        )
+        .unwrap();
+        let excellent_verification = signed_verification(
+            &verifier,
+            "campaign-1".to_string(),
+            excellent.contribution_id.clone(),
+            "accepted".to_string(),
+            "FINDING_ACCEPTED".to_string(),
+            "Reportable finding accepted.".to_string(),
+            vec![],
+            vec![artifact("verification.md")],
+        )
+        .unwrap();
+
+        let ordinary_credit = allocate_credits(&ordinary, &ordinary_verification)
+            .unwrap()
+            .into_iter()
+            .find(|credit| credit.receiver_agent_id == ordinary.worker_agent_id)
+            .unwrap();
+        let excellent_credit = allocate_credits(&excellent, &excellent_verification)
+            .unwrap()
+            .into_iter()
+            .find(|credit| credit.receiver_agent_id == excellent.worker_agent_id)
+            .unwrap();
+
+        assert_eq!(ordinary_credit.total, 115);
+        assert!(ordinary_credit.formula.contains("standard-output cap"));
+        assert_eq!(excellent_credit.buckets.participation, 405);
+        assert!(excellent_credit.total >= ordinary_credit.total * 4);
+        assert!(excellent_credit.formula.contains("excellent-output bonus"));
     }
 
     #[test]

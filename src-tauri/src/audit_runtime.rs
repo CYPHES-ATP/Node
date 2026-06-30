@@ -1328,16 +1328,18 @@ fn ollama_endpoint() -> &'static str {
 
 fn model_multiplier(model: &str) -> f64 {
     let lower = model.to_ascii_lowercase();
-    if lower.contains("70b") || lower.contains("72b") {
-        1.0
-    } else if lower.contains("32b") || lower.contains("34b") || lower.contains("20b") {
-        0.9
+    if lower.contains("70b") || lower.contains("72b") || lower.contains("405b") {
+        3.0
+    } else if lower.contains("32b") || lower.contains("34b") {
+        2.5
+    } else if lower.contains("20b") || lower.contains("22b") || lower.contains("24b") {
+        2.0
     } else if lower.contains("14b") || lower.contains("13b") {
-        0.8
+        1.6
     } else if lower.contains("7b") || lower.contains("8b") {
-        0.7
+        1.0
     } else {
-        0.75
+        0.9
     }
 }
 
@@ -1447,6 +1449,8 @@ mod tests {
 
     #[test]
     fn model_multiplier_rewards_larger_local_models_without_maxing_unknowns() {
+        assert_eq!(model_multiplier("llama-3.3-70b"), 3.0);
+        assert!(model_multiplier("qwen2.5-32b") > model_multiplier("qwen2.5-14b"));
         assert!(model_multiplier("oss-20b") > model_multiplier("qwen2.5-7b"));
         assert!(model_multiplier("unknown-local") < 1.0);
     }

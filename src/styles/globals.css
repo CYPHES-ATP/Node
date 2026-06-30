@@ -1113,6 +1113,30 @@ form > label,
   white-space: nowrap;
 }
 
+.telemetry-grid .pending-credit {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  letter-spacing: 0;
+}
+
+.telemetry-grid .pending-credit span {
+  display: inline;
+  margin-top: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0;
+  text-shadow: inherit;
+}
+
+.telemetry-grid .pending-credit em {
+  color: #ff5f6d;
+  font-style: normal;
+  font-size: 0.56em;
+  letter-spacing: 0;
+  text-shadow: 0 0 16px rgba(255, 95, 109, 0.22);
+}
+
 .intelligence-progress {
   margin-top: 10px;
 }
@@ -1290,6 +1314,50 @@ form > label,
   color: var(--faint);
   font-family: var(--mono);
   font-size: 10px;
+}
+
+.network-progress {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.network-progress-row {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(0, 246, 255, 0.14);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.network-progress-row > div:first-child {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.network-progress-row span {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.network-progress-row strong {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.network-progress-row small {
+  display: block;
+  margin-top: 7px;
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .work-unit-dropdown {
@@ -1981,6 +2049,10 @@ footer {
 
   .work-unit-row {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .network-progress {
+    grid-template-columns: 1fr;
   }
 
   .campaign-hero,

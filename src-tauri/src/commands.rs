@@ -472,6 +472,7 @@ pub async fn claim_campaign_work_unit(
 ) -> Result<AuditWorkUnitClaim, String> {
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
+    ensure_verification_pool_clear(&store)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     if snapshot.campaign.requester_agent_id == worker_agent_id {
         return Err(
@@ -512,6 +513,7 @@ pub async fn run_claimed_work_unit(
 ) -> Result<NodeContribution, String> {
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
+    ensure_verification_pool_clear(&store)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     let campaign = snapshot.campaign;
     if campaign.requester_agent_id == worker_agent_id {
@@ -626,6 +628,7 @@ pub async fn run_accepted_audit_skill(
         })
         .cloned()
         .ok_or_else(|| "Campaign has no open work units.".to_string())?;
+    ensure_work_unit_claim_for_non_requester(&store, &keypair, &campaign, &work_unit)?;
     let output = run_local_audit_skill(
         &app,
         &campaign,
@@ -757,6 +760,7 @@ async fn run_professional_audit_pipeline(
 
     let mut contributions = Vec::new();
     for work_unit in work_units {
+        ensure_work_unit_claim_for_non_requester(store, keypair, &campaign, &work_unit)?;
         let output = run_local_audit_skill(
             app,
             &campaign,
@@ -782,6 +786,27 @@ async fn run_professional_audit_pipeline(
         contributions.push(contribution);
     }
     Ok(contributions)
+}
+
+fn ensure_work_unit_claim_for_non_requester(
+    store: &AtpStore,
+    keypair: &libp2p::identity::Keypair,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
+) -> Result<(), String> {
+    let worker_agent_id = agent_id(&keypair.public());
+    if campaign.requester_agent_id == worker_agent_id {
+        return Ok(());
+    }
+    if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
+        if claimed_by == worker_agent_id {
+            return Ok(());
+        }
+        return Err("work unit is claimed by another worker".to_string());
+    }
+    let claim = signed_work_unit_claim(keypair, campaign, work_unit)?;
+    store.record_work_unit_claim(&claim)?;
+    Ok(())
 }
 
 fn professional_pipeline_work_units(snapshot: &CampaignReportSnapshot) -> Vec<AuditWorkUnit> {
@@ -1345,6 +1370,17 @@ fn node_runtime(
         .clone()
         .ok_or_else(|| "P2P node has not started".to_string())?;
     Ok((keypair, sender))
+}
+
+fn ensure_verification_pool_clear(store: &AtpStore) -> Result<(), String> {
+    let pending = store.pending_network_verification_count()?;
+    if pending == 0 {
+        return Ok(());
+    }
+    Err(format!(
+        "Verifier duty active: clear {pending} pending receipt{} before claiming or running new audit work.",
+        if pending == 1 { "" } else { "s" }
+    ))
 }
 
 fn parse_github_input(value: &str) -> Result<GitHubInputTarget, String> {
