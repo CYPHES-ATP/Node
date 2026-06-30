@@ -1,16 +1,21 @@
 # Install And Test
 
-## Download The macOS Preview
+## Download The Preview
 
 macOS users can download the current packaged v0.7.1 developer DMGs from:
 
 - Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_aarch64.dmg
 - Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_x64.dmg
 
+Windows users can download the current packaged v0.7.1 x64 NSIS setup build
+from:
+
+- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_x64-setup.exe
+
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
-**Open** the first time. Windows and Linux binary distributions are not
-available yet.
+**Open** the first time. The Windows setup build is unsigned and intended for
+testnet use. Linux binary distributions are not available yet.
 
 The current source tree is v0.7.1. Run from source to test Verified ATP
 independent-verifier enforcement, the isolated testnet hotfixes, the separate

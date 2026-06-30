@@ -13,6 +13,7 @@ dist-ssr
 *.local
 target/
 release/**/*.dmg
+release/**/*.exe
 
 # Editor directories and files
 .vscode/*

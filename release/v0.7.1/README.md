@@ -6,9 +6,11 @@ Release date: 2026-06-30
 
 - `CYPHES_0.7.1_aarch64.dmg`
 - `CYPHES_0.7.1_x64.dmg`
+- `CYPHES_0.7.1_x64-setup.exe`
 
-These macOS builds are ad hoc signed and verified locally, but not
-Apple-notarized yet.
+The macOS builds are ad hoc signed and verified locally, but not
+Apple-notarized yet. The Windows x64 setup build is an unsigned NSIS installer
+cross-built from macOS for testnet use.
 
 ## What Changed
 
@@ -49,15 +51,24 @@ hdiutil verify src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/CYPHES_0
 hdiutil verify src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/CYPHES_0.7.1_x64.dmg
 lipo -archs src-tauri/target/aarch64-apple-darwin/release/bundle/macos/CYPHES.app/Contents/MacOS/cyphes-desktop
 lipo -archs src-tauri/target/x86_64-apple-darwin/release/bundle/macos/CYPHES.app/Contents/MacOS/cyphes-desktop
+PATH="$HOME/.local/bin:$HOME/.local/llvm-22.1.8/LLVM-22.1.8-macOS-ARM64/bin:$PATH" \
+  npm_config_cache=/tmp/cyphes-npm-cache \
+  npm exec tauri -- build --config src-tauri/tauri.worker.conf.json \
+  --runner cargo-xwin --target x86_64-pc-windows-msvc --ci
+file src-tauri/target/x86_64-pc-windows-msvc/release/cyphes-desktop.exe
+file src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/CYPHES_0.7.1_x64-setup.exe
 ```
 
 Rust desktop tests: 46 passed, 1 intentionally ignored live-GitHub fixture test.
 Source Gateway tests: 2 passed.
-Architectures verified: `arm64` and `x86_64`.
+Architectures verified: macOS `arm64`, macOS `x86_64`, and Windows `x86_64`.
+Windows executable verification: PE32+ GUI x86-64 with embedded
+`/cyphes/atp/0.7.1` and `cyphes.repository-audit.v0.7.1` strings.
 
 ## SHA-256
 
 ```text
 9c237b24c0da2593d3aaeca72164bde59689af1f0f6a2422a7ef99d9491a3711  CYPHES_0.7.1_aarch64.dmg
 5e217c94b963b7fd983ee2c3f170212cf9df2038a8bbbb2b37ca2cc5af170bb5  CYPHES_0.7.1_x64.dmg
+3fec67cfeb94725c3d01716dbaba4897a7b96b82931b42e0b4c07bf130a2c3ac  CYPHES_0.7.1_x64-setup.exe
 ```

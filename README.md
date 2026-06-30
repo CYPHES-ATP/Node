@@ -35,9 +35,14 @@ macOS downloads:
 - [Download CYPHES v0.7.1](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_aarch64.dmg)
 - [Download CYPHES v0.7.1 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_x64.dmg)
 
+Windows download:
+
+- [Download CYPHES v0.7.1 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.1/CYPHES_0.7.1_x64-setup.exe)
+
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
-confirm **Open**. Windows and Linux users should run from source for now.
+confirm **Open**. The Windows x64 setup build is unsigned and intended for
+testnet use. Linux users should run from source for now.
 
 Use **CYPHES** to connect a local model and watch the autonomous guardian loop
 run. The separate protocol/admin console remains available from source at
@@ -246,8 +251,9 @@ Artifact Two independently returns:
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
-- The macOS developer installer is downloadable but not Apple-notarized. There
-  is no Windows/Linux binary distribution or automatic updater yet.
+- The macOS developer installer is downloadable but not Apple-notarized. The
+  Windows x64 installer is downloadable but unsigned. There is no Linux binary
+  distribution or automatic updater yet.
 
 ## Run The Desktop Node
 
