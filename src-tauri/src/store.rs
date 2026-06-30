@@ -939,6 +939,29 @@ impl AtpStore {
         .collect()
     }
 
+    pub fn work_unit_claims_for_network(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<AuditWorkUnitClaim>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT claim_json FROM audit_work_unit_claims
+                 WHERE status = 'claimed'
+                 ORDER BY created_at DESC, claim_id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| {
+            let json = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
     pub fn contributions_for_requester(
         &self,
         requester_agent_id: &str,
@@ -1033,6 +1056,26 @@ impl AtpStore {
                     WHERE v.target_contribution_id = c.contribution_id
                  )",
                 params![verifier_agent_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(count.max(0) as usize)
+    }
+
+    pub fn pending_contribution_count_for_worker(
+        &self,
+        worker_agent_id: &str,
+    ) -> Result<usize, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let count = connection
+            .query_row(
+                "SELECT COUNT(*) FROM audit_contributions c
+                 WHERE c.worker_agent_id = ?1
+                   AND NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                 )",
+                params![worker_agent_id],
                 |row| row.get::<_, i64>(0),
             )
             .map_err(|error| error.to_string())?;
@@ -3453,6 +3496,12 @@ mod tests {
         );
         assert_eq!(
             store
+                .pending_contribution_count_for_worker(&worker_agent)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
                 .pending_network_verification_count_for_verifier(&verifier_agent)
                 .unwrap(),
             1
@@ -3502,6 +3551,12 @@ mod tests {
         assert_eq!(
             store
                 .pending_network_verification_count_for_verifier(&verifier_agent)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .pending_contribution_count_for_worker(&worker_agent)
                 .unwrap(),
             0
         );
@@ -3658,6 +3713,15 @@ mod tests {
                 .work_unit_claims_for_requester(&agent_id(&requester.public()))
                 .unwrap()
                 .len(),
+            1
+        );
+        let replayable_claims = store.work_unit_claims_for_network(10).unwrap();
+        assert_eq!(replayable_claims.len(), 1);
+        assert_eq!(replayable_claims[0].claim_id, claim.claim_id);
+        assert_eq!(
+            store
+                .pending_contribution_count_for_worker(&agent_id(&worker.public()))
+                .unwrap(),
             1
         );
         let replayable_contributions = store

@@ -31,6 +31,7 @@ use crate::{
 
 const GITHUB_REPOSITORY_URL_ERROR: &str =
     "Use a public GitHub repository URL, file URL, or folder URL, for example https://github.com/owner/repo.";
+const MAX_SELF_PENDING_CONTRIBUTIONS: usize = 4;
 
 #[derive(Debug, Serialize)]
 pub struct StartNodeResponse {
@@ -1375,7 +1376,14 @@ fn node_runtime(
 fn ensure_verification_pool_clear(store: &AtpStore, local_agent_id: &str) -> Result<(), String> {
     let pending = store.pending_network_verification_count_for_verifier(local_agent_id)?;
     if pending == 0 {
-        return Ok(());
+        let self_pending = store.pending_contribution_count_for_worker(local_agent_id)?;
+        if self_pending < MAX_SELF_PENDING_CONTRIBUTIONS {
+            return Ok(());
+        }
+        return Err(format!(
+            "Worker backpressure active: {self_pending} self-authored receipt{} awaiting independent verification; pause new audit work until the network clears below {MAX_SELF_PENDING_CONTRIBUTIONS}.",
+            if self_pending == 1 { "" } else { "s" }
+        ));
     }
     Err(format!(
         "Verifier duty active: clear {pending} independently verifiable pending receipt{} before claiming or running new audit work.",

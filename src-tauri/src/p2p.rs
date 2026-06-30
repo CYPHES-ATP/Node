@@ -35,6 +35,7 @@ const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 const LABOR_SYNC_CAMPAIGN_LIMIT: usize = 64;
+const LABOR_SYNC_CLAIM_LIMIT: usize = 1024;
 const LABOR_SYNC_CONTRIBUTION_LIMIT: usize = 128;
 const LABOR_SYNC_VERIFICATION_LIMIT: usize = 128;
 const LABOR_AUTO_VERIFY_LIMIT: usize = 4;
@@ -149,6 +150,7 @@ enum PendingOutbound {
         campaign_id: String,
         work_unit_id: String,
         claim_id: String,
+        silent: bool,
     },
     ExecutionResult {
         transaction_id: String,
@@ -172,6 +174,7 @@ impl PendingOutbound {
     fn is_silent(&self) -> bool {
         match self {
             Self::Campaign { silent, .. }
+            | Self::WorkUnitClaim { silent, .. }
             | Self::Contribution { silent, .. }
             | Self::VerificationResult { silent, .. } => *silent,
             _ => false,
@@ -412,6 +415,7 @@ pub async fn spawn_swarm(
                                 &state,
                                 claim,
                                 &audience,
+                                false,
                                 &mut outbound,
                             );
                         }
@@ -922,6 +926,7 @@ fn handle_swarm_event(
                     campaign_id,
                     work_unit_id,
                     claim_id,
+                    ..
                 }) => (
                     None,
                     Some(format!("{campaign_id}:{work_unit_id}:{claim_id}")),
@@ -1376,6 +1381,24 @@ fn on_peer_connected(
                     campaign_id: claim.campaign_id,
                     work_unit_id: claim.work_unit_id,
                     claim_id: claim.claim_id,
+                    silent: true,
+                },
+            );
+        }
+    }
+    if let Ok(claims) = store.work_unit_claims_for_network(LABOR_SYNC_CLAIM_LIMIT) {
+        for claim in claims {
+            let request_id = swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
+            outbound.insert(
+                request_id,
+                PendingOutbound::WorkUnitClaim {
+                    campaign_id: claim.campaign_id,
+                    work_unit_id: claim.work_unit_id,
+                    claim_id: claim.claim_id,
+                    silent: true,
                 },
             );
         }
@@ -1486,6 +1509,11 @@ fn sync_audit_labor_network(
     if let Ok(campaigns) = store.list_protocol_campaigns() {
         for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
             broadcast_campaign(swarm, state, campaign, true, outbound);
+        }
+    }
+    if let Ok(claims) = store.work_unit_claims_for_network(LABOR_SYNC_CLAIM_LIMIT) {
+        for claim in claims {
+            broadcast_work_unit_claim(swarm, state, claim, true, outbound);
         }
     }
     if let Ok(contributions) =
@@ -1657,6 +1685,7 @@ fn send_work_unit_claim(
     state: &P2pState,
     claim: AuditWorkUnitClaim,
     audience: &str,
+    silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     for peer_id in target_peers(state, Some(audience)) {
@@ -1670,6 +1699,7 @@ fn send_work_unit_claim(
                 campaign_id: claim.campaign_id.clone(),
                 work_unit_id: claim.work_unit_id.clone(),
                 claim_id: claim.claim_id.clone(),
+                silent,
             },
         );
     }
@@ -1774,6 +1804,30 @@ fn broadcast_contribution(
                 campaign_id: contribution.campaign_id.clone(),
                 contribution_id: contribution.contribution_id.clone(),
                 receipt_hash: contribution.receipt_hash.clone(),
+                silent,
+            },
+        );
+    }
+}
+
+fn broadcast_work_unit_claim(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    claim: AuditWorkUnitClaim,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    for peer_id in target_peers(state, None) {
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
+        outbound.insert(
+            request_id,
+            PendingOutbound::WorkUnitClaim {
+                campaign_id: claim.campaign_id.clone(),
+                work_unit_id: claim.work_unit_id.clone(),
+                claim_id: claim.claim_id.clone(),
                 silent,
             },
         );

@@ -2,18 +2,18 @@
 
 ## Download The macOS Preview
 
-macOS users can download the current packaged v0.6.4 developer DMGs from:
+macOS users can download the current packaged v0.6.5 developer DMGs from:
 
-- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.6.4/CYPHES_0.6.4_aarch64.dmg
-- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.6.4/CYPHES_0.6.4_x64.dmg
+- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.6.5/CYPHES_0.6.5_aarch64.dmg
+- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.6.5/CYPHES_0.6.5_x64.dmg
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. Windows and Linux binary distributions are not
 available yet.
 
-The current source tree is v0.6.4. Run from source to test Verified ATP
-independent-verifier enforcement, the network liveness hotfix, the separate
+The current source tree is v0.6.5. Run from source to test Verified ATP
+independent-verifier enforcement, the network liveness hotfixes, the separate
 `campaign.html` admin console, and the local pinned-source GitHub cache.
 
 - **CYPHES** opens into the autonomous guardian cockpit. Select a local LM

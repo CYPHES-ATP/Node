@@ -55,6 +55,7 @@ const AUDIT_SCOPE = [
 const AUTO_TICK_INTERVAL_MS = 12_000;
 const TELEMETRY_TICK_INTERVAL_MS = 1_000;
 const MAX_AUTO_CAMPAIGNS_PER_DAY = 24;
+const MAX_SELF_PENDING_CONTRIBUTIONS = 4;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
 
@@ -443,6 +444,7 @@ function AppContent() {
     });
   }, [agentId, campaignSnapshots]);
   const pendingVerificationCount = networkProgress.independentlyVerifiablePendingContributions;
+  const selfPendingVerificationCount = networkProgress.selfPendingContributions;
   const visibleProgress = runtimeActive || runtimeRecentlyFinished ? currentProgress : networkProgress.settlementPercent;
   const projectedPendingCredits = Math.max(
     0,
@@ -1037,6 +1039,11 @@ function AppContent() {
       }
       if (pendingVerificationCount > 0) {
         pushAutoPulse(`Verifier duty active: ${pendingVerificationCount} receipt${pendingVerificationCount === 1 ? "" : "s"} pending`, "warn");
+        return;
+      }
+      if (selfPendingVerificationCount >= MAX_SELF_PENDING_CONTRIBUTIONS) {
+        pushAutoPulse(`Awaiting verifier: ${selfPendingVerificationCount} submitted receipts pending`, "warn");
+        setNotice(`CYPHES paused new audit work while ${selfPendingVerificationCount} submitted receipt${selfPendingVerificationCount === 1 ? "" : "s"} await independent verification.`);
         return;
       }
       if (autoMode.autoWorker) {
