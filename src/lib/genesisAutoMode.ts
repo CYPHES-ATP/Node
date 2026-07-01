@@ -34,9 +34,11 @@ export interface GuardianObservationLedger {
   targets: Record<string, GuardianTargetObservation>;
 }
 
-const SETTINGS_KEY = "cyphes.genesis-auto-mode.settings.v3";
-const COUNTERS_KEY = "cyphes.genesis-auto-mode.counters.v1";
-const LEDGER_KEY = "cyphes.guardian-observation-ledger.v1";
+export const GENESIS_AUTO_MODE_TESTNET_ID = "cyphes-dev-v0.7.5";
+
+const SETTINGS_KEY = `cyphes.${GENESIS_AUTO_MODE_TESTNET_ID}.genesis-auto-mode.settings.v1`;
+const COUNTERS_KEY = `cyphes.${GENESIS_AUTO_MODE_TESTNET_ID}.genesis-auto-mode.counters.v1`;
+const LEDGER_KEY = `cyphes.${GENESIS_AUTO_MODE_TESTNET_ID}.guardian-observation-ledger.v1`;
 
 export const DEFAULT_GENESIS_AUTO_MODE: GenesisAutoModeSettings = {
   autoWorker: false,
@@ -125,7 +127,7 @@ export function writeGenesisAutoCounters(counters: GenesisAutoCounters) {
 
 export function defaultGuardianObservationLedger(): GuardianObservationLedger {
   return {
-    version: "0.6.2",
+    version: GENESIS_AUTO_MODE_TESTNET_ID,
     targets: {},
   };
 }
@@ -164,7 +166,7 @@ export function recordGuardianObservation(
   }
   const updated = {
     ...ledger,
-    version: "0.6.2",
+    version: GENESIS_AUTO_MODE_TESTNET_ID,
     targets: {
       ...ledger.targets,
       [targetId]: next,
@@ -185,7 +187,7 @@ export function recordGuardianFailure(
   };
   const updated = {
     ...ledger,
-    version: "0.6.2",
+    version: GENESIS_AUTO_MODE_TESTNET_ID,
     targets: {
       ...ledger.targets,
       [targetId]: {

@@ -59,6 +59,8 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 2400;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 4;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.5";
+const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
   full_name: string;
@@ -356,6 +358,7 @@ function AppContent() {
   const runtimeStartedAtRef = useRef<number | null>(null);
   const lastPhaseRef = useRef("");
   const autoBusyRef = useRef(false);
+  const autoProviderFallbackRef = useRef(true);
   const lastAutoTickAtRef = useRef(0);
   const lastAutoPulseRef = useRef("");
   const lastGitHubPauseRef = useRef("");
@@ -498,14 +501,28 @@ function AppContent() {
     pushCockpitEvent(label, tone);
   }
 
-  async function refreshRuntimeModels(provider = runtimeProvider) {
-    const listing = await p2p.listLocalModelModels(provider);
+  async function refreshRuntimeModels(provider = runtimeProvider, allowProviderFallback = false) {
+    let selectedProvider = provider;
+    let listing = await p2p.listLocalModelModels(provider);
+    if (allowProviderFallback && listing.models.length === 0) {
+      for (const fallbackProvider of RUNTIME_PROVIDER_OPTIONS.filter((candidate) => candidate !== provider)) {
+        const fallbackListing = await p2p.listLocalModelModels(fallbackProvider);
+        if (fallbackListing.models.length === 0) continue;
+        selectedProvider = fallbackProvider;
+        listing = fallbackListing;
+        setRuntimeProvider(fallbackProvider);
+        break;
+      }
+    }
     setRuntimeStatus(listing);
     setRuntimeModels(listing.models);
     setRuntimeModel((current) => {
       if (current && listing.models.includes(current)) return current;
-      return "";
+      return listing.models[0] || "";
     });
+    if (selectedProvider !== provider) {
+      pushAutoPulse(`Using ${listing.providerLabel}`, "info");
+    }
     return listing;
   }
 
@@ -600,7 +617,9 @@ function AppContent() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    void refreshRuntimeModels(runtimeProvider);
+    const allowFallback = autoProviderFallbackRef.current && !runtimeModel;
+    autoProviderFallbackRef.current = false;
+    void refreshRuntimeModels(runtimeProvider, allowFallback);
     const timer = window.setInterval(() => {
       void refreshRuntimeModels(runtimeProvider);
     }, 15_000);
@@ -1034,7 +1053,6 @@ function AppContent() {
     }
 
     for (const campaign of campaigns) {
-      if (requestedByLocalNode(campaign, agentId)) continue;
       const snapshot =
         campaignSnapshots[campaign.campaignId] ||
         (await refreshCampaignSnapshot(campaign.campaignId));
@@ -1285,8 +1303,12 @@ function AppContent() {
           ) : (
             <div className="empty-state compact">
               <ShieldCheck size={24} />
-              <strong>Guardian loop warming up</strong>
-              <span>CYPHES will resolve the next indexed target, pin the commit, and create work if it has not been covered yet.</span>
+              <strong>{workModeEnabled ? "Guardian loop warming up" : "Verifier mode active"}</strong>
+              <span>
+                {workModeEnabled
+                  ? "CYPHES will resolve the next indexed target, pin the commit, and create work if it has not been covered yet."
+                  : "This node is syncing receipts and available for independent verification. Press Run to start local model work and campaign seeding."}
+              </span>
             </div>
           )}
 
@@ -1374,7 +1396,8 @@ function AppContent() {
         </div>
 
         <footer>
-          <span>ATP v0.3 envelopes</span>
+          <span>CYPHES v{APP_VERSION} testnet</span>
+          <span>ATP envelope v0.3</span>
           <span>Ed25519 identity proof</span>
           <span>SQLite event chain</span>
           <span>Relay + direct libp2p</span>

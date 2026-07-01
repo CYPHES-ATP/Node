@@ -373,7 +373,16 @@ pub async fn record_campaign_contribution(
     work_unit_id: String,
     notes_markdown: String,
 ) -> Result<NodeContribution, String> {
-    let (keypair, _) = node_runtime(&state)?;
+    let (keypair, sender) = node_runtime(&state)?;
+    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    let campaign = snapshot.campaign.clone();
+    let work_unit = snapshot
+        .work_units
+        .iter()
+        .find(|unit| unit.work_unit_id == work_unit_id)
+        .cloned()
+        .ok_or_else(|| "Campaign work unit not found".to_string())?;
+    let claim = ensure_work_unit_claim(&store, &keypair, &campaign, &work_unit, &snapshot.claims)?;
     let note = if notes_markdown.trim().is_empty() {
         "Manual coverage contribution. Use Run Audit Pipeline with LM Studio or Ollama for local model execution.".to_string()
     } else {
@@ -388,8 +397,8 @@ pub async fn record_campaign_contribution(
     };
     let contribution = signed_contribution(
         &keypair,
-        campaign_id,
-        work_unit_id,
+        campaign.campaign_id.clone(),
+        work_unit.work_unit_id,
         RuntimeDescriptor::deterministic_fixture(),
         note,
         vec![AuditFinding {
@@ -415,6 +424,18 @@ pub async fn record_campaign_contribution(
         vec!["CYPHES deterministic fixture: no repository code execution".to_string()],
     )?;
     let contribution = store.record_contribution(&contribution)?;
+    sender
+        .send(SwarmCommand::SendWorkUnitClaim {
+            claim,
+            audience: campaign.requester_agent_id.clone(),
+        })
+        .map_err(|error| error.to_string())?;
+    sender
+        .send(SwarmCommand::SendContribution {
+            contribution: contribution.clone(),
+            audience: campaign.requester_agent_id,
+        })
+        .map_err(|error| error.to_string())?;
     let _ = app.emit("audit:labor_changed", ());
     Ok(contribution)
 }
@@ -429,14 +450,16 @@ pub async fn run_campaign_audit_skill(
     provider: String,
     model: String,
 ) -> Result<NodeContribution, String> {
-    let (keypair, _) = node_runtime(&state)?;
+    let (keypair, sender) = node_runtime(&state)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
-    let campaign = snapshot.campaign;
+    let campaign = snapshot.campaign.clone();
     let work_unit = snapshot
         .work_units
-        .into_iter()
+        .iter()
         .find(|unit| unit.work_unit_id == work_unit_id)
+        .cloned()
         .ok_or_else(|| "Campaign work unit not found".to_string())?;
+    let claim = ensure_work_unit_claim(&store, &keypair, &campaign, &work_unit, &snapshot.claims)?;
     let prior_contributions = snapshot.contributions;
     let output = run_local_audit_skill(
         &app,
@@ -459,6 +482,18 @@ pub async fn run_campaign_audit_skill(
         output.commands,
     )?;
     let contribution = store.record_contribution(&contribution)?;
+    sender
+        .send(SwarmCommand::SendWorkUnitClaim {
+            claim,
+            audience: campaign.requester_agent_id.clone(),
+        })
+        .map_err(|error| error.to_string())?;
+    sender
+        .send(SwarmCommand::SendContribution {
+            contribution: contribution.clone(),
+            audience: campaign.requester_agent_id,
+        })
+        .map_err(|error| error.to_string())?;
     let _ = app.emit("audit:labor_changed", ());
     Ok(contribution)
 }
@@ -475,11 +510,6 @@ pub async fn claim_campaign_work_unit(
     let worker_agent_id = agent_id(&keypair.public());
     ensure_verification_pool_clear(&store, &worker_agent_id)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
-    if snapshot.campaign.requester_agent_id == worker_agent_id {
-        return Err(
-            "Requester already owns this campaign; remote claims are for other nodes.".to_string(),
-        );
-    }
     let work_unit = snapshot
         .work_units
         .iter()
@@ -517,9 +547,6 @@ pub async fn run_claimed_work_unit(
     ensure_verification_pool_clear(&store, &worker_agent_id)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     let campaign = snapshot.campaign;
-    if campaign.requester_agent_id == worker_agent_id {
-        return Err("Use the requester pipeline for campaigns you created.".to_string());
-    }
     let claim = snapshot
         .claims
         .iter()
@@ -611,7 +638,7 @@ pub async fn run_accepted_audit_skill(
     }
     let campaign_id = campaign_id_for_transaction(&job.transaction_id);
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
-    let campaign = snapshot.campaign;
+    let campaign = snapshot.campaign.clone();
     let preferred_kind = if campaign.scope_text.to_ascii_lowercase().contains(".sol") {
         "defi-exploit-class-pass"
     } else {
@@ -629,7 +656,13 @@ pub async fn run_accepted_audit_skill(
         })
         .cloned()
         .ok_or_else(|| "Campaign has no open work units.".to_string())?;
-    ensure_work_unit_claim_for_non_requester(&store, &keypair, &campaign, &work_unit)?;
+    let claim = ensure_work_unit_claim(&store, &keypair, &campaign, &work_unit, &snapshot.claims)?;
+    sender
+        .send(SwarmCommand::SendWorkUnitClaim {
+            claim,
+            audience: campaign.requester_agent_id.clone(),
+        })
+        .map_err(|error| error.to_string())?;
     let output = run_local_audit_skill(
         &app,
         &campaign,
@@ -760,8 +793,9 @@ async fn run_professional_audit_pipeline(
     }
 
     let mut contributions = Vec::new();
+    let claims = snapshot.claims.clone();
     for work_unit in work_units {
-        ensure_work_unit_claim_for_non_requester(store, keypair, &campaign, &work_unit)?;
+        ensure_work_unit_claim(store, keypair, &campaign, &work_unit, &claims)?;
         let output = run_local_audit_skill(
             app,
             &campaign,
@@ -789,25 +823,30 @@ async fn run_professional_audit_pipeline(
     Ok(contributions)
 }
 
-fn ensure_work_unit_claim_for_non_requester(
+fn ensure_work_unit_claim(
     store: &AtpStore,
     keypair: &libp2p::identity::Keypair,
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
-) -> Result<(), String> {
+    claims: &[AuditWorkUnitClaim],
+) -> Result<AuditWorkUnitClaim, String> {
     let worker_agent_id = agent_id(&keypair.public());
-    if campaign.requester_agent_id == worker_agent_id {
-        return Ok(());
-    }
     if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
         if claimed_by == worker_agent_id {
-            return Ok(());
+            return claims
+                .iter()
+                .find(|claim| {
+                    claim.work_unit_id == work_unit.work_unit_id
+                        && claim.worker_agent_id == worker_agent_id
+                        && claim.status == "claimed"
+                })
+                .cloned()
+                .ok_or_else(|| "work unit claim is missing locally".to_string());
         }
         return Err("work unit is claimed by another worker".to_string());
     }
     let claim = signed_work_unit_claim(keypair, campaign, work_unit)?;
-    store.record_work_unit_claim(&claim)?;
-    Ok(())
+    store.record_work_unit_claim(&claim)
 }
 
 fn professional_pipeline_work_units(snapshot: &CampaignReportSnapshot) -> Vec<AuditWorkUnit> {

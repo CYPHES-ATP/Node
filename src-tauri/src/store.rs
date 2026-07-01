@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -147,6 +147,22 @@ pub struct AtpStore {
     connection: Arc<Mutex<Connection>>,
 }
 
+pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.5";
+const STORE_META_TESTNET_ID_KEY: &str = "testnet_id";
+const STORE_META_APP_VERSION_KEY: &str = "app_version";
+const STORE_META_SCHEMA_KEY: &str = "schema";
+const STORE_SCHEMA_VERSION: &str = "audit-labor-v1";
+const LEDGER_TABLES: &[&str] = &[
+    "atp_events",
+    "audit_jobs",
+    "protocol_audit_campaigns",
+    "audit_work_units",
+    "audit_work_unit_claims",
+    "audit_contributions",
+    "audit_verifications",
+    "credit_allocations",
+];
+
 pub fn campaign_id_for_transaction(transaction_id: &str) -> String {
     format!("campaign_{transaction_id}")
 }
@@ -157,6 +173,7 @@ impl AtpStore {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
+        prepare_database_path_for_current_testnet(&path)?;
 
         let connection = Connection::open(&path).map_err(|error| error.to_string())?;
         connection
@@ -507,7 +524,7 @@ impl AtpStore {
             }
             return Err("contribution id already exists with different signed content".to_string());
         }
-        let campaign = campaign_in_transaction(&transaction, &contribution.campaign_id)
+        let _campaign = campaign_in_transaction(&transaction, &contribution.campaign_id)
             .map_err(|_| "contribution campaign is not known locally".to_string())?;
         let work_unit = work_unit_in_transaction(
             &transaction,
@@ -532,19 +549,14 @@ impl AtpStore {
         if existing_for_work_unit.is_some() {
             return Err("work unit already has a submitted contribution".to_string());
         }
-        let is_requester_submission = campaign.requester_agent_id == contribution.worker_agent_id;
-        if !is_requester_submission {
-            let claim = active_claim_for_worker_in_connection(
-                &transaction,
-                &contribution.campaign_id,
-                &contribution.work_unit_id,
-                &contribution.worker_agent_id,
-            )?;
-            if claim.is_none() {
-                return Err(
-                    "work unit must be claimed by this worker before submission".to_string()
-                );
-            }
+        let claim = active_claim_for_worker_in_connection(
+            &transaction,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            &contribution.worker_agent_id,
+        )?;
+        if claim.is_none() {
+            return Err("work unit must be claimed by this worker before submission".to_string());
         }
         if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
             if claimed_by != contribution.worker_agent_id {
@@ -1401,6 +1413,12 @@ impl AtpStore {
             .execute_batch(
                 "PRAGMA foreign_keys = ON;
 
+                 CREATE TABLE IF NOT EXISTS atp_store_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                 );
+
                  CREATE TABLE IF NOT EXISTS atp_events (
                     event_hash TEXT PRIMARY KEY,
                     transaction_id TEXT NOT NULL,
@@ -1625,6 +1643,24 @@ impl AtpStore {
                     ON protocol_audit_campaigns(requester_agent_id, created_at);",
             )
             .map_err(|error| error.to_string())?;
+
+        let updated_at = now_millis() as i64;
+        for (key, value) in [
+            (STORE_META_TESTNET_ID_KEY, ATP_STORE_TESTNET_ID),
+            (STORE_META_APP_VERSION_KEY, env!("CARGO_PKG_VERSION")),
+            (STORE_META_SCHEMA_KEY, STORE_SCHEMA_VERSION),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO atp_store_meta (key, value, updated_at)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at",
+                    params![key, value, updated_at],
+                )
+                .map_err(|error| error.to_string())?;
+        }
 
         let has_delivery_reason = {
             let mut statement = connection
@@ -2976,7 +3012,91 @@ pub fn data_dir() -> Result<PathBuf, String> {
 }
 
 fn database_path() -> Result<PathBuf, String> {
-    Ok(data_dir()?.join("atp.sqlite3"))
+    Ok(data_dir()?.join(format!("{ATP_STORE_TESTNET_ID}.sqlite3")))
+}
+
+fn prepare_database_path_for_current_testnet(path: &Path) -> Result<(), String> {
+    if !path.exists() || database_matches_current_testnet(path)? {
+        return Ok(());
+    }
+    archive_database_files(path)
+}
+
+fn database_matches_current_testnet(path: &Path) -> Result<bool, String> {
+    let connection = Connection::open(path).map_err(|error| error.to_string())?;
+    if sqlite_table_exists(&connection, "atp_store_meta")? {
+        let testnet_id = connection
+            .query_row(
+                "SELECT value FROM atp_store_meta WHERE key = ?1",
+                params![STORE_META_TESTNET_ID_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        return Ok(testnet_id.as_deref() == Some(ATP_STORE_TESTNET_ID));
+    }
+    Ok(!database_has_ledger_rows(&connection)?)
+}
+
+fn sqlite_table_exists(connection: &Connection, table_name: &str) -> Result<bool, String> {
+    let exists = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table_name],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .is_some();
+    Ok(exists)
+}
+
+fn database_has_ledger_rows(connection: &Connection) -> Result<bool, String> {
+    for table in LEDGER_TABLES {
+        if !sqlite_table_exists(connection, table)? {
+            continue;
+        }
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        let count = connection
+            .query_row(&sql, [], |row| row.get::<_, i64>(0))
+            .map_err(|error| error.to_string())?;
+        if count > 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn archive_database_files(path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "database path has no parent directory".to_string())?;
+    let archive_dir = parent.join("backups").join(format!(
+        "{}-incompatible-{}",
+        Utc::now().format("%Y-%m-%d-%H%M%S"),
+        ATP_STORE_TESTNET_ID
+    ));
+    fs::create_dir_all(&archive_dir).map_err(|error| error.to_string())?;
+
+    for source in [
+        path.to_path_buf(),
+        path_with_suffix(path, "-wal"),
+        path_with_suffix(path, "-shm"),
+    ] {
+        if source.exists() {
+            let file_name = source
+                .file_name()
+                .ok_or_else(|| "database file has no filename".to_string())?;
+            fs::rename(&source, archive_dir.join(file_name)).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
 }
 
 #[cfg(test)]
@@ -3002,6 +3122,62 @@ mod tests {
         };
         store.initialize().unwrap();
         store
+    }
+
+    #[test]
+    fn store_initialization_records_current_testnet_marker() {
+        let store = test_store();
+        let connection = store.connection.lock().unwrap();
+        let marker = connection
+            .query_row(
+                "SELECT value FROM atp_store_meta WHERE key = ?1",
+                params![STORE_META_TESTNET_ID_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        assert_eq!(marker, ATP_STORE_TESTNET_ID);
+    }
+
+    #[test]
+    fn database_path_is_testnet_specific() {
+        let filename = database_path()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(filename, format!("{ATP_STORE_TESTNET_ID}.sqlite3"));
+    }
+
+    #[test]
+    fn unmarked_database_with_ledger_rows_is_archived() {
+        let root = std::env::temp_dir().join(format!("cyphes-store-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join(format!("{ATP_STORE_TESTNET_ID}.sqlite3"));
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE protocol_audit_campaigns (campaign_id TEXT PRIMARY KEY);
+                     INSERT INTO protocol_audit_campaigns (campaign_id) VALUES ('old-campaign');",
+                )
+                .unwrap();
+        }
+        prepare_database_path_for_current_testnet(&path).unwrap();
+
+        assert!(!path.exists());
+        let backup_root = root.join("backups");
+        let backup_dir = fs::read_dir(&backup_root)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert!(backup_dir
+            .join(format!("{ATP_STORE_TESTNET_ID}.sqlite3"))
+            .is_file());
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn labor_artifact(path: &str) -> ContributionArtifact {
@@ -3963,10 +4139,11 @@ mod tests {
             .into_iter()
             .find(|unit| unit.kind == "repo-inventory")
             .unwrap();
+        claim_work_unit(&store, &requester, &campaign, &work_unit);
         let contribution = signed_contribution(
             &requester,
             campaign.campaign_id.clone(),
-            work_unit.work_unit_id,
+            work_unit.work_unit_id.clone(),
             RuntimeDescriptor::deterministic_fixture(),
             "Mapped repository inventory locally.".to_string(),
             vec![],

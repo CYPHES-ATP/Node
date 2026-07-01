@@ -5,8 +5,12 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 
 const checks = [
   {
-    label: "settings key isolates current boot settings from persisted v0.7.2 worker mode",
-    pattern: /SETTINGS_KEY\s*=\s*"cyphes\.genesis-auto-mode\.settings\.v3"/,
+    label: "frontend auto-mode state is scoped to the current testnet",
+    pattern: /GENESIS_AUTO_MODE_TESTNET_ID\s*=\s*"cyphes-dev-v0\.7\.5"/,
+  },
+  {
+    label: "settings key isolates current boot settings from prior testnets",
+    pattern: /SETTINGS_KEY\s*=\s*`cyphes\.\$\{GENESIS_AUTO_MODE_TESTNET_ID\}\.genesis-auto-mode\.settings\.v1`/,
   },
   {
     label: "boot read forces auto worker off",

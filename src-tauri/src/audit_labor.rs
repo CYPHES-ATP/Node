@@ -482,9 +482,6 @@ pub fn signed_work_unit_claim(
         return Err("work unit does not belong to campaign".to_string());
     }
     let worker_agent_id = agent_id(&keypair.public());
-    if worker_agent_id == campaign.requester_agent_id {
-        return Err("requester cannot remotely claim its own campaign work unit".to_string());
-    }
     let public_key = raw_ed25519_public_key(&keypair.public())?;
     let mut claim = AuditWorkUnitClaim {
         profile: WORK_UNIT_CLAIM_PROFILE.to_string(),
@@ -1243,7 +1240,6 @@ pub fn validate_work_unit_claim(claim: &AuditWorkUnitClaim) -> Result<(), String
         || claim.work_unit_id.trim().is_empty()
         || claim.requester_agent_id.trim().is_empty()
         || claim.worker_agent_id.trim().is_empty()
-        || claim.requester_agent_id == claim.worker_agent_id
         || claim.claim_hash.trim().is_empty()
         || claim.signature.trim().is_empty()
     {
