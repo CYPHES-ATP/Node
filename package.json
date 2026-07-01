@@ -1,7 +1,7 @@
 {
   "name": "cyphes-desktop",
   "private": true,
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Native ATP node for verifiable repository audit work orders",
   "license": "MIT",
   "repository": {
@@ -16,12 +16,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "check": "npm run build && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo check --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path src-tauri/Cargo.toml && cargo fmt --manifest-path source-gateway/Cargo.toml --check && cargo test --manifest-path source-gateway/Cargo.toml",
+    "check": "npm run build && node scripts/assert-genesis-auto-mode.mjs && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo check --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path src-tauri/Cargo.toml && cargo fmt --manifest-path source-gateway/Cargo.toml --check && cargo test --manifest-path source-gateway/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build:worker": "tauri build --config src-tauri/tauri.worker.conf.json",
     "tauri:build:partner": "tauri build --config src-tauri/tauri.partner.conf.json",
-    "release:mac:v0.7.2": "npm run tauri:build:worker"
+    "release:mac:v0.7.3": "npm run tauri:build:worker"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

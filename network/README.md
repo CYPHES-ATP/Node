@@ -33,7 +33,7 @@ Runtime overrides:
 ```bash
 export CYPHES_RELAY_ADDR=/dns4/host/tcp/4001/p2p/PEER_ID
 export CYPHES_RENDEZVOUS_ADDR="$CYPHES_RELAY_ADDR"
-export CYPHES_RENDEZVOUS_NAMESPACE=cyphes.repository-audit.v0.7.2
+export CYPHES_RENDEZVOUS_NAMESPACE=cyphes.repository-audit.v0.7.3
 ```
 
 Release builds can instead pin the address at compile time with

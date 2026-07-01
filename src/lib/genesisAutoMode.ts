@@ -34,7 +34,7 @@ export interface GuardianObservationLedger {
   targets: Record<string, GuardianTargetObservation>;
 }
 
-const SETTINGS_KEY = "cyphes.genesis-auto-mode.settings.v2";
+const SETTINGS_KEY = "cyphes.genesis-auto-mode.settings.v3";
 const COUNTERS_KEY = "cyphes.genesis-auto-mode.counters.v1";
 const LEDGER_KEY = "cyphes.guardian-observation-ledger.v1";
 
@@ -77,9 +77,9 @@ export function readGenesisAutoModeSettings() {
   const stored = readJson(SETTINGS_KEY, DEFAULT_GENESIS_AUTO_MODE);
   return {
     ...stored,
-    autoWorker: Boolean(stored.autoWorker),
+    autoWorker: false,
     autoVerifier: true,
-    questSeeder: Boolean(stored.questSeeder),
+    questSeeder: false,
     maxDailyObservations: Math.max(
       DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
       stored.maxDailyObservations || DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
@@ -97,9 +97,9 @@ export function writeGenesisAutoModeSettings(settings: GenesisAutoModeSettings) 
     SETTINGS_KEY,
     JSON.stringify({
       ...settings,
-      autoWorker: Boolean(settings.autoWorker),
+      autoWorker: false,
       autoVerifier: true,
-      questSeeder: Boolean(settings.questSeeder),
+      questSeeder: false,
     }),
   );
 }
