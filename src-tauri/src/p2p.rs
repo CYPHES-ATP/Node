@@ -23,8 +23,8 @@ use crate::{
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.1";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.1";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.2";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.2";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -33,13 +33,13 @@ const INFRASTRUCTURE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(30);
-const LABOR_SYNC_CAMPAIGN_LIMIT: usize = 64;
+const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(12);
+const LABOR_SYNC_CAMPAIGN_LIMIT: usize = 128;
 const LABOR_SYNC_CLAIM_LIMIT: usize = 1024;
-const LABOR_SYNC_CONTRIBUTION_LIMIT: usize = 128;
-const LABOR_SYNC_VERIFICATION_LIMIT: usize = 128;
-const LABOR_AUTO_VERIFY_LIMIT: usize = 4;
-const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 128;
+const LABOR_SYNC_CONTRIBUTION_LIMIT: usize = 512;
+const LABOR_SYNC_VERIFICATION_LIMIT: usize = 512;
+const LABOR_AUTO_VERIFY_LIMIT: usize = 8;
+const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
 
 #[derive(Debug, Clone)]
 struct InfrastructureTarget {
@@ -1502,30 +1502,37 @@ fn sync_audit_labor_network(
     local_agent_id: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    if target_peers(state, None).is_empty() {
-        return;
-    }
+    let has_peers = !target_peers(state, None).is_empty();
 
-    if let Ok(campaigns) = store.list_protocol_campaigns() {
-        for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
-            broadcast_campaign(swarm, state, campaign, true, outbound);
+    if has_peers {
+        if let Ok(campaigns) = store.list_protocol_campaigns() {
+            for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
+                broadcast_campaign(swarm, state, campaign, true, outbound);
+            }
         }
-    }
-    if let Ok(claims) = store.work_unit_claims_for_network(LABOR_SYNC_CLAIM_LIMIT) {
-        for claim in claims {
-            broadcast_work_unit_claim(swarm, state, claim, true, outbound);
+        if let Ok(claims) = store.work_unit_claims_for_network(LABOR_SYNC_CLAIM_LIMIT) {
+            for claim in claims {
+                broadcast_work_unit_claim(swarm, state, claim, true, outbound);
+            }
         }
-    }
-    if let Ok(contributions) =
-        store.unverified_contributions_for_network(LABOR_SYNC_CONTRIBUTION_LIMIT)
-    {
-        for contribution in contributions {
-            broadcast_contribution(swarm, state, contribution, true, outbound);
+        if let Ok(contributions) =
+            store.unverified_contributions_for_network(LABOR_SYNC_CONTRIBUTION_LIMIT)
+        {
+            for contribution in contributions {
+                broadcast_contribution(swarm, state, contribution, true, outbound);
+            }
         }
-    }
-    if let Ok(bundles) = store.verification_bundles_for_network(LABOR_SYNC_VERIFICATION_LIMIT) {
-        for (verification, allocations) in bundles {
-            broadcast_verification_result(swarm, state, verification, allocations, true, outbound);
+        if let Ok(bundles) = store.verification_bundles_for_network(LABOR_SYNC_VERIFICATION_LIMIT) {
+            for (verification, allocations) in bundles {
+                broadcast_verification_result(
+                    swarm,
+                    state,
+                    verification,
+                    allocations,
+                    true,
+                    outbound,
+                );
+            }
         }
     }
 
@@ -2219,7 +2226,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.1"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.7.2"
             }"#,
         )
         .expect("valid manifest");

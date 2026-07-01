@@ -975,7 +975,7 @@ form > label,
   display: grid;
   align-content: center;
   min-height: 126px;
-  padding: 14px;
+  padding: 12px;
   border: 1px solid rgba(0, 246, 255, 0.18);
   background:
     repeating-linear-gradient(90deg, rgba(0, 246, 255, 0.05) 0 1px, transparent 1px 16px),
@@ -984,12 +984,12 @@ form > label,
 
 .runtime-radar label {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
 }
 
 .runtime-radar label + label {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .runtime-radar span {
@@ -1003,7 +1003,7 @@ form > label,
 .runtime-radar select {
   width: 100%;
   min-width: 0;
-  height: 34px;
+  height: 29px;
   border: 1px solid rgba(0, 246, 255, 0.18);
   border-radius: 0;
   outline: 0;
@@ -1012,9 +1012,9 @@ form > label,
     rgba(0, 0, 0, 0.34);
   color: var(--green);
   font-family: var(--mono);
-  font-size: clamp(12px, 1.35vw, 18px);
+  font-size: 11px;
   font-weight: 820;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -1025,6 +1025,51 @@ form > label,
 .runtime-radar select:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 1px rgba(199, 255, 71, 0.22);
+}
+
+.runtime-run-button {
+  display: inline-flex;
+  width: 100%;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 10px;
+  border: 1px solid rgba(199, 255, 71, 0.38);
+  border-radius: 0;
+  background:
+    linear-gradient(90deg, rgba(199, 255, 71, 0.13), transparent),
+    rgba(0, 0, 0, 0.32);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.runtime-run-button svg {
+  color: var(--green);
+  flex: 0 0 auto;
+}
+
+.runtime-run-button span {
+  color: inherit;
+  font-size: inherit;
+  letter-spacing: 0;
+}
+
+.runtime-run-button:hover:not(:disabled) {
+  border-color: var(--green);
+  background:
+    linear-gradient(90deg, rgba(199, 255, 71, 0.2), transparent),
+    rgba(0, 0, 0, 0.42);
+}
+
+.runtime-run-button:disabled {
+  color: rgba(245, 251, 250, 0.46);
+  cursor: default;
 }
 
 .standby-runtime-card {

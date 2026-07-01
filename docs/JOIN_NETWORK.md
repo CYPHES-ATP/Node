@@ -161,7 +161,7 @@ Use separate data directories. One identity must not run as both parties.
 
 **Nodes connect but do not exchange a work order**
 
-- Confirm both support `/cyphes/atp/0.7.1`.
+- Confirm both support `/cyphes/atp/0.7.2`.
 - Keep both online; offline mailbox delivery is not implemented.
 - Confirm the target multiaddress ends with the counterparty node peer ID.
 - Check the client notice for signature, `prev`, expiry, or lease rejection.

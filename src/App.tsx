@@ -13,6 +13,7 @@ import {
   Clock3,
   Cpu,
   Gauge,
+  Play,
   ShieldCheck,
   Target,
   Trophy,
@@ -341,7 +342,7 @@ function AppContent() {
     { id: "boot", label: "Runtime standby", at: Date.now() },
   ]);
   const [guardianTargets, setGuardianTargets] = useState<GuardianTarget[]>([]);
-  const [autoMode] = useState<GenesisAutoModeSettings>(() =>
+  const [autoMode, setAutoMode] = useState<GenesisAutoModeSettings>(() =>
     readGenesisAutoModeSettings(),
   );
   const [autoCounters, setAutoCounters] = useState<GenesisAutoCounters>(() =>
@@ -453,6 +454,7 @@ function AppContent() {
   const provisionalCreditTotal = creditSummary.provisionalTotal || 0;
   const activeNodeCount = nodeStatus === "online" ? peerCount + 1 : peerCount;
   const autoModeArmed = true;
+  const workModeEnabled = autoMode.autoWorker || autoMode.questSeeder;
   const sortedCampaigns = useMemo(
     () => [...campaigns].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [campaigns],
@@ -502,9 +504,47 @@ function AppContent() {
     setRuntimeModels(listing.models);
     setRuntimeModel((current) => {
       if (current && listing.models.includes(current)) return current;
-      return listing.models[0] || "";
+      return "";
     });
     return listing;
+  }
+
+  async function enableWorkMode() {
+    if (workModeEnabled) return;
+    let selectedModel = runtimeModel;
+    let availableModels = runtimeModels;
+    if (!selectedModel || availableModels.length === 0) {
+      try {
+        const listing = await refreshRuntimeModels(runtimeProvider);
+        availableModels = listing.models;
+        if (selectedModel && !availableModels.includes(selectedModel)) {
+          selectedModel = "";
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        pushAutoPulse(message, "warn");
+        setNotice(message);
+        return;
+      }
+    }
+    if (!selectedModel && availableModels.length > 0) {
+      selectedModel = availableModels[0];
+      setRuntimeModel(selectedModel);
+    }
+    if (!selectedModel) {
+      const message = `${runtimeProviderLabel} model required before Run.`;
+      pushAutoPulse(message, "warn");
+      setNotice(message);
+      return;
+    }
+    setAutoMode((current) => ({
+      ...current,
+      autoVerifier: true,
+      autoWorker: true,
+      questSeeder: true,
+    }));
+    pushAutoPulse("Work mode enabled", "success");
+    setNotice("CYPHES worker mode enabled; verifier duties remain active.");
   }
 
   useEffect(() => {
@@ -1046,6 +1086,10 @@ function AppContent() {
         setNotice(`CYPHES paused new audit work while ${selfPendingVerificationCount} submitted receipt${selfPendingVerificationCount === 1 ? "" : "s"} await independent verification.`);
         return;
       }
+      if (!workModeEnabled) {
+        pushAutoPulse("Verifier mode active", "info");
+        return;
+      }
       if (autoMode.autoWorker) {
         const worked = await autoWorkerNextUnit();
         if (worked) return;
@@ -1130,6 +1174,18 @@ function AppContent() {
                       )}
                     </select>
                   </label>
+                  <button
+                    aria-label={workModeEnabled ? "Worker mode running" : "Run worker mode"}
+                    className="runtime-run-button"
+                    disabled={workModeEnabled || runtimeActive}
+                    onClick={() => {
+                      void enableWorkMode();
+                    }}
+                    type="button"
+                  >
+                    <Play size={14} aria-hidden="true" />
+                    <span>{workModeEnabled ? "Running" : "Run"}</span>
+                  </button>
                 </div>
               </div>
               <div className="campaign-target">
@@ -1271,6 +1327,18 @@ function AppContent() {
                   )}
                 </select>
               </label>
+              <button
+                aria-label={workModeEnabled ? "Worker mode running" : "Run worker mode"}
+                className="runtime-run-button"
+                disabled={workModeEnabled || runtimeActive}
+                onClick={() => {
+                  void enableWorkMode();
+                }}
+                type="button"
+              >
+                <Play size={14} aria-hidden="true" />
+                <span>{workModeEnabled ? "Running" : "Run"}</span>
+              </button>
             </div>
           ) : null}
 

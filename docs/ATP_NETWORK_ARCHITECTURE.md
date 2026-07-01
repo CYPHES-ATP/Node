@@ -443,10 +443,10 @@ desktop binary.
 Use dedicated versioned protocols:
 
 ```text
-/cyphes/atp/0.7.1/envelope
-/cyphes/atp/0.7.1/card
-/cyphes/atp/0.7.1/artifact
-/cyphes/atp/0.7.1/mailbox
+/cyphes/atp/0.7.2/envelope
+/cyphes/atp/0.7.2/card
+/cyphes/atp/0.7.2/artifact
+/cyphes/atp/0.7.2/mailbox
 ```
 
 `/envelope` is reliable request-response with an acknowledgement:
