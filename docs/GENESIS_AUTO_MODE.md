@@ -41,6 +41,7 @@ v0.6.2 raises the default autonomous caps to support long-running testnet nodes:
 
 - **Observation cap**: 2880 Guardian target observations per day.
 - **Model audit cap**: 2880 local-model work-unit runs per day.
+- **Campaign seed cap**: 2400 new autonomous campaigns per UTC day.
 
 ## GitHub Backoff
 

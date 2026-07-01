@@ -83,8 +83,9 @@ v0.6.2 makes the main CYPHES node autonomous by default:
   networking. Nodes can set a local GitHub token for higher quota. v0.6.2 also
   routes source reads through the optional Source Gateway first, then falls back
   to direct GitHub reads and local pinned-source cache.
-- **Daily caps** default to 2880 Guardian observations/day and 2880 model-audit
-  work-unit runs/day for long-running testnet participation.
+- **Daily caps** default to 2880 Guardian observations/day, 2880 model-audit
+  work-unit runs/day, and 2400 autonomous campaign seeds/day for long-running
+  testnet participation.
 - **Quality deductions** reduce parser-fallback, zero-structured-finding
   contributions by 90% and show the deduction in red runtime telemetry.
 

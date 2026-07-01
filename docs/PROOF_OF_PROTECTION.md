@@ -41,7 +41,8 @@ it burns tokens. The useful primitive is **Proof of Protection**:
 - Gateway responses include signed source manifest headers.
 - Parser-fallback model outputs earn only 10% of normal ATP allocation and show
   the deduction in red telemetry.
-- Default autonomous observation and model-audit caps are 2880/day each.
+- Default autonomous observation and model-audit caps are 2880/day each, with
+  autonomous campaign seeding capped at 2400/day.
 
 That is enough to say CYPHES has a real early labor-receipt engine. It is not
 just a simulated scoreboard.
