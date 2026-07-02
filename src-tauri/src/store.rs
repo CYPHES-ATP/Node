@@ -150,6 +150,7 @@ pub struct AtpStore {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditLaborInventory {
+    pub campaign_ids: Vec<String>,
     pub claim_ids: Vec<String>,
     pub contribution_ids: Vec<String>,
     pub verification_ids: Vec<String>,
@@ -158,15 +159,25 @@ pub struct AuditLaborInventory {
 
 #[derive(Debug, Clone)]
 pub struct StaleContributionRepair {
+    pub campaign: ProtocolAuditCampaign,
     pub claim: Option<AuditWorkUnitClaim>,
     pub contribution: NodeContribution,
 }
 
-pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.6";
+#[derive(Debug, Clone)]
+pub struct PendingLaborObject {
+    pub object_kind: String,
+    pub object_id: String,
+    pub object_json: String,
+}
+
+pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.7";
+pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 12;
 const STORE_META_TESTNET_ID_KEY: &str = "testnet_id";
 const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
 const STORE_SCHEMA_VERSION: &str = "audit-labor-v1";
+const CLAIM_CONTRIBUTION_CLOCK_SKEW_MS: i64 = 60_000;
 const LEDGER_TABLES: &[&str] = &[
     "atp_events",
     "audit_jobs",
@@ -176,6 +187,7 @@ const LEDGER_TABLES: &[&str] = &[
     "audit_contributions",
     "audit_verifications",
     "credit_allocations",
+    "audit_labor_pending_objects",
 ];
 
 pub fn campaign_id_for_transaction(transaction_id: &str) -> String {
@@ -528,8 +540,6 @@ impl AtpStore {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
-        let now = now_millis() as i64;
-        expire_stale_claims_in_transaction(&transaction, claim_expiry_cutoff(now), now)?;
         let existing = transaction
             .query_row(
                 "SELECT contribution_json FROM audit_contributions WHERE contribution_id = ?1",
@@ -571,19 +581,32 @@ impl AtpStore {
         if existing_for_work_unit.is_some() {
             return Err("work unit already has a submitted contribution".to_string());
         }
-        let claim = active_claim_for_worker_in_connection(
-            &transaction,
-            &contribution.campaign_id,
-            &contribution.work_unit_id,
-            &contribution.worker_agent_id,
-        )?;
+        let claim = claim_for_contribution_in_connection(&transaction, contribution)?;
         if claim.is_none() {
             return Err("work unit must be claimed by this worker before submission".to_string());
         }
         if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
-            if claimed_by != contribution.worker_agent_id {
+            if claimed_by != contribution.worker_agent_id && work_unit.status != "claimed" {
                 return Err("work unit is claimed by another worker".to_string());
             }
+        }
+        let worker_pending = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM audit_contributions c
+                 WHERE c.worker_agent_id = ?1
+                   AND NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                 )",
+                params![contribution.worker_agent_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if worker_pending.max(0) as usize >= MAX_PENDING_CONTRIBUTIONS_PER_WORKER {
+            return Err(format!(
+                "worker backpressure active: {worker_pending} receipt{} from this worker await independent verification; pause new audit work until the network clears below {MAX_PENDING_CONTRIBUTIONS_PER_WORKER}",
+                if worker_pending == 1 { "" } else { "s" }
+            ));
         }
         let inserted = transaction
             .execute(
@@ -866,6 +889,7 @@ impl AtpStore {
         })
     }
 
+    #[cfg(test)]
     pub fn verification_bundles_for_worker(
         &self,
         worker_agent_id: &str,
@@ -918,6 +942,7 @@ impl AtpStore {
         Ok(bundles)
     }
 
+    #[cfg(test)]
     pub fn verification_bundles_for_network(
         &self,
         limit: usize,
@@ -951,6 +976,7 @@ impl AtpStore {
         Ok(bundles)
     }
 
+    #[cfg(test)]
     pub fn work_unit_claims_for_requester(
         &self,
         requester_agent_id: &str,
@@ -973,6 +999,7 @@ impl AtpStore {
         .collect()
     }
 
+    #[cfg(test)]
     pub fn work_unit_claims_for_network(
         &self,
         limit: usize,
@@ -996,6 +1023,7 @@ impl AtpStore {
         .collect()
     }
 
+    #[cfg(test)]
     pub fn contributions_for_requester(
         &self,
         requester_agent_id: &str,
@@ -1020,6 +1048,7 @@ impl AtpStore {
         .collect()
     }
 
+    #[cfg(test)]
     pub fn unverified_contributions_for_network(
         &self,
         limit: usize,
@@ -1116,12 +1145,66 @@ impl AtpStore {
         Ok(count.max(0) as usize)
     }
 
+    pub fn oldest_pending_contribution_time_for_worker(
+        &self,
+        worker_agent_id: &str,
+    ) -> Result<Option<u64>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let timestamp = connection
+            .query_row(
+                "SELECT MIN(c.created_at) FROM audit_contributions c
+                 WHERE c.worker_agent_id = ?1
+                   AND NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                 )",
+                params![worker_agent_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(timestamp.map(|value| value.max(0) as u64))
+    }
+
+    pub fn latest_independent_verification_time_for_worker(
+        &self,
+        worker_agent_id: &str,
+    ) -> Result<Option<u64>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let timestamp = connection
+            .query_row(
+                "SELECT MAX(v.created_at)
+                 FROM audit_verifications v
+                 JOIN audit_contributions c
+                   ON c.contribution_id = v.target_contribution_id
+                 WHERE c.worker_agent_id = ?1
+                   AND v.verifier_agent_id != ?1",
+                params![worker_agent_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(timestamp.map(|value| value.max(0) as u64))
+    }
+
     pub fn audit_labor_inventory(
         &self,
         local_agent_id: &str,
         limit: usize,
     ) -> Result<AuditLaborInventory, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut campaign_statement = connection
+            .prepare(
+                "SELECT campaign_id FROM protocol_audit_campaigns
+                 ORDER BY created_at DESC, campaign_id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let campaign_ids = campaign_statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .map(|row| row.map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(campaign_statement);
+
         let mut claim_statement = connection
             .prepare(
                 "SELECT claim_id FROM audit_work_unit_claims
@@ -1190,11 +1273,34 @@ impl AtpStore {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(AuditLaborInventory {
+            campaign_ids,
             claim_ids,
             contribution_ids,
             verification_ids,
             needs_verifier_contribution_ids,
         })
+    }
+
+    pub fn campaigns_by_ids(
+        &self,
+        campaign_ids: &[String],
+    ) -> Result<Vec<ProtocolAuditCampaign>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut campaigns = Vec::new();
+        for campaign_id in campaign_ids {
+            let campaign_json = connection
+                .query_row(
+                    "SELECT campaign_json FROM protocol_audit_campaigns WHERE campaign_id = ?1",
+                    params![campaign_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some(json) = campaign_json {
+                campaigns.push(serde_json::from_str(&json).map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(campaigns)
     }
 
     pub fn work_unit_claims_by_ids(
@@ -1220,6 +1326,25 @@ impl AtpStore {
         Ok(claims)
     }
 
+    pub fn claims_for_contributions(
+        &self,
+        contributions: &[NodeContribution],
+    ) -> Result<Vec<AuditWorkUnitClaim>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut claims = Vec::new();
+        for contribution in contributions {
+            if let Some(claim) = claim_for_contribution_in_connection(&connection, contribution)? {
+                if !claims
+                    .iter()
+                    .any(|existing: &AuditWorkUnitClaim| existing.claim_id == claim.claim_id)
+                {
+                    claims.push(claim);
+                }
+            }
+        }
+        Ok(claims)
+    }
+
     pub fn contributions_by_ids(
         &self,
         contribution_ids: &[String],
@@ -1237,6 +1362,38 @@ impl AtpStore {
                 .map_err(|error| error.to_string())?;
             if let Some(json) = contribution_json {
                 contributions.push(serde_json::from_str(&json).map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(contributions)
+    }
+
+    pub fn contributions_for_verifications(
+        &self,
+        verification_ids: &[String],
+    ) -> Result<Vec<NodeContribution>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut contributions = Vec::new();
+        for verification_id in verification_ids {
+            let contribution_json = connection
+                .query_row(
+                    "SELECT c.contribution_json
+                     FROM audit_verifications v
+                     INNER JOIN audit_contributions c
+                        ON c.contribution_id = v.target_contribution_id
+                     WHERE v.verification_id = ?1",
+                    params![verification_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some(json) = contribution_json {
+                let contribution: NodeContribution =
+                    serde_json::from_str(&json).map_err(|error| error.to_string())?;
+                if !contributions.iter().any(|existing: &NodeContribution| {
+                    existing.contribution_id == contribution.contribution_id
+                }) {
+                    contributions.push(contribution);
+                }
             }
         }
         Ok(contributions)
@@ -1301,18 +1458,124 @@ impl AtpStore {
         };
         let mut repairs = Vec::new();
         for contribution in contributions {
-            let claim = active_claim_for_worker_in_connection(
-                &connection,
-                &contribution.campaign_id,
-                &contribution.work_unit_id,
-                &contribution.worker_agent_id,
-            )?;
+            let campaign = campaign_in_connection(&connection, &contribution.campaign_id)?;
+            let claim = claim_for_contribution_in_connection(&connection, &contribution)?.or(
+                active_claim_for_worker_in_connection(
+                    &connection,
+                    &contribution.campaign_id,
+                    &contribution.work_unit_id,
+                    &contribution.worker_agent_id,
+                )?,
+            );
             repairs.push(StaleContributionRepair {
+                campaign,
                 claim,
                 contribution,
             });
         }
         Ok(repairs)
+    }
+
+    pub fn queue_pending_labor_object(
+        &self,
+        object_kind: &str,
+        object_id: &str,
+        object_json: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let now = now_millis() as i64;
+        connection
+            .execute(
+                "INSERT INTO audit_labor_pending_objects
+                    (object_kind, object_id, object_json, status, reason, attempts, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'needs_dependency', ?4, 0, ?5, ?5)
+                 ON CONFLICT(object_kind, object_id) DO UPDATE SET
+                    object_json = excluded.object_json,
+                    status = 'needs_dependency',
+                    reason = excluded.reason,
+                    updated_at = excluded.updated_at",
+                params![object_kind, object_id, object_json, reason, now],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn pending_labor_objects(&self, limit: usize) -> Result<Vec<PendingLaborObject>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT object_kind, object_id, object_json
+                 FROM audit_labor_pending_objects
+                 WHERE status = 'needs_dependency'
+                 ORDER BY created_at, object_kind, object_id
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![limit as i64], |row| {
+                Ok(PendingLaborObject {
+                    object_kind: row.get(0)?,
+                    object_id: row.get(1)?,
+                    object_json: row.get(2)?,
+                })
+            })
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| row.map_err(|error| error.to_string()))
+            .collect()
+    }
+
+    pub fn mark_pending_labor_object_settled(
+        &self,
+        object_kind: &str,
+        object_id: &str,
+    ) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "UPDATE audit_labor_pending_objects
+                 SET status = 'settled', reason = NULL, updated_at = ?3
+                 WHERE object_kind = ?1 AND object_id = ?2",
+                params![object_kind, object_id, now_millis() as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn mark_pending_labor_object_rejected(
+        &self,
+        object_kind: &str,
+        object_id: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "UPDATE audit_labor_pending_objects
+                 SET status = 'rejected', reason = ?3, updated_at = ?4
+                 WHERE object_kind = ?1 AND object_id = ?2",
+                params![object_kind, object_id, reason, now_millis() as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn refresh_pending_labor_object(
+        &self,
+        object_kind: &str,
+        object_id: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "UPDATE audit_labor_pending_objects
+                 SET reason = ?3, attempts = attempts + 1, updated_at = ?4
+                 WHERE object_kind = ?1 AND object_id = ?2",
+                params![object_kind, object_id, reason, now_millis() as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     pub fn expire_stale_claims(&self, claim_ttl_ms: u64) -> Result<usize, String> {
@@ -1873,6 +2136,19 @@ impl AtpStore {
                     ON credit_allocations(verification_id, issued_at, allocation_id);
                  CREATE INDEX IF NOT EXISTS credit_allocations_contribution
                     ON credit_allocations(contribution_id, issued_at, allocation_id);
+                 CREATE TABLE IF NOT EXISTS audit_labor_pending_objects (
+                    object_kind TEXT NOT NULL,
+                    object_id TEXT NOT NULL,
+                    object_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    reason TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY(object_kind, object_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS audit_labor_pending_objects_status
+                    ON audit_labor_pending_objects(status, updated_at, object_kind, object_id);
                  CREATE INDEX IF NOT EXISTS deliveries_transaction_updated
                     ON deliveries(transaction_id, updated_at);
                  CREATE INDEX IF NOT EXISTS protocol_audit_campaigns_requester_created
@@ -3054,6 +3330,71 @@ fn active_claim_for_worker_in_connection(
     Ok(Some(claim))
 }
 
+fn claim_for_contribution_in_connection(
+    connection: &Connection,
+    contribution: &NodeContribution,
+) -> Result<Option<AuditWorkUnitClaim>, String> {
+    let contribution_created_at = millis_from_rfc3339(&contribution.created_at)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT claim_json, created_at FROM audit_work_unit_claims
+             WHERE campaign_id = ?1
+               AND work_unit_id = ?2
+               AND worker_agent_id = ?3
+             ORDER BY created_at DESC, claim_id DESC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(
+            params![
+                contribution.campaign_id,
+                contribution.work_unit_id,
+                contribution.worker_agent_id
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (claim_json, stored_claim_created_at) = row.map_err(|error| error.to_string())?;
+        let claim: AuditWorkUnitClaim =
+            serde_json::from_str(&claim_json).map_err(|error| error.to_string())?;
+        verify_signed_work_unit_claim(&claim)?;
+        if contribution_is_within_claim_window(
+            &claim,
+            stored_claim_created_at,
+            contribution_created_at,
+        )? {
+            return Ok(Some(claim));
+        }
+    }
+    Ok(None)
+}
+
+fn contribution_is_within_claim_window(
+    claim: &AuditWorkUnitClaim,
+    stored_claim_created_at: i64,
+    contribution_created_at: i64,
+) -> Result<bool, String> {
+    let signed_claim_created_at = millis_from_rfc3339(&claim.created_at)?;
+    let claim_started_at = stored_claim_created_at.min(signed_claim_created_at);
+    let signed_expires_at = claim
+        .expires_at
+        .as_deref()
+        .map(millis_from_rfc3339)
+        .transpose()?
+        .unwrap_or_else(|| {
+            signed_claim_created_at.saturating_add(ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS))
+        });
+    let ttl_expires_at =
+        stored_claim_created_at.saturating_add(ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS));
+    let claim_expires_at = signed_expires_at.min(ttl_expires_at);
+    Ok(
+        contribution_created_at.saturating_add(CLAIM_CONTRIBUTION_CLOCK_SKEW_MS)
+            >= claim_started_at
+            && contribution_created_at <= claim_expires_at,
+    )
+}
+
 fn contribution_in_connection(
     connection: &Connection,
     contribution_id: &str,
@@ -3616,6 +3957,40 @@ mod tests {
         verification.signature = crate::atp::sign_canonical(keypair, &value).unwrap();
     }
 
+    fn resign_contribution(
+        keypair: &libp2p::identity::Keypair,
+        contribution: &mut NodeContribution,
+    ) {
+        let mut value = serde_json::to_value(&*contribution).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("contributionHash");
+        object.remove("receiptHash");
+        object.remove("signature");
+        contribution.contribution_hash = sha256_ref(&serde_jcs::to_vec(&value).unwrap());
+        let receipt_value = serde_json::json!({
+            "profile": contribution.profile.clone(),
+            "receiptType": "NodeContributionReceipt",
+            "campaignId": contribution.campaign_id.clone(),
+            "workUnitId": contribution.work_unit_id.clone(),
+            "contributionId": contribution.contribution_id.clone(),
+            "workerAgentId": contribution.worker_agent_id.clone(),
+            "contributionHash": contribution.contribution_hash.clone(),
+            "artifacts": contribution.artifacts.clone(),
+            "createdAt": contribution.created_at.clone(),
+        });
+        contribution.receipt_hash = sha256_ref(&serde_jcs::to_vec(&receipt_value).unwrap());
+        contribution.signature = crate::atp::sign_canonical(keypair, &value).unwrap();
+    }
+
+    fn resign_claim(keypair: &libp2p::identity::Keypair, claim: &mut AuditWorkUnitClaim) {
+        let mut value = serde_json::to_value(&*claim).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("claimHash");
+        object.remove("signature");
+        claim.claim_hash = sha256_ref(&serde_jcs::to_vec(&value).unwrap());
+        claim.signature = crate::atp::sign_canonical(keypair, &value).unwrap();
+    }
+
     #[test]
     fn commits_a_signed_announcement_and_replays_idempotently() {
         let store = test_store();
@@ -3830,6 +4205,74 @@ mod tests {
         assert_eq!(second.campaign_id, first.campaign_id);
         assert_eq!(store.list_protocol_campaigns().unwrap().len(), 1);
         assert_eq!(store.list_work_units(&first.campaign_id).unwrap().len(), 7);
+    }
+
+    #[test]
+    fn record_contribution_enforces_worker_pending_cap_across_entrypoints() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let requester_agent = agent_id(&requester.public());
+        let mut submitted = 0usize;
+
+        for campaign_index in 0..3 {
+            let campaign = ProtocolAuditCampaign::new(
+                format!("Backpressure Fixture {campaign_index}"),
+                RepositoryTarget {
+                    full_name: format!("fixture/repo-{campaign_index}"),
+                    url: format!("https://github.com/fixture/repo-{campaign_index}"),
+                    commit_sha: "fd1fbd9150426ca8ace9cee45b4acf912ae84f5b".to_string(),
+                },
+                format!("Backpressure fixture scope {campaign_index}."),
+                None,
+                vec!["Principal theft".to_string()],
+                vec!["Best practice notes".to_string()],
+                Some("Backpressure fixture".to_string()),
+                None,
+                Vec::new(),
+                None,
+                requester_agent.clone(),
+            )
+            .unwrap();
+            store.create_protocol_campaign(&campaign).unwrap();
+            let work_units = store.list_work_units(&campaign.campaign_id).unwrap();
+            for work_unit in work_units {
+                let contribution = signed_contribution(
+                    &worker,
+                    campaign.campaign_id.clone(),
+                    work_unit.work_unit_id.clone(),
+                    RuntimeDescriptor::deterministic_fixture(),
+                    format!("Backpressure fixture contribution {submitted}."),
+                    vec![],
+                    vec![labor_artifact(&format!("backpressure-{submitted}.md"))],
+                    vec![CoverageItem {
+                        area: "backpressure".to_string(),
+                        status: "completed".to_string(),
+                        evidence: vec!["Pending cap exercised.".to_string()],
+                    }],
+                    vec!["no repository code execution".to_string()],
+                )
+                .unwrap();
+                claim_work_unit(&store, &worker, &campaign, &work_unit);
+                if submitted < MAX_PENDING_CONTRIBUTIONS_PER_WORKER {
+                    store.record_contribution(&contribution).unwrap();
+                    submitted += 1;
+                    continue;
+                }
+
+                let error = store.record_contribution(&contribution).unwrap_err();
+                assert!(error.contains("worker backpressure active"));
+                assert_eq!(
+                    store
+                        .pending_contribution_count_for_worker(&agent_id(&worker.public()))
+                        .unwrap(),
+                    MAX_PENDING_CONTRIBUTIONS_PER_WORKER
+                );
+                return;
+            }
+        }
+
+        panic!("expected pending contribution cap to be reached");
     }
 
     #[test]
@@ -4379,6 +4822,91 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.claims.len(), 1);
         assert_eq!(snapshot.claims[0].status, "expired");
+    }
+
+    #[test]
+    fn delayed_contribution_replay_accepts_receipt_created_inside_claim_window() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+
+        let mut claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+
+        let historical_claim_created_at =
+            now_millis() as i64 - ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS) - 60_000;
+        let contribution_created_at =
+            historical_claim_created_at + ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS) / 2;
+        claim.created_at = rfc3339_from_millis(historical_claim_created_at as u64);
+        claim.expires_at = Some(rfc3339_from_millis(
+            (historical_claim_created_at + ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS)) as u64,
+        ));
+        resign_claim(&worker, &mut claim);
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_work_unit_claims
+                     SET claim_json = ?1, created_at = ?2, updated_at = ?2
+                     WHERE claim_id = ?3",
+                    params![
+                        serde_json::to_string(&claim).unwrap(),
+                        historical_claim_created_at,
+                        claim.claim_id
+                    ],
+                )
+                .unwrap();
+        }
+
+        let expired = store.expire_stale_claims(WORK_UNIT_CLAIM_TTL_MS).unwrap();
+        assert_eq!(expired, 1);
+
+        let mut contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Receipt was produced while the claim was valid but delivered after expiry."
+                .to_string(),
+            vec![],
+            vec![labor_artifact("delayed-replay.md")],
+            vec![CoverageItem {
+                area: "delayed replay".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Receipt timestamp falls inside signed claim window.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        contribution.created_at = rfc3339_from_millis(contribution_created_at as u64);
+        resign_contribution(&worker, &mut contribution);
+
+        store.record_contribution(&contribution).unwrap();
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(snapshot.contributions.len(), 1);
+        assert_eq!(
+            snapshot.contributions[0].contribution_id,
+            contribution.contribution_id
+        );
+        assert_eq!(
+            snapshot
+                .work_units
+                .iter()
+                .find(|unit| unit.work_unit_id == work_unit.work_unit_id)
+                .unwrap()
+                .status,
+            "submitted"
+        );
     }
 
     #[test]

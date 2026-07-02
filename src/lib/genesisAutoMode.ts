@@ -24,6 +24,7 @@ export interface GuardianTargetObservation {
   lastObservedAt?: string;
   lastSeededCommit?: string;
   lastSeededAt?: string;
+  lastSeededEpoch?: string;
   lastError?: string;
   lastErrorAt?: string;
   unchangedCount: number;
@@ -34,7 +35,7 @@ export interface GuardianObservationLedger {
   targets: Record<string, GuardianTargetObservation>;
 }
 
-export const GENESIS_AUTO_MODE_TESTNET_ID = "cyphes-dev-v0.7.6";
+export const GENESIS_AUTO_MODE_TESTNET_ID = "cyphes-dev-v0.7.7";
 
 const SETTINGS_KEY = `cyphes.${GENESIS_AUTO_MODE_TESTNET_ID}.genesis-auto-mode.settings.v1`;
 const COUNTERS_KEY = `cyphes.${GENESIS_AUTO_MODE_TESTNET_ID}.genesis-auto-mode.counters.v1`;
@@ -79,9 +80,7 @@ export function readGenesisAutoModeSettings() {
   const stored = readJson(SETTINGS_KEY, DEFAULT_GENESIS_AUTO_MODE);
   return {
     ...stored,
-    autoWorker: false,
     autoVerifier: true,
-    questSeeder: false,
     maxDailyObservations: Math.max(
       DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
       stored.maxDailyObservations || DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
@@ -99,9 +98,7 @@ export function writeGenesisAutoModeSettings(settings: GenesisAutoModeSettings) 
     SETTINGS_KEY,
     JSON.stringify({
       ...settings,
-      autoWorker: false,
       autoVerifier: true,
-      questSeeder: false,
     }),
   );
 }
@@ -145,6 +142,7 @@ export function recordGuardianObservation(
   targetId: string,
   commitSha: string,
   seeded: boolean,
+  seededEpoch?: string,
 ) {
   const current = ledger.targets[targetId] || {
     targetId,
@@ -163,6 +161,7 @@ export function recordGuardianObservation(
   if (seeded) {
     next.lastSeededCommit = commitSha;
     next.lastSeededAt = next.lastObservedAt;
+    next.lastSeededEpoch = seededEpoch;
   }
   const updated = {
     ...ledger,

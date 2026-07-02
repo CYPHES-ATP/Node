@@ -29,8 +29,8 @@ use crate::{
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.6";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.6";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.7";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.7";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -41,14 +41,13 @@ const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(12);
 const LABOR_SYNC_CAMPAIGN_LIMIT: usize = 128;
-const LABOR_SYNC_CLAIM_LIMIT: usize = 1024;
-const LABOR_SYNC_CONTRIBUTION_LIMIT: usize = 512;
-const LABOR_SYNC_VERIFICATION_LIMIT: usize = 512;
 const LABOR_AUTO_VERIFY_LIMIT: usize = 8;
 const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
 const LABOR_INVENTORY_LIMIT: usize = 512;
 const STALE_RECEIPT_REPAIR_AFTER: Duration = Duration::from_secs(2 * 60);
 const STALE_RECEIPT_REPAIR_LIMIT: usize = 32;
+const VERIFIER_LIVENESS_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
+const VERIFIER_LIVENESS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 struct InfrastructureTarget {
@@ -109,6 +108,8 @@ enum WireRequest {
         allocations: Vec<CreditAllocation>,
     },
     LaborInventory(LaborInventory),
+    LaborObjectRequest(LaborObjectRequest),
+    LaborObjectBundle(LaborObjectBundle),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,12 +149,15 @@ enum WireResponse {
         reason: Option<String>,
     },
     LaborInventory(LaborInventoryResponse),
+    LaborObjectBundle(LaborObjectBundle),
+    LaborObjectBundleAck(LaborObjectBundleResponse),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LaborInventory {
     testnet_id: String,
+    campaigns: Vec<String>,
     claims: Vec<String>,
     contributions: Vec<String>,
     verifications: Vec<String>,
@@ -165,9 +169,50 @@ struct LaborInventory {
 struct LaborInventoryResponse {
     accepted: bool,
     testnet_id: String,
+    missing_campaigns: Vec<String>,
     missing_claims: Vec<String>,
     missing_contributions: Vec<String>,
     missing_verifications: Vec<String>,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LaborObjectRequest {
+    testnet_id: String,
+    campaign_ids: Vec<String>,
+    claim_ids: Vec<String>,
+    contribution_ids: Vec<String>,
+    verification_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LaborObjectBundle {
+    testnet_id: String,
+    campaigns: Vec<ProtocolAuditCampaign>,
+    claims: Vec<AuditWorkUnitClaim>,
+    contributions: Vec<NodeContribution>,
+    verifications: Vec<VerificationBundleWire>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerificationBundleWire {
+    verification: VerificationResult,
+    allocations: Vec<CreditAllocation>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LaborObjectBundleResponse {
+    accepted: bool,
+    testnet_id: String,
+    campaigns: usize,
+    claims: usize,
+    contributions: usize,
+    verifications: usize,
+    queued: usize,
     reason: Option<String>,
 }
 
@@ -203,6 +248,13 @@ enum PendingOutbound {
     LaborInventory {
         peer_id: PeerId,
     },
+    LaborObjectRequest {
+        peer_id: PeerId,
+    },
+    LaborObjectBundle {
+        peer_id: PeerId,
+        silent: bool,
+    },
 }
 
 impl PendingOutbound {
@@ -211,7 +263,8 @@ impl PendingOutbound {
             Self::Campaign { silent, .. }
             | Self::WorkUnitClaim { silent, .. }
             | Self::Contribution { silent, .. }
-            | Self::VerificationResult { silent, .. } => *silent,
+            | Self::VerificationResult { silent, .. }
+            | Self::LaborObjectBundle { silent, .. } => *silent,
             _ => false,
         }
     }
@@ -422,6 +475,7 @@ pub async fn spawn_swarm(
         let mut relay_listener_started = false;
         let mut rendezvous_registration_started = false;
         let mut rendezvous_cookie = None;
+        let mut last_verifier_liveness_discovery_ms = 0u64;
         let mut discovery_interval = tokio::time::interval(RENDEZVOUS_DISCOVERY_INTERVAL);
         discovery_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut registration_interval = tokio::time::interval(RENDEZVOUS_REGISTRATION_INTERVAL);
@@ -526,6 +580,9 @@ pub async fn spawn_swarm(
                         &store,
                         &runtime_keypair,
                         &local_agent_id,
+                        &network,
+                        &mut rendezvous_cookie,
+                        &mut last_verifier_liveness_discovery_ms,
                         &mut outbound,
                     );
                 }
@@ -633,6 +690,7 @@ fn handle_swarm_event(
                                         }),
                                     );
                                 }
+                                retry_pending_labor_objects(app, store);
                                 WireResponse::Campaign {
                                     accepted: true,
                                     campaign_id,
@@ -661,12 +719,25 @@ fn handle_swarm_event(
                                         "claimId": claim_id,
                                     }),
                                 );
+                                retry_pending_labor_objects(app, store);
                                 WireResponse::WorkUnitClaim {
                                     accepted: true,
                                     campaign_id,
                                     work_unit_id,
                                     claim_id,
                                     reason: None,
+                                }
+                            }
+                            Err(reason) if is_labor_dependency_error(&reason) => {
+                                queue_pending_labor_object(
+                                    store, "claim", &claim_id, &claim, &reason,
+                                );
+                                WireResponse::WorkUnitClaim {
+                                    accepted: true,
+                                    campaign_id,
+                                    work_unit_id,
+                                    claim_id,
+                                    reason: Some(format!("queued pending dependency: {reason}")),
                                 }
                             }
                             Err(reason) => WireResponse::WorkUnitClaim {
@@ -724,12 +795,29 @@ fn handle_swarm_event(
                                         }),
                                     );
                                 }
+                                retry_pending_labor_objects(app, store);
                                 WireResponse::Contribution {
                                     accepted: true,
                                     campaign_id,
                                     contribution_id,
                                     receipt_hash,
                                     reason: None,
+                                }
+                            }
+                            Err(reason) if is_labor_dependency_error(&reason) => {
+                                queue_pending_labor_object(
+                                    store,
+                                    "contribution",
+                                    &contribution_id,
+                                    &contribution,
+                                    &reason,
+                                );
+                                WireResponse::Contribution {
+                                    accepted: true,
+                                    campaign_id,
+                                    contribution_id,
+                                    receipt_hash,
+                                    reason: Some(format!("queued pending dependency: {reason}")),
                                 }
                             }
                             Err(reason) => WireResponse::Contribution {
@@ -771,12 +859,33 @@ fn handle_swarm_event(
                                         }),
                                     );
                                 }
+                                retry_pending_labor_objects(app, store);
                                 WireResponse::VerificationResult {
                                     accepted: true,
                                     campaign_id,
                                     verification_id,
                                     credit_total,
                                     reason: None,
+                                }
+                            }
+                            Err(reason) if is_labor_dependency_error(&reason) => {
+                                let bundle = VerificationBundleWire {
+                                    verification: verification.clone(),
+                                    allocations: allocations.clone(),
+                                };
+                                queue_pending_labor_object(
+                                    store,
+                                    "verification",
+                                    &verification_id,
+                                    &bundle,
+                                    &reason,
+                                );
+                                WireResponse::VerificationResult {
+                                    accepted: true,
+                                    campaign_id,
+                                    verification_id,
+                                    credit_total,
+                                    reason: Some(format!("queued pending dependency: {reason}")),
                                 }
                             }
                             Err(reason) => WireResponse::VerificationResult {
@@ -801,6 +910,12 @@ fn handle_swarm_event(
                             outbound,
                         ))
                     }
+                    WireRequest::LaborObjectRequest(request) => {
+                        WireResponse::LaborObjectBundle(build_labor_object_bundle(store, request))
+                    }
+                    WireRequest::LaborObjectBundle(bundle) => WireResponse::LaborObjectBundleAck(
+                        ingest_labor_object_bundle(app, store, bundle),
+                    ),
                 };
                 let _ = swarm
                     .behaviour_mut()
@@ -959,6 +1074,7 @@ fn handle_swarm_event(
                                 swarm,
                                 store,
                                 &inventory_peer,
+                                &response.missing_campaigns,
                                 &response.missing_claims,
                                 &response.missing_contributions,
                                 &response.missing_verifications,
@@ -968,6 +1084,7 @@ fn handle_swarm_event(
                                 "audit:labor_inventory_resynced",
                                 serde_json::json!({
                                     "peerId": inventory_peer.to_string(),
+                                    "missingCampaigns": response.missing_campaigns.len(),
                                     "missingClaims": response.missing_claims.len(),
                                     "missingContributions": response.missing_contributions.len(),
                                     "missingVerifications": response.missing_verifications.len(),
@@ -982,6 +1099,43 @@ fn handle_swarm_event(
                                 }),
                             );
                         }
+                    }
+                    WireResponse::LaborObjectBundle(bundle) => {
+                        let response = ingest_labor_object_bundle(app, store, bundle);
+                        let _ = app.emit(
+                            if response.accepted {
+                                "audit:labor_object_bundle_received"
+                            } else {
+                                "atp:delivery_failed"
+                            },
+                            serde_json::json!({
+                                "peerId": peer.to_string(),
+                                "campaigns": response.campaigns,
+                                "claims": response.claims,
+                                "contributions": response.contributions,
+                                "verifications": response.verifications,
+                                "queued": response.queued,
+                                "reason": response.reason,
+                            }),
+                        );
+                    }
+                    WireResponse::LaborObjectBundleAck(response) => {
+                        let _ = app.emit(
+                            if response.accepted {
+                                "audit:labor_object_bundle_acknowledged"
+                            } else {
+                                "atp:delivery_failed"
+                            },
+                            serde_json::json!({
+                                "peerId": peer.to_string(),
+                                "campaigns": response.campaigns,
+                                "claims": response.claims,
+                                "contributions": response.contributions,
+                                "verifications": response.verifications,
+                                "queued": response.queued,
+                                "reason": response.reason,
+                            }),
+                        );
                     }
                 }
                 if pending.is_none() {
@@ -1001,7 +1155,19 @@ fn handle_swarm_event(
             },
         )) => {
             let pending = outbound.remove(&request_id);
-            if pending.as_ref().is_some_and(PendingOutbound::is_silent) {
+            let silent = pending.as_ref().is_some_and(PendingOutbound::is_silent);
+            forget_peer(state, peer);
+            *rendezvous_cookie = None;
+            discover_rendezvous(swarm, network.rendezvous.as_ref(), &network.namespace, None);
+            let _ = app.emit(
+                "p2p:peer_resync_requested",
+                serde_json::json!({
+                    "peerId": peer.to_string(),
+                    "reason": error.to_string(),
+                    "silent": silent,
+                }),
+            );
+            if silent {
                 return;
             }
             let (event_hash, transaction_id, result_hash) = match pending {
@@ -1045,6 +1211,12 @@ fn handle_swarm_event(
                 ),
                 Some(PendingOutbound::LaborInventory { peer_id }) => {
                     (None, Some(format!("labor-inventory:{peer_id}")), None)
+                }
+                Some(PendingOutbound::LaborObjectRequest { peer_id }) => {
+                    (None, Some(format!("labor-object-request:{peer_id}")), None)
+                }
+                Some(PendingOutbound::LaborObjectBundle { peer_id, .. }) => {
+                    (None, Some(format!("labor-object-bundle:{peer_id}")), None)
                 }
                 None => (None, None, None),
             };
@@ -1443,141 +1615,7 @@ fn on_peer_connected(
             outbound.insert(request_id, PendingOutbound::Envelope(event_hash));
         }
     }
-    if let Ok(campaigns) = store.list_protocol_campaigns() {
-        for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
-            let campaign_id = campaign.campaign_id.clone();
-            let request_id = swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer_id, WireRequest::Campaign(campaign));
-            outbound.insert(
-                request_id,
-                PendingOutbound::Campaign {
-                    campaign_id,
-                    silent: true,
-                },
-            );
-        }
-    }
     send_labor_inventory_to_peer(swarm, store, local_agent_id, &peer_id, outbound);
-    if let Ok(claims) = store.work_unit_claims_for_requester(&peer_agent_id) {
-        for claim in claims {
-            let request_id = swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
-            outbound.insert(
-                request_id,
-                PendingOutbound::WorkUnitClaim {
-                    campaign_id: claim.campaign_id,
-                    work_unit_id: claim.work_unit_id,
-                    claim_id: claim.claim_id,
-                    silent: true,
-                },
-            );
-        }
-    }
-    if let Ok(claims) = store.work_unit_claims_for_network(LABOR_SYNC_CLAIM_LIMIT) {
-        for claim in claims {
-            let request_id = swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
-            outbound.insert(
-                request_id,
-                PendingOutbound::WorkUnitClaim {
-                    campaign_id: claim.campaign_id,
-                    work_unit_id: claim.work_unit_id,
-                    claim_id: claim.claim_id,
-                    silent: true,
-                },
-            );
-        }
-    }
-    if let Ok(contributions) = store.contributions_for_requester(&peer_agent_id) {
-        for contribution in contributions {
-            let request_id = swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
-            outbound.insert(
-                request_id,
-                PendingOutbound::Contribution {
-                    campaign_id: contribution.campaign_id,
-                    contribution_id: contribution.contribution_id,
-                    receipt_hash: contribution.receipt_hash,
-                    silent: true,
-                },
-            );
-        }
-    }
-    if let Ok(contributions) =
-        store.unverified_contributions_for_network(LABOR_SYNC_CONTRIBUTION_LIMIT)
-    {
-        for contribution in contributions {
-            let request_id = swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
-            outbound.insert(
-                request_id,
-                PendingOutbound::Contribution {
-                    campaign_id: contribution.campaign_id,
-                    contribution_id: contribution.contribution_id,
-                    receipt_hash: contribution.receipt_hash,
-                    silent: true,
-                },
-            );
-        }
-    }
-    if let Ok(bundles) = store.verification_bundles_for_worker(&peer_agent_id) {
-        for (verification, allocations) in bundles {
-            let credit_total = allocations
-                .iter()
-                .map(|allocation| allocation.total)
-                .sum::<u32>();
-            let request_id = swarm.behaviour_mut().request_response.send_request(
-                &peer_id,
-                WireRequest::VerificationResult {
-                    verification: verification.clone(),
-                    allocations,
-                },
-            );
-            outbound.insert(
-                request_id,
-                PendingOutbound::VerificationResult {
-                    campaign_id: verification.campaign_id,
-                    verification_id: verification.verification_id,
-                    credit_total,
-                    silent: true,
-                },
-            );
-        }
-    }
-    if let Ok(bundles) = store.verification_bundles_for_network(LABOR_SYNC_VERIFICATION_LIMIT) {
-        for (verification, allocations) in bundles {
-            let credit_total = allocations
-                .iter()
-                .map(|allocation| allocation.total)
-                .sum::<u32>();
-            let request_id = swarm.behaviour_mut().request_response.send_request(
-                &peer_id,
-                WireRequest::VerificationResult {
-                    verification: verification.clone(),
-                    allocations,
-                },
-            );
-            outbound.insert(
-                request_id,
-                PendingOutbound::VerificationResult {
-                    campaign_id: verification.campaign_id,
-                    verification_id: verification.verification_id,
-                    credit_total,
-                    silent: true,
-                },
-            );
-        }
-    }
     let _ = app.emit(
         "p2p:peer_connected",
         serde_json::json!({ "peerId": peer_id.to_string() }),
@@ -1591,6 +1629,9 @@ fn sync_audit_labor_network(
     store: &AtpStore,
     keypair: &identity::Keypair,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
+    rendezvous_cookie: &mut Option<rendezvous::Cookie>,
+    last_verifier_liveness_discovery_ms: &mut u64,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     let has_peers = !target_peers(state, None).is_empty();
@@ -1614,6 +1655,17 @@ fn sync_audit_labor_network(
         _ => {}
     }
 
+    recover_verifier_liveness_if_stale(
+        swarm,
+        app,
+        state,
+        store,
+        local_agent_id,
+        network,
+        rendezvous_cookie,
+        last_verifier_liveness_discovery_ms,
+    );
+
     if has_peers {
         if let Ok(campaigns) = store.list_protocol_campaigns() {
             for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
@@ -1625,6 +1677,68 @@ fn sync_audit_labor_network(
     }
 
     verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn recover_verifier_liveness_if_stale(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    local_agent_id: &str,
+    network: &NetworkBootstrap,
+    rendezvous_cookie: &mut Option<rendezvous::Cookie>,
+    last_verifier_liveness_discovery_ms: &mut u64,
+) {
+    let pending_receipts = match store.pending_contribution_count_for_worker(local_agent_id) {
+        Ok(count) if count > 0 => count,
+        _ => return,
+    };
+    let Some(oldest_pending_at) = store
+        .oldest_pending_contribution_time_for_worker(local_agent_id)
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+
+    let now = now_millis();
+    let oldest_pending_age_ms = now.saturating_sub(oldest_pending_at);
+    if oldest_pending_age_ms < STALE_RECEIPT_REPAIR_AFTER.as_millis() as u64 {
+        return;
+    }
+
+    let latest_independent_verification_age_ms = store
+        .latest_independent_verification_time_for_worker(local_agent_id)
+        .ok()
+        .flatten()
+        .map(|verified_at| now.saturating_sub(verified_at));
+    if latest_independent_verification_age_ms
+        .is_some_and(|age| age < VERIFIER_LIVENESS_STALE_AFTER.as_millis() as u64)
+    {
+        return;
+    }
+
+    if now.saturating_sub(*last_verifier_liveness_discovery_ms)
+        < VERIFIER_LIVENESS_DISCOVERY_INTERVAL.as_millis() as u64
+    {
+        return;
+    }
+
+    *last_verifier_liveness_discovery_ms = now;
+    *rendezvous_cookie = None;
+    ensure_infrastructure_connections(swarm, network);
+    discover_rendezvous(swarm, network.rendezvous.as_ref(), &network.namespace, None);
+
+    let _ = app.emit(
+        "audit:verifier_liveness_resync",
+        serde_json::json!({
+            "pendingReceipts": pending_receipts,
+            "oldestPendingAgeMs": oldest_pending_age_ms,
+            "latestIndependentVerificationAgeMs": latest_independent_verification_age_ms,
+            "knownPeers": target_peers(state, None).len(),
+        }),
+    );
 }
 
 fn handle_labor_inventory_request(
@@ -1662,6 +1776,8 @@ fn handle_labor_inventory_request(
         }
     };
 
+    let peer_missing_campaigns =
+        missing_from_remote(&local_inventory.campaigns, &remote_inventory.campaigns);
     let peer_missing_claims =
         missing_from_remote(&local_inventory.claims, &remote_inventory.claims);
     let peer_missing_contributions = missing_from_remote(
@@ -1676,12 +1792,15 @@ fn handle_labor_inventory_request(
         swarm,
         store,
         &peer_id,
+        &peer_missing_campaigns,
         &peer_missing_claims,
         &peer_missing_contributions,
         &peer_missing_verifications,
         outbound,
     );
 
+    let missing_campaigns =
+        missing_from_remote(&remote_inventory.campaigns, &local_inventory.campaigns);
     let missing_claims = missing_from_remote(&remote_inventory.claims, &local_inventory.claims);
     let missing_contributions = missing_from_remote(
         &remote_inventory.contributions,
@@ -1691,14 +1810,25 @@ fn handle_labor_inventory_request(
         &remote_inventory.verifications,
         &local_inventory.verifications,
     );
+    request_labor_objects_from_peer(
+        swarm,
+        &peer_id,
+        &missing_campaigns,
+        &missing_claims,
+        &missing_contributions,
+        &missing_verifications,
+        outbound,
+    );
 
     let _ = app.emit(
         "audit:labor_inventory_received",
         serde_json::json!({
             "peerId": peer_id.to_string(),
+            "peerNeedsCampaigns": peer_missing_campaigns.len(),
             "peerNeedsClaims": peer_missing_claims.len(),
             "peerNeedsContributions": peer_missing_contributions.len(),
             "peerNeedsVerifications": peer_missing_verifications.len(),
+            "localNeedsCampaigns": missing_campaigns.len(),
             "localNeedsClaims": missing_claims.len(),
             "localNeedsContributions": missing_contributions.len(),
             "localNeedsVerifications": missing_verifications.len(),
@@ -1713,6 +1843,7 @@ fn handle_labor_inventory_request(
     LaborInventoryResponse {
         accepted: true,
         testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        missing_campaigns,
         missing_claims,
         missing_contributions,
         missing_verifications,
@@ -1724,6 +1855,7 @@ fn wire_labor_inventory(store: &AtpStore, local_agent_id: &str) -> Result<LaborI
     let inventory = store.audit_labor_inventory(local_agent_id, LABOR_INVENTORY_LIMIT)?;
     Ok(LaborInventory {
         testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        campaigns: inventory.campaign_ids,
         claims: inventory.claim_ids,
         contributions: inventory.contribution_ids,
         verifications: inventory.verification_ids,
@@ -1775,15 +1907,331 @@ fn broadcast_labor_inventory(
     }
 }
 
-fn push_labor_objects_to_peer(
+fn request_labor_objects_from_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    store: &AtpStore,
     peer_id: &PeerId,
+    campaign_ids: &[String],
     claim_ids: &[String],
     contribution_ids: &[String],
     verification_ids: &[String],
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
+    if campaign_ids.is_empty()
+        && claim_ids.is_empty()
+        && contribution_ids.is_empty()
+        && verification_ids.is_empty()
+    {
+        return;
+    }
+    let request = LaborObjectRequest {
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        campaign_ids: campaign_ids.to_vec(),
+        claim_ids: claim_ids.to_vec(),
+        contribution_ids: contribution_ids.to_vec(),
+        verification_ids: verification_ids.to_vec(),
+    };
+    let request_id = swarm
+        .behaviour_mut()
+        .request_response
+        .send_request(peer_id, WireRequest::LaborObjectRequest(request));
+    outbound.insert(
+        request_id,
+        PendingOutbound::LaborObjectRequest {
+            peer_id: peer_id.clone(),
+        },
+    );
+}
+
+fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> LaborObjectBundle {
+    if request.testnet_id != ATP_STORE_TESTNET_ID {
+        return LaborObjectBundle {
+            testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+            ..Default::default()
+        };
+    }
+
+    let mut campaign_ids = request.campaign_ids;
+    let mut claims = store
+        .work_unit_claims_by_ids(&request.claim_ids)
+        .unwrap_or_default();
+    for claim in &claims {
+        campaign_ids.push(claim.campaign_id.clone());
+    }
+
+    let mut contributions = store
+        .contributions_by_ids(&request.contribution_ids)
+        .unwrap_or_default();
+    let verification_contributions = store
+        .contributions_for_verifications(&request.verification_ids)
+        .unwrap_or_default();
+    merge_contributions(&mut contributions, verification_contributions);
+
+    let contribution_claims = store
+        .claims_for_contributions(&contributions)
+        .unwrap_or_default();
+    merge_claims(&mut claims, contribution_claims);
+    for contribution in &contributions {
+        campaign_ids.push(contribution.campaign_id.clone());
+    }
+
+    let verifications = store
+        .verification_bundles_by_ids(&request.verification_ids)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(verification, allocations)| {
+            campaign_ids.push(verification.campaign_id.clone());
+            VerificationBundleWire {
+                verification,
+                allocations,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    dedupe_strings(&mut campaign_ids);
+    let campaigns = store.campaigns_by_ids(&campaign_ids).unwrap_or_default();
+
+    LaborObjectBundle {
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        campaigns,
+        claims,
+        contributions,
+        verifications,
+    }
+}
+
+fn ingest_labor_object_bundle(
+    app: &AppHandle,
+    store: &AtpStore,
+    bundle: LaborObjectBundle,
+) -> LaborObjectBundleResponse {
+    if bundle.testnet_id != ATP_STORE_TESTNET_ID {
+        return LaborObjectBundleResponse {
+            accepted: false,
+            testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+            reason: Some(format!(
+                "peer testnet {} does not match {}",
+                bundle.testnet_id, ATP_STORE_TESTNET_ID
+            )),
+            ..Default::default()
+        };
+    }
+
+    let mut response = LaborObjectBundleResponse {
+        accepted: true,
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        ..Default::default()
+    };
+
+    for campaign in bundle.campaigns {
+        match store.upsert_protocol_campaign(&campaign) {
+            Ok(_) => response.campaigns += 1,
+            Err(reason) if is_labor_dependency_error(&reason) => {
+                queue_pending_labor_object(
+                    store,
+                    "campaign",
+                    &campaign.campaign_id,
+                    &campaign,
+                    &reason,
+                );
+                response.queued += 1;
+            }
+            Err(reason) => response.reason = Some(reason),
+        }
+    }
+    for claim in bundle.claims {
+        match store.record_work_unit_claim(&claim) {
+            Ok(_) => response.claims += 1,
+            Err(reason) if is_labor_dependency_error(&reason) => {
+                queue_pending_labor_object(store, "claim", &claim.claim_id, &claim, &reason);
+                response.queued += 1;
+            }
+            Err(reason) => response.reason = Some(reason),
+        }
+    }
+    for contribution in bundle.contributions {
+        match store.record_contribution(&contribution) {
+            Ok(_) => response.contributions += 1,
+            Err(reason) if is_labor_dependency_error(&reason) => {
+                queue_pending_labor_object(
+                    store,
+                    "contribution",
+                    &contribution.contribution_id,
+                    &contribution,
+                    &reason,
+                );
+                response.queued += 1;
+            }
+            Err(reason) => response.reason = Some(reason),
+        }
+    }
+    for verification_bundle in bundle.verifications {
+        match store.record_verification_bundle(
+            &verification_bundle.verification,
+            &verification_bundle.allocations,
+        ) {
+            Ok(_) => response.verifications += 1,
+            Err(reason) if is_labor_dependency_error(&reason) => {
+                queue_pending_labor_object(
+                    store,
+                    "verification",
+                    &verification_bundle.verification.verification_id,
+                    &verification_bundle,
+                    &reason,
+                );
+                response.queued += 1;
+            }
+            Err(reason) => response.reason = Some(reason),
+        }
+    }
+
+    retry_pending_labor_objects(app, store);
+    let _ = app.emit("audit:labor_changed", ());
+    response
+}
+
+fn merge_claims(target: &mut Vec<AuditWorkUnitClaim>, incoming: Vec<AuditWorkUnitClaim>) {
+    for claim in incoming {
+        if !target
+            .iter()
+            .any(|existing| existing.claim_id == claim.claim_id)
+        {
+            target.push(claim);
+        }
+    }
+}
+
+fn merge_contributions(target: &mut Vec<NodeContribution>, incoming: Vec<NodeContribution>) {
+    for contribution in incoming {
+        if !target
+            .iter()
+            .any(|existing| existing.contribution_id == contribution.contribution_id)
+        {
+            target.push(contribution);
+        }
+    }
+}
+
+fn dedupe_strings(values: &mut Vec<String>) {
+    let mut seen = HashSet::new();
+    values.retain(|value| seen.insert(value.clone()));
+}
+
+fn queue_pending_labor_object<T: Serialize>(
+    store: &AtpStore,
+    object_kind: &str,
+    object_id: &str,
+    object: &T,
+    reason: &str,
+) {
+    let Ok(object_json) = serde_json::to_string(object) else {
+        return;
+    };
+    let _ = store.queue_pending_labor_object(object_kind, object_id, &object_json, reason);
+}
+
+fn retry_pending_labor_objects(app: &AppHandle, store: &AtpStore) {
+    let mut settled_total = 0usize;
+    for _ in 0..3 {
+        let Ok(objects) = store.pending_labor_objects(64) else {
+            return;
+        };
+        if objects.is_empty() {
+            break;
+        }
+        let mut settled_this_pass = 0usize;
+        for object in objects {
+            match retry_pending_labor_object(store, &object.object_kind, &object.object_json) {
+                Ok(()) => {
+                    let _ = store
+                        .mark_pending_labor_object_settled(&object.object_kind, &object.object_id);
+                    settled_this_pass += 1;
+                }
+                Err(reason) if is_labor_dependency_error(&reason) => {
+                    let _ = store.refresh_pending_labor_object(
+                        &object.object_kind,
+                        &object.object_id,
+                        &reason,
+                    );
+                }
+                Err(reason) => {
+                    let _ = store.mark_pending_labor_object_rejected(
+                        &object.object_kind,
+                        &object.object_id,
+                        &reason,
+                    );
+                }
+            }
+        }
+        settled_total += settled_this_pass;
+        if settled_this_pass == 0 {
+            break;
+        }
+    }
+    if settled_total > 0 {
+        let _ = app.emit("audit:labor_changed", ());
+        let _ = app.emit(
+            "audit:labor_pending_objects_settled",
+            serde_json::json!({ "settled": settled_total }),
+        );
+    }
+}
+
+fn retry_pending_labor_object(
+    store: &AtpStore,
+    object_kind: &str,
+    object_json: &str,
+) -> Result<(), String> {
+    match object_kind {
+        "campaign" => {
+            let campaign: ProtocolAuditCampaign =
+                serde_json::from_str(object_json).map_err(|error| error.to_string())?;
+            store.upsert_protocol_campaign(&campaign)?;
+            Ok(())
+        }
+        "claim" => {
+            let claim: AuditWorkUnitClaim =
+                serde_json::from_str(object_json).map_err(|error| error.to_string())?;
+            store.record_work_unit_claim(&claim)?;
+            Ok(())
+        }
+        "contribution" => {
+            let contribution: NodeContribution =
+                serde_json::from_str(object_json).map_err(|error| error.to_string())?;
+            store.record_contribution(&contribution)?;
+            Ok(())
+        }
+        "verification" => {
+            let bundle: VerificationBundleWire =
+                serde_json::from_str(object_json).map_err(|error| error.to_string())?;
+            store.record_verification_bundle(&bundle.verification, &bundle.allocations)?;
+            Ok(())
+        }
+        _ => Err(format!("unknown pending labor object kind: {object_kind}")),
+    }
+}
+
+fn is_labor_dependency_error(reason: &str) -> bool {
+    reason.contains("not known locally")
+        || reason.contains("must be claimed by this worker")
+        || reason.contains("Query returned no rows")
+        || reason.contains("FOREIGN KEY constraint failed")
+}
+
+fn push_labor_objects_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    store: &AtpStore,
+    peer_id: &PeerId,
+    campaign_ids: &[String],
+    claim_ids: &[String],
+    contribution_ids: &[String],
+    verification_ids: &[String],
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    if let Ok(campaigns) = store.campaigns_by_ids(campaign_ids) {
+        for campaign in campaigns {
+            send_campaign_to_peer(swarm, peer_id, campaign, true, outbound);
+        }
+    }
     if let Ok(claims) = store.work_unit_claims_by_ids(claim_ids) {
         for claim in claims {
             send_work_unit_claim_to_peer(swarm, peer_id, claim, true, outbound);
@@ -1836,11 +2284,18 @@ fn repair_stale_receipts(
     }
     let mut claims = 0;
     for repair in repairs {
+        let mut bundle = LaborObjectBundle {
+            testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+            campaigns: vec![repair.campaign],
+            claims: Vec::new(),
+            contributions: vec![repair.contribution],
+            verifications: Vec::new(),
+        };
         if let Some(claim) = repair.claim {
             claims += 1;
-            broadcast_work_unit_claim(swarm, state, claim, true, outbound);
+            bundle.claims.push(claim);
         }
-        broadcast_contribution(swarm, state, repair.contribution, true, outbound);
+        broadcast_labor_object_bundle(swarm, state, bundle, true, outbound);
     }
     let _ = app.emit(
         "audit:stale_receipts_rebroadcast",
@@ -1935,7 +2390,7 @@ fn verify_network_contributions(
             state,
             verification.clone(),
             allocations,
-            true,
+            false,
             outbound,
         );
         let _ = app.emit("audit:labor_changed", ());
@@ -1968,6 +2423,26 @@ fn send_work_unit_claim_to_peer(
             campaign_id: claim.campaign_id,
             work_unit_id: claim.work_unit_id,
             claim_id: claim.claim_id,
+            silent,
+        },
+    );
+}
+
+fn send_campaign_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    peer_id: &PeerId,
+    campaign: ProtocolAuditCampaign,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let request_id = swarm
+        .behaviour_mut()
+        .request_response
+        .send_request(peer_id, WireRequest::Campaign(campaign.clone()));
+    outbound.insert(
+        request_id,
+        PendingOutbound::Campaign {
+            campaign_id: campaign.campaign_id,
             silent,
         },
     );
@@ -2179,54 +2654,6 @@ fn send_verification_result(
     }
 }
 
-fn broadcast_contribution(
-    swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    state: &P2pState,
-    contribution: NodeContribution,
-    silent: bool,
-    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    for peer_id in target_peers(state, None) {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
-        outbound.insert(
-            request_id,
-            PendingOutbound::Contribution {
-                campaign_id: contribution.campaign_id.clone(),
-                contribution_id: contribution.contribution_id.clone(),
-                receipt_hash: contribution.receipt_hash.clone(),
-                silent,
-            },
-        );
-    }
-}
-
-fn broadcast_work_unit_claim(
-    swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    state: &P2pState,
-    claim: AuditWorkUnitClaim,
-    silent: bool,
-    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    for peer_id in target_peers(state, None) {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
-        outbound.insert(
-            request_id,
-            PendingOutbound::WorkUnitClaim {
-                campaign_id: claim.campaign_id.clone(),
-                work_unit_id: claim.work_unit_id.clone(),
-                claim_id: claim.claim_id.clone(),
-                silent,
-            },
-        );
-    }
-}
-
 fn broadcast_verification_result(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
@@ -2259,6 +2686,25 @@ fn broadcast_verification_result(
     }
 }
 
+fn broadcast_labor_object_bundle(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    bundle: LaborObjectBundle,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    for peer_id in target_peers(state, None) {
+        let request_id = swarm
+            .behaviour_mut()
+            .request_response
+            .send_request(&peer_id, WireRequest::LaborObjectBundle(bundle.clone()));
+        outbound.insert(
+            request_id,
+            PendingOutbound::LaborObjectBundle { peer_id, silent },
+        );
+    }
+}
+
 fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
     state
         .inner
@@ -2285,6 +2731,12 @@ fn touch_peer(state: &P2pState, peer_id: PeerId) {
                 last_seen: now_millis(),
             },
         );
+    }
+}
+
+fn forget_peer(state: &P2pState, peer_id: PeerId) {
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.peers.remove(&peer_id.to_string());
     }
 }
 
@@ -2612,7 +3064,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.6"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.7.7"
             }"#,
         )
         .expect("valid manifest");

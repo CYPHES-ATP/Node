@@ -24,14 +24,14 @@ use crate::{
     state::{P2pState, PeerInfo},
     store::{
         campaign_id_for_transaction, data_dir, now_millis, AtpStore, AuditEventBody, AuditJob,
-        AuditJobPayload, LegacyAuditJob, RepositorySummary,
+        AuditJobPayload, LegacyAuditJob, RepositorySummary, MAX_PENDING_CONTRIBUTIONS_PER_WORKER,
     },
     worker::{create_repository_leases, execute_pipeline_audit_result, execute_repository_audit},
 };
 
 const GITHUB_REPOSITORY_URL_ERROR: &str =
     "Use a public GitHub repository URL, file URL, or folder URL, for example https://github.com/owner/repo.";
-const MAX_SELF_PENDING_CONTRIBUTIONS: usize = 4;
+const MAX_SELF_PENDING_CONTRIBUTIONS: usize = MAX_PENDING_CONTRIBUTIONS_PER_WORKER;
 
 #[derive(Debug, Serialize)]
 pub struct StartNodeResponse {

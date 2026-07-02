@@ -6,27 +6,29 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 const checks = [
   {
     label: "frontend auto-mode state is scoped to the current testnet",
-    pattern: /GENESIS_AUTO_MODE_TESTNET_ID\s*=\s*"cyphes-dev-v0\.7\.6"/,
+    pattern: /GENESIS_AUTO_MODE_TESTNET_ID\s*=\s*"cyphes-dev-v0\.7\.7"/,
   },
   {
     label: "settings key isolates current boot settings from prior testnets",
     pattern: /SETTINGS_KEY\s*=\s*`cyphes\.\$\{GENESIS_AUTO_MODE_TESTNET_ID\}\.genesis-auto-mode\.settings\.v1`/,
   },
   {
-    label: "boot read forces auto worker off",
+    label: "default boot remains verifier-only until Run",
+    pattern: /DEFAULT_GENESIS_AUTO_MODE[\s\S]*autoWorker:\s*false[\s\S]*autoVerifier:\s*true[\s\S]*questSeeder:\s*false/,
+  },
+  {
+    label: "boot read keeps verifier duty on",
+    pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoVerifier:\s*true/,
+  },
+  {
+    label: "boot read no longer forces auto worker off",
     pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoWorker:\s*false/,
+    shouldMatch: false,
   },
   {
-    label: "boot read forces quest seeder off",
-    pattern: /readGenesisAutoModeSettings\(\)[\s\S]*questSeeder:\s*false/,
-  },
-  {
-    label: "persisted settings store auto worker off for next launch",
-    pattern: /writeGenesisAutoModeSettings\([\s\S]*autoWorker:\s*false/,
-  },
-  {
-    label: "persisted settings store quest seeder off for next launch",
+    label: "persisted settings no longer force quest seeder off",
     pattern: /writeGenesisAutoModeSettings\([\s\S]*questSeeder:\s*false/,
+    shouldMatch: false,
   },
 ];
 
@@ -38,8 +40,8 @@ const appChecks = [
 ];
 
 const failures = [
-  ...checks.filter((check) => !check.pattern.test(source)),
-  ...appChecks.filter((check) => !check.pattern.test(appSource)),
+  ...checks.filter((check) => check.pattern.test(source) !== (check.shouldMatch ?? true)),
+  ...appChecks.filter((check) => check.pattern.test(appSource) !== (check.shouldMatch ?? true)),
 ];
 
 if (failures.length > 0) {

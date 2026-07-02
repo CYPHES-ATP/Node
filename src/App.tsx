@@ -56,10 +56,11 @@ const AUDIT_SCOPE = [
 const AUTO_TICK_INTERVAL_MS = 12_000;
 const TELEMETRY_TICK_INTERVAL_MS = 1_000;
 const MAX_AUTO_CAMPAIGNS_PER_DAY = 2400;
-const MAX_SELF_PENDING_CONTRIBUTIONS = 4;
+const MAX_SELF_PENDING_CONTRIBUTIONS = 12;
+const GUARDIAN_REAUDIT_EPOCH_MS = 12 * 60 * 60 * 1000;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.6";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.8";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -324,6 +325,10 @@ function updateAutoCounter(
     writeGenesisAutoCounters(next);
     return next;
   });
+}
+
+function guardianEpochKey(date = new Date()) {
+  return `epoch-${Math.floor(date.getTime() / GUARDIAN_REAUDIT_EPOCH_MS)}`;
 }
 
 function AppContent() {
@@ -594,6 +599,8 @@ function AppContent() {
       ["audit:contribution_received", "Inbound contribution received", "success"],
       ["audit:verification_received", "Receipt verified; Verified ATP updated", "success"],
       ["audit:verification_acknowledged", "Credit receipt delivered", "success"],
+      ["audit:verifier_liveness_resync", "Verifier resync requested", "warn"],
+      ["p2p:peer_resync_requested", "Peer resync requested", "warn"],
       ["atp:delivery_failed", "Network delivery pending", "warn"],
     ];
     eventListeners.forEach(([eventName, label, tone]) => {
@@ -889,15 +896,20 @@ function AppContent() {
   async function seedGuardianCampaign(target: GuardianTarget, nextCursor: number) {
     pushAutoPulse(`Watching ${target.protocolName}`, "info");
     const inspected = await inspectRepository(target.repoUrl);
+    const currentEpoch = guardianEpochKey();
+    const epochScopeLine = `Guardian epoch: ${currentEpoch}`;
     const existingCampaign = campaigns.find(
       (campaign) =>
         requestedByLocalNode(campaign, agentId) &&
         campaignIncludesGuardianTarget(campaign, target) &&
-        campaign.repository.commitSha === inspected.repository.commitSha,
+        campaign.repository.commitSha === inspected.repository.commitSha &&
+        campaign.scopeText.includes(epochScopeLine),
     );
     const observation = guardianLedger.targets[target.targetId];
     const alreadySeededCommit =
-      observation?.lastSeededCommit === inspected.repository.commitSha || Boolean(existingCampaign);
+      (observation?.lastSeededCommit === inspected.repository.commitSha &&
+        observation?.lastSeededEpoch === currentEpoch) ||
+      Boolean(existingCampaign);
     if (alreadySeededCommit) {
       const nextLedger = recordGuardianObservation(
         guardianLedger,
@@ -918,10 +930,11 @@ function AppContent() {
     const campaign = await p2p.createProtocolCampaign(
       inspected.repository,
       target.protocolName,
-      target.scopeText,
+      [target.scopeText, epochScopeLine].join("\n\n"),
       target.creditBudget.toString(),
       [
         `Guardian target: ${target.targetId}`,
+        epochScopeLine,
         target.auditBrief,
         `Category: ${target.category}`,
         `Chains: ${target.chains.join(", ")}`,
@@ -944,6 +957,7 @@ function AppContent() {
       target.targetId,
       inspected.repository.commitSha,
       true,
+      currentEpoch,
     );
     setGuardianLedger(nextLedger);
     updateAutoCounter(setAutoCounters, (current) => ({
