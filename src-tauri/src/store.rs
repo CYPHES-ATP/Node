@@ -619,9 +619,6 @@ impl AtpStore {
             &contribution.work_unit_id,
         )
         .map_err(|_| "contribution work unit is not known locally".to_string())?;
-        if is_submitted_or_terminal_work_unit_status(&work_unit.status) {
-            return Err("work unit already has submitted or reviewed work".to_string());
-        }
         let existing_for_work_unit = transaction
             .query_row(
                 "SELECT contribution_json FROM audit_contributions
@@ -635,6 +632,9 @@ impl AtpStore {
             .map_err(|error| error.to_string())?;
         if existing_for_work_unit.is_some() {
             return Err("work unit already has a submitted contribution".to_string());
+        }
+        if is_reviewed_terminal_work_unit_status(&work_unit.status) {
+            return Err("work unit already has reviewed work".to_string());
         }
         let claim = claim_for_contribution_in_connection(&transaction, contribution)?;
         if claim.is_none() {
@@ -3789,6 +3789,13 @@ fn is_submitted_or_terminal_work_unit_status(status: &str) -> bool {
     )
 }
 
+fn is_reviewed_terminal_work_unit_status(status: &str) -> bool {
+    matches!(
+        status,
+        "accepted" | "rejected" | "challenged" | "revision_requested"
+    )
+}
+
 fn ttl_ms_to_i64(ttl_ms: u64) -> i64 {
     i64::try_from(ttl_ms).unwrap_or(i64::MAX)
 }
@@ -5078,6 +5085,60 @@ mod tests {
         resign_contribution(&worker, &mut contribution);
 
         store.record_contribution(&contribution).unwrap();
+    }
+
+    #[test]
+    fn contribution_replay_repairs_submitted_work_unit_shell() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+        let claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+        {
+            let connection = store.connection.lock().unwrap();
+            update_work_unit_status(
+                &connection,
+                &campaign.campaign_id,
+                &work_unit.work_unit_id,
+                "submitted",
+                Some(claim.worker_agent_id.as_str()),
+            )
+            .unwrap();
+        }
+
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Contribution row repairs a submitted work-unit shell.".to_string(),
+            vec![],
+            vec![labor_artifact("submitted-shell-repair.md")],
+            vec![CoverageItem {
+                area: "submitted shell replay".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Signed contribution row was missing locally.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+
+        store.record_contribution(&contribution).unwrap();
+        assert_eq!(
+            store
+                .network_verification_candidates(&agent_id(&requester.public()), 10)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

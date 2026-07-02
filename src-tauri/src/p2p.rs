@@ -29,8 +29,8 @@ use crate::{
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.10";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.10";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.11";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.11";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -40,12 +40,13 @@ const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(12);
-const LABOR_SYNC_CAMPAIGN_LIMIT: usize = 128;
 const LABOR_AUTO_VERIFY_LIMIT: usize = 8;
 const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
 const LABOR_INVENTORY_LIMIT: usize = 512;
 const STALE_RECEIPT_REPAIR_AFTER: Duration = Duration::from_secs(2 * 60);
+const STALE_RECEIPT_REPAIR_INTERVAL: Duration = Duration::from_secs(60);
 const STALE_RECEIPT_REPAIR_LIMIT: usize = 32;
+const MAX_OUTBOUND_REPAIR_BACKLOG: usize = 32;
 const VERIFIER_LIVENESS_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
 const VERIFIER_LIVENESS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(30);
 const LABOR_CAPABILITY_INVENTORY_V2: &str = "audit_labor_inventory_v2";
@@ -520,6 +521,7 @@ pub async fn spawn_swarm(
         let mut rendezvous_registration_started = false;
         let mut rendezvous_cookie = None;
         let mut last_verifier_liveness_discovery_ms = 0u64;
+        let mut last_stale_receipt_repair_ms = 0u64;
         let mut discovery_interval = tokio::time::interval(RENDEZVOUS_DISCOVERY_INTERVAL);
         discovery_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut registration_interval = tokio::time::interval(RENDEZVOUS_REGISTRATION_INTERVAL);
@@ -627,6 +629,7 @@ pub async fn spawn_swarm(
                         &network,
                         &mut rendezvous_cookie,
                         &mut last_verifier_liveness_discovery_ms,
+                        &mut last_stale_receipt_repair_ms,
                         &mut outbound,
                     );
                 }
@@ -1720,6 +1723,7 @@ fn sync_audit_labor_network(
     network: &NetworkBootstrap,
     rendezvous_cookie: &mut Option<rendezvous::Cookie>,
     last_verifier_liveness_discovery_ms: &mut u64,
+    last_stale_receipt_repair_ms: &mut u64,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     let has_peers = !target_peers(state, None).is_empty();
@@ -1755,13 +1759,15 @@ fn sync_audit_labor_network(
     );
 
     if has_peers {
-        if let Ok(campaigns) = store.list_protocol_campaigns() {
-            for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
-                broadcast_campaign(swarm, state, campaign, true, outbound);
-            }
-        }
         broadcast_labor_inventory(swarm, state, store, local_agent_id, outbound);
-        repair_stale_receipts(swarm, app, state, store, outbound);
+        maybe_repair_stale_receipts(
+            swarm,
+            app,
+            state,
+            store,
+            last_stale_receipt_repair_ms,
+            outbound,
+        );
     }
 
     verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
@@ -2463,13 +2469,31 @@ fn push_labor_objects_to_peer(
     }
 }
 
-fn repair_stale_receipts(
+fn maybe_repair_stale_receipts(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     app: &AppHandle,
     state: &P2pState,
     store: &AtpStore,
+    last_stale_receipt_repair_ms: &mut u64,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
+    let now = now_millis();
+    if now.saturating_sub(*last_stale_receipt_repair_ms)
+        < STALE_RECEIPT_REPAIR_INTERVAL.as_millis() as u64
+    {
+        return;
+    }
+    if outbound.len() >= MAX_OUTBOUND_REPAIR_BACKLOG {
+        let _ = app.emit(
+            "audit:stale_receipt_repair_backpressure",
+            serde_json::json!({
+                "outboundRequests": outbound.len(),
+                "limit": MAX_OUTBOUND_REPAIR_BACKLOG,
+            }),
+        );
+        return;
+    }
+
     let repairs = match store.stale_unverified_contributions_with_claims(
         STALE_RECEIPT_REPAIR_AFTER.as_millis() as u64,
         STALE_RECEIPT_REPAIR_LIMIT,
@@ -2489,27 +2513,36 @@ fn repair_stale_receipts(
     if receipt_count == 0 {
         return;
     }
-    let mut claims = 0;
+    *last_stale_receipt_repair_ms = now;
+    let mut bundle = LaborObjectBundle {
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        app_version: labor_wire_app_version(),
+        capabilities: labor_wire_capabilities(),
+        campaigns: Vec::new(),
+        claims: Vec::new(),
+        contributions: Vec::new(),
+        verifications: Vec::new(),
+    };
     for repair in repairs {
-        let mut bundle = LaborObjectBundle {
-            testnet_id: ATP_STORE_TESTNET_ID.to_string(),
-            app_version: labor_wire_app_version(),
-            capabilities: labor_wire_capabilities(),
-            campaigns: vec![repair.campaign],
-            claims: Vec::new(),
-            contributions: vec![repair.contribution],
-            verifications: Vec::new(),
-        };
-        if let Some(claim) = repair.claim {
-            claims += 1;
-            bundle.claims.push(claim);
+        if !bundle
+            .campaigns
+            .iter()
+            .any(|campaign| campaign.campaign_id == repair.campaign.campaign_id)
+        {
+            bundle.campaigns.push(repair.campaign);
         }
-        broadcast_labor_object_bundle(swarm, state, bundle, true, outbound);
+        if let Some(claim) = repair.claim {
+            merge_claims(&mut bundle.claims, vec![claim]);
+        }
+        merge_contributions(&mut bundle.contributions, vec![repair.contribution]);
     }
+    let claims = bundle.claims.len();
+    let receipts = bundle.contributions.len();
+    broadcast_labor_object_bundle(swarm, state, bundle, true, outbound);
     let _ = app.emit(
         "audit:stale_receipts_rebroadcast",
         serde_json::json!({
-            "receipts": receipt_count,
+            "receipts": receipts,
             "claims": claims,
         }),
     );
@@ -3342,7 +3375,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.10"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.7.11"
             }"#,
         )
         .expect("valid manifest");
