@@ -178,6 +178,13 @@ const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
 const STORE_SCHEMA_VERSION: &str = "audit-labor-v1";
 const CLAIM_CONTRIBUTION_CLOCK_SKEW_MS: i64 = 60_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContributionIngestPolicy {
+    LocalWorker,
+    PeerSync,
+}
+
 const LEDGER_TABLES: &[&str] = &[
     "atp_events",
     "audit_jobs",
@@ -590,6 +597,21 @@ impl AtpStore {
         &self,
         contribution: &NodeContribution,
     ) -> Result<NodeContribution, String> {
+        self.record_contribution_with_policy(contribution, ContributionIngestPolicy::LocalWorker)
+    }
+
+    pub fn record_network_contribution(
+        &self,
+        contribution: &NodeContribution,
+    ) -> Result<NodeContribution, String> {
+        self.record_contribution_with_policy(contribution, ContributionIngestPolicy::PeerSync)
+    }
+
+    fn record_contribution_with_policy(
+        &self,
+        contribution: &NodeContribution,
+        policy: ContributionIngestPolicy,
+    ) -> Result<NodeContribution, String> {
         verify_signed_contribution(contribution)?;
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
         let transaction = connection
@@ -619,49 +641,59 @@ impl AtpStore {
             &contribution.work_unit_id,
         )
         .map_err(|_| "contribution work unit is not known locally".to_string())?;
-        let existing_for_work_unit = transaction
+        let existing_for_worker_unit = transaction
             .query_row(
                 "SELECT contribution_json FROM audit_contributions
-                 WHERE campaign_id = ?1 AND work_unit_id = ?2
+                 WHERE campaign_id = ?1
+                   AND work_unit_id = ?2
+                   AND worker_agent_id = ?3
                  ORDER BY created_at, contribution_id
                  LIMIT 1",
-                params![contribution.campaign_id, contribution.work_unit_id],
+                params![
+                    contribution.campaign_id,
+                    contribution.work_unit_id,
+                    contribution.worker_agent_id
+                ],
                 |row| row.get::<_, String>(0),
             )
             .optional()
             .map_err(|error| error.to_string())?;
-        if existing_for_work_unit.is_some() {
-            return Err("work unit already has a submitted contribution".to_string());
+        if existing_for_worker_unit.is_some() {
+            return Err("worker already submitted a contribution for this work unit".to_string());
         }
-        if is_reviewed_terminal_work_unit_status(&work_unit.status) {
+        if policy == ContributionIngestPolicy::LocalWorker
+            && is_reviewed_terminal_work_unit_status(&work_unit.status)
+        {
             return Err("work unit already has reviewed work".to_string());
         }
         let claim = claim_for_contribution_in_connection(&transaction, contribution)?;
         if claim.is_none() {
             return Err("work unit must be claimed by this worker before submission".to_string());
         }
-        if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
-            if claimed_by != contribution.worker_agent_id && work_unit.status != "claimed" {
-                return Err("work unit is claimed by another worker".to_string());
+        if policy == ContributionIngestPolicy::LocalWorker {
+            if let Some(claimed_by) = work_unit.claimed_by_agent_id.as_deref() {
+                if claimed_by != contribution.worker_agent_id && work_unit.status != "claimed" {
+                    return Err("work unit is claimed by another worker".to_string());
+                }
             }
-        }
-        let worker_pending = transaction
-            .query_row(
-                "SELECT COUNT(*) FROM audit_contributions c
-                 WHERE c.worker_agent_id = ?1
-                   AND NOT EXISTS (
-                    SELECT 1 FROM audit_verifications v
-                    WHERE v.target_contribution_id = c.contribution_id
-                 )",
-                params![contribution.worker_agent_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|error| error.to_string())?;
-        if worker_pending.max(0) as usize >= MAX_PENDING_CONTRIBUTIONS_PER_WORKER {
-            return Err(format!(
-                "worker backpressure active: {worker_pending} receipt{} from this worker await independent verification; pause new audit work until the network clears below {MAX_PENDING_CONTRIBUTIONS_PER_WORKER}",
-                if worker_pending == 1 { "" } else { "s" }
-            ));
+            let worker_pending = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM audit_contributions c
+                     WHERE c.worker_agent_id = ?1
+                       AND NOT EXISTS (
+                        SELECT 1 FROM audit_verifications v
+                        WHERE v.target_contribution_id = c.contribution_id
+                     )",
+                    params![contribution.worker_agent_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+            if worker_pending.max(0) as usize >= MAX_PENDING_CONTRIBUTIONS_PER_WORKER {
+                return Err(format!(
+                    "worker backpressure active: {worker_pending} receipt{} from this worker await independent verification; pause new audit work until the network clears below {MAX_PENDING_CONTRIBUTIONS_PER_WORKER}",
+                    if worker_pending == 1 { "" } else { "s" }
+                ));
+            }
         }
         let inserted = transaction
             .execute(
@@ -681,13 +713,15 @@ impl AtpStore {
             )
             .map_err(|error| error.to_string())?;
         expect_one_row(inserted, "contribution insert")?;
-        update_work_unit_status(
-            &transaction,
-            &contribution.campaign_id,
-            &contribution.work_unit_id,
-            "submitted",
-            Some(contribution.worker_agent_id.as_str()),
-        )?;
+        if !is_reviewed_terminal_work_unit_status(&work_unit.status) {
+            update_work_unit_status(
+                &transaction,
+                &contribution.campaign_id,
+                &contribution.work_unit_id,
+                "submitted",
+                Some(contribution.worker_agent_id.as_str()),
+            )?;
+        }
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(contribution.clone())
     }
@@ -4697,6 +4731,87 @@ mod tests {
         assert_eq!(bundles.len(), 1);
         assert_eq!(bundles[0].0.verification_id, verification.verification_id);
         assert_eq!(bundles[0].1.len(), allocations.len());
+    }
+
+    #[test]
+    fn peer_sync_accepts_parallel_worker_receipt_for_submitted_unit() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker_a = libp2p::identity::Keypair::generate_ed25519();
+        let worker_b = libp2p::identity::Keypair::generate_ed25519();
+        let worker_a_agent = agent_id(&worker_a.public());
+        let worker_b_agent = agent_id(&worker_b.public());
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+
+        let claim_a = signed_work_unit_claim(&worker_a, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim_a).unwrap();
+        let contribution_a = signed_contribution(
+            &worker_a,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Worker A submitted a signed receipt first.".to_string(),
+            vec![],
+            vec![labor_artifact("worker-a.md")],
+            vec![CoverageItem {
+                area: "parallel worker recovery".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Worker A produced local work.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution_a).unwrap();
+
+        let claim_b = signed_work_unit_claim(&worker_b, &campaign, &work_unit).unwrap();
+        let claim_error = store.record_work_unit_claim(&claim_b).unwrap_err();
+        assert!(claim_error.contains("submitted or reviewed"));
+        store.record_historical_work_unit_claim(&claim_b).unwrap();
+        let contribution_b = signed_contribution(
+            &worker_b,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Worker B submitted a raced signed receipt through peer sync.".to_string(),
+            vec![],
+            vec![labor_artifact("worker-b.md")],
+            vec![CoverageItem {
+                area: "parallel worker recovery".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Worker B receipt remains verifiable.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        store.record_network_contribution(&contribution_b).unwrap();
+
+        let candidates_for_a = store
+            .network_verification_candidates(&worker_a_agent, 10)
+            .unwrap();
+        assert_eq!(candidates_for_a.len(), 1);
+        assert_eq!(
+            candidates_for_a[0].contribution_id,
+            contribution_b.contribution_id
+        );
+        let candidates_for_b = store
+            .network_verification_candidates(&worker_b_agent, 10)
+            .unwrap();
+        assert_eq!(candidates_for_b.len(), 1);
+        assert_eq!(
+            candidates_for_b[0].contribution_id,
+            contribution_a.contribution_id
+        );
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(snapshot.contributions.len(), 2);
     }
 
     #[test]

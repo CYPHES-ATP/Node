@@ -5,6 +5,6 @@
   "status": "online",
   "relayAddr": "/dns4/relay.cyphes.com/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
   "rendezvousAddr": "/dns4/relay.cyphes.com/tcp/4001/p2p/12D3KooWPXJ3VkZt88hTwo1YsqB1fSokLRjgcHc1FRRPawgqc2oQ",
-  "rendezvousNamespace": "cyphes.repository-audit.v0.7.11",
-  "updatedAt": "2026-07-02T16:45:00Z"
+  "rendezvousNamespace": "cyphes.repository-audit.v0.7.12",
+  "updatedAt": "2026-07-02T17:20:00Z"
 }

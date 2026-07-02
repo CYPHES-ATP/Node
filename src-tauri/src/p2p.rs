@@ -29,8 +29,8 @@ use crate::{
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.11";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.11";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.12";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.12";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -829,7 +829,7 @@ fn handle_swarm_event(
                         let contribution_id = contribution.contribution_id.clone();
                         let receipt_hash = contribution.receipt_hash.clone();
                         let was_known = store.get_contribution(&contribution_id).is_ok();
-                        match store.record_contribution(&contribution) {
+                        match store.record_network_contribution(&contribution) {
                             Ok(_) => {
                                 if !was_known {
                                     let _ = app.emit("audit:labor_changed", ());
@@ -2229,7 +2229,7 @@ fn ingest_labor_object_bundle(
         }
     }
     for contribution in bundle.contributions {
-        match store.record_contribution(&contribution) {
+        match store.record_network_contribution(&contribution) {
             Ok(_) => response.contributions += 1,
             Err(reason) if is_labor_dependency_error(&reason) => {
                 queue_pending_labor_object(
@@ -2405,7 +2405,7 @@ fn retry_pending_labor_object(
         "contribution" => {
             let contribution: NodeContribution =
                 serde_json::from_str(object_json).map_err(|error| error.to_string())?;
-            store.record_contribution(&contribution)?;
+            store.record_network_contribution(&contribution)?;
             Ok(())
         }
         "verification" => {
@@ -3375,7 +3375,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.11"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.7.12"
             }"#,
         )
         .expect("valid manifest");
