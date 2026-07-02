@@ -25,6 +25,7 @@ pub const AUDIT_LABOR_PROFILE_VERSION: &str = "0.1";
 pub const DEFAULT_SKILL_PACK_ID: &str = "cyphes-audit-skill";
 pub const DEFAULT_SKILL_PACK_VERSION: &str = "0.4";
 pub const DEFAULT_SKILL_PACK_LABEL: &str = "CYPHES audit methodology v0.4";
+pub const WORK_UNIT_CLAIM_TTL_MS: u64 = 15 * 60 * 1000;
 
 const DEFAULT_AUDIT_SKILL_TEXT: &str =
     include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
@@ -483,6 +484,8 @@ pub fn signed_work_unit_claim(
     }
     let worker_agent_id = agent_id(&keypair.public());
     let public_key = raw_ed25519_public_key(&keypair.public())?;
+    let expires_at = (Utc::now() + chrono::Duration::milliseconds(WORK_UNIT_CLAIM_TTL_MS as i64))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let mut claim = AuditWorkUnitClaim {
         profile: WORK_UNIT_CLAIM_PROFILE.to_string(),
         profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
@@ -493,7 +496,7 @@ pub fn signed_work_unit_claim(
         worker_agent_id,
         status: "claimed".to_string(),
         created_at: now_rfc3339(),
-        expires_at: None,
+        expires_at: Some(expires_at),
         public_key_base64_url: URL_SAFE_NO_PAD.encode(public_key),
         claim_hash: String::new(),
         signature: String::new(),

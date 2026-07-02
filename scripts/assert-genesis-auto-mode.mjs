@@ -6,7 +6,7 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 const checks = [
   {
     label: "frontend auto-mode state is scoped to the current testnet",
-    pattern: /GENESIS_AUTO_MODE_TESTNET_ID\s*=\s*"cyphes-dev-v0\.7\.5"/,
+    pattern: /GENESIS_AUTO_MODE_TESTNET_ID\s*=\s*"cyphes-dev-v0\.7\.6"/,
   },
   {
     label: "settings key isolates current boot settings from prior testnets",

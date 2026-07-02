@@ -124,16 +124,16 @@ for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securi
 targets.sort((a, b) => b.priorityScore - a.priorityScore || a.tvlRiskRank - b.tvlRiskRank);
 
 const index = {
-  version: "0.5.6",
+  version: "0.7.6",
   label: "CYPHES Guardian Index v2",
-  generatedAt: "2026-06-26T00:00:00Z",
+  generatedAt: "2026-07-02T00:00:00Z",
   policy,
   notes: [
     "Bundled static seed for autonomous public guardian coverage.",
     "DeFiLlama is used as a risk-ranking source signal only; GitHub targets are manually curated and resolved to pinned commits by the app before work is created.",
     "No external bounty submission or protocol contact occurs in auto mode.",
   ],
-  targets: targets.slice(0, 100),
+  targets: targets.slice(0, 150),
 };
 
 writeFileSync(

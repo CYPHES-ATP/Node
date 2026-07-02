@@ -1375,7 +1375,7 @@ mod tests {
         ))
         .expect("guardian target index should parse");
 
-        assert!(index.targets.len() >= 100);
+        assert!(index.targets.len() >= 142);
         for target in index.targets {
             assert!(target.repo_url.starts_with("https://github.com/"));
             assert!(target.source.iter().any(|source| source == "github"));

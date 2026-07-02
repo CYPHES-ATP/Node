@@ -66,7 +66,7 @@ remaining gateway work is cache limits, metrics, and per-node quotas.
 
 ## Guardian Index v2
 
-The bundled index contains 100 structured public coverage targets. Each target
+The bundled index contains 142 structured public coverage targets. Each target
 includes:
 
 - source signals: `manual-curated`, `github`, and `defillama`;

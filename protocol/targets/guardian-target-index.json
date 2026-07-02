@@ -1,7 +1,7 @@
 {
-  "version": "0.5.6",
+  "version": "0.7.6",
   "label": "CYPHES Guardian Index v2",
-  "generatedAt": "2026-06-26T00:00:00Z",
+  "generatedAt": "2026-07-02T00:00:00Z",
   "policy": "Public guardian coverage only. CYPHES does not submit external reports in auto mode. Human approval is required before disclosure, escalation, payout claim, protocol contact, or any production interaction.",
   "notes": [
     "Bundled static seed for autonomous public guardian coverage.",
@@ -4002,6 +4002,1637 @@
         "polygon",
         "optimism",
         "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-036-aragon-osx-repository",
+      "protocolName": "Aragon OSx",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "DAO",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 36,
+      "repoUrl": "https://github.com/aragon/osx",
+      "repoUrls": [
+        "https://github.com/aragon/osx"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://devs.aragon.org/",
+      "securityUrl": "https://github.com/aragon/osx",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 82,
+      "scopeText": "Focused path: repository root\nProtocol: Aragon OSx\nCategory: DAO\nChains: Ethereum\nStatic TVL/risk rank seed: 36\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Aragon OSx repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 213,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "dao",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-039-seaport-contracts-seaport-sol",
+      "protocolName": "Seaport",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Marketplace",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 39,
+      "repoUrl": "https://github.com/ProjectOpenSea/seaport",
+      "repoUrls": [
+        "https://github.com/ProjectOpenSea/seaport"
+      ],
+      "contractPaths": [
+        "contracts/Seaport.sol"
+      ],
+      "docsUrl": "https://docs.opensea.io/",
+      "securityUrl": "https://github.com/ProjectOpenSea/seaport",
+      "inScopeText": "Public read-only review of contracts/Seaport.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 4,
+      "priorityScore": 82,
+      "scopeText": "Focused path: contracts/Seaport.sol\nProtocol: Seaport\nCategory: Marketplace\nChains: Ethereum\nStatic TVL/risk rank seed: 39\nCriticality: 4/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Seaport focused path contracts/Seaport.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 226,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "marketplace",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-031-morpho-blue-src-libraries-marketparamslib-sol",
+      "protocolName": "Morpho Blue",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Lending",
+      "chains": [
+        "Ethereum",
+        "Base"
+      ],
+      "tvlRiskRank": 31,
+      "repoUrl": "https://github.com/morpho-org/morpho-blue",
+      "repoUrls": [
+        "https://github.com/morpho-org/morpho-blue"
+      ],
+      "contractPaths": [
+        "src/libraries/MarketParamsLib.sol"
+      ],
+      "docsUrl": "https://docs.morpho.org/",
+      "securityUrl": "https://github.com/morpho-org/morpho-blue",
+      "inScopeText": "Public read-only review of src/libraries/MarketParamsLib.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 81,
+      "scopeText": "Focused path: src/libraries/MarketParamsLib.sol\nProtocol: Morpho Blue\nCategory: Lending\nChains: Ethereum, Base\nStatic TVL/risk rank seed: 31\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Morpho Blue focused path src/libraries/MarketParamsLib.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 221,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "lending",
+        "ethereum",
+        "base",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-037-gnosis-conditional-tokens-repository",
+      "protocolName": "Gnosis Conditional Tokens",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Prediction Markets",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 37,
+      "repoUrl": "https://github.com/gnosis/conditional-tokens-contracts",
+      "repoUrls": [
+        "https://github.com/gnosis/conditional-tokens-contracts"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://gnosis-conditional-tokens.readthedocs.io/",
+      "securityUrl": "https://github.com/gnosis/conditional-tokens-contracts",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 81,
+      "scopeText": "Focused path: repository root\nProtocol: Gnosis Conditional Tokens\nCategory: Prediction Markets\nChains: Ethereum\nStatic TVL/risk rank seed: 37\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Gnosis Conditional Tokens repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 211,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "prediction-markets",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-040-looksrare-contracts-looksrareprotocol-sol",
+      "protocolName": "LooksRare",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Marketplace",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 40,
+      "repoUrl": "https://github.com/LooksRare/contracts-exchange-v2",
+      "repoUrls": [
+        "https://github.com/LooksRare/contracts-exchange-v2"
+      ],
+      "contractPaths": [
+        "contracts/LooksRareProtocol.sol"
+      ],
+      "docsUrl": "https://docs.looksrare.org/",
+      "securityUrl": "https://github.com/LooksRare/contracts-exchange-v2",
+      "inScopeText": "Public read-only review of contracts/LooksRareProtocol.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 4,
+      "priorityScore": 81,
+      "scopeText": "Focused path: contracts/LooksRareProtocol.sol\nProtocol: LooksRare\nCategory: Marketplace\nChains: Ethereum\nStatic TVL/risk rank seed: 40\nCriticality: 4/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review LooksRare focused path contracts/LooksRareProtocol.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 224,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "marketplace",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-032-liquity-packages-contracts-contracts-trovemanager-sol",
+      "protocolName": "Liquity",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Stablecoin",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 32,
+      "repoUrl": "https://github.com/liquity/dev",
+      "repoUrls": [
+        "https://github.com/liquity/dev"
+      ],
+      "contractPaths": [
+        "packages/contracts/contracts/TroveManager.sol"
+      ],
+      "docsUrl": "https://docs.liquity.org/",
+      "securityUrl": "https://github.com/liquity/dev",
+      "inScopeText": "Public read-only review of packages/contracts/contracts/TroveManager.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 80,
+      "scopeText": "Focused path: packages/contracts/contracts/TroveManager.sol\nProtocol: Liquity\nCategory: Stablecoin\nChains: Ethereum\nStatic TVL/risk rank seed: 32\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Liquity focused path packages/contracts/contracts/TroveManager.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 220,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "stablecoin",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-038-superfluid-repository",
+      "protocolName": "Superfluid",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Streaming Payments",
+      "chains": [
+        "Ethereum",
+        "Polygon",
+        "Optimism",
+        "Base"
+      ],
+      "tvlRiskRank": 38,
+      "repoUrl": "https://github.com/superfluid-finance/protocol-monorepo",
+      "repoUrls": [
+        "https://github.com/superfluid-finance/protocol-monorepo"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.superfluid.finance/",
+      "securityUrl": "https://github.com/superfluid-finance/protocol-monorepo",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 80,
+      "scopeText": "Focused path: repository root\nProtocol: Superfluid\nCategory: Streaming Payments\nChains: Ethereum, Polygon, Optimism, Base\nStatic TVL/risk rank seed: 38\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Superfluid repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 209,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "streaming-payments",
+        "ethereum",
+        "polygon",
+        "optimism",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-033-euler-contracts-modules-dtoken-sol",
+      "protocolName": "Euler",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Lending",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 33,
+      "repoUrl": "https://github.com/euler-xyz/euler-contracts",
+      "repoUrls": [
+        "https://github.com/euler-xyz/euler-contracts"
+      ],
+      "contractPaths": [
+        "contracts/modules/dToken.sol"
+      ],
+      "docsUrl": "https://docs.euler.finance/",
+      "securityUrl": "https://github.com/euler-xyz/euler-contracts",
+      "inScopeText": "Public read-only review of contracts/modules/dToken.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 79,
+      "scopeText": "Focused path: contracts/modules/dToken.sol\nProtocol: Euler\nCategory: Lending\nChains: Ethereum\nStatic TVL/risk rank seed: 33\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Euler focused path contracts/modules/dToken.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 218,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "lending",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-039-seaport-repository",
+      "protocolName": "Seaport",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Marketplace",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 39,
+      "repoUrl": "https://github.com/ProjectOpenSea/seaport",
+      "repoUrls": [
+        "https://github.com/ProjectOpenSea/seaport"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.opensea.io/",
+      "securityUrl": "https://github.com/ProjectOpenSea/seaport",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 79,
+      "scopeText": "Focused path: repository root\nProtocol: Seaport\nCategory: Marketplace\nChains: Ethereum\nStatic TVL/risk rank seed: 39\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Seaport repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 208,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "marketplace",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-034-venus-contracts-tokens-vtoken-sol",
+      "protocolName": "Venus",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Lending",
+      "chains": [
+        "BNB Chain"
+      ],
+      "tvlRiskRank": 34,
+      "repoUrl": "https://github.com/VenusProtocol/venus-protocol",
+      "repoUrls": [
+        "https://github.com/VenusProtocol/venus-protocol"
+      ],
+      "contractPaths": [
+        "contracts/Tokens/VToken.sol"
+      ],
+      "docsUrl": "https://docs-v4.venus.io/",
+      "securityUrl": "https://github.com/VenusProtocol/venus-protocol",
+      "inScopeText": "Public read-only review of contracts/Tokens/VToken.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 78,
+      "scopeText": "Focused path: contracts/Tokens/VToken.sol\nProtocol: Venus\nCategory: Lending\nChains: BNB Chain\nStatic TVL/risk rank seed: 34\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Venus focused path contracts/Tokens/VToken.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 216,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "lending",
+        "bnb-chain",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-040-looksrare-repository",
+      "protocolName": "LooksRare",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Marketplace",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 40,
+      "repoUrl": "https://github.com/LooksRare/contracts-exchange-v2",
+      "repoUrls": [
+        "https://github.com/LooksRare/contracts-exchange-v2"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.looksrare.org/",
+      "securityUrl": "https://github.com/LooksRare/contracts-exchange-v2",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 78,
+      "scopeText": "Focused path: repository root\nProtocol: LooksRare\nCategory: Marketplace\nChains: Ethereum\nStatic TVL/risk rank seed: 40\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review LooksRare repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 206,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "marketplace",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-035-stargate-contracts-router-sol",
+      "protocolName": "Stargate",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Bridge",
+      "chains": [
+        "Ethereum",
+        "Arbitrum",
+        "Optimism",
+        "Avalanche"
+      ],
+      "tvlRiskRank": 35,
+      "repoUrl": "https://github.com/stargate-protocol/stargate",
+      "repoUrls": [
+        "https://github.com/stargate-protocol/stargate"
+      ],
+      "contractPaths": [
+        "contracts/Router.sol"
+      ],
+      "docsUrl": "https://stargateprotocol.gitbook.io/",
+      "securityUrl": "https://github.com/stargate-protocol/stargate",
+      "inScopeText": "Public read-only review of contracts/Router.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 77,
+      "scopeText": "Focused path: contracts/Router.sol\nProtocol: Stargate\nCategory: Bridge\nChains: Ethereum, Arbitrum, Optimism, Avalanche\nStatic TVL/risk rank seed: 35\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Stargate focused path contracts/Router.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 215,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "bridge",
+        "ethereum",
+        "arbitrum",
+        "optimism",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-036-aragon-osx-packages-contracts-src-framework-plugin-repo-pluginrepo-sol",
+      "protocolName": "Aragon OSx",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "DAO",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 36,
+      "repoUrl": "https://github.com/aragon/osx",
+      "repoUrls": [
+        "https://github.com/aragon/osx"
+      ],
+      "contractPaths": [
+        "packages/contracts/src/framework/plugin/repo/PluginRepo.sol"
+      ],
+      "docsUrl": "https://devs.aragon.org/",
+      "securityUrl": "https://github.com/aragon/osx",
+      "inScopeText": "Public read-only review of packages/contracts/src/framework/plugin/repo/PluginRepo.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 76,
+      "scopeText": "Focused path: packages/contracts/src/framework/plugin/repo/PluginRepo.sol\nProtocol: Aragon OSx\nCategory: DAO\nChains: Ethereum\nStatic TVL/risk rank seed: 36\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Aragon OSx focused path packages/contracts/src/framework/plugin/repo/PluginRepo.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 213,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "dao",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-038-superfluid-packages-ethereum-contracts-contracts-agreements-constantflowagreementv1-sol",
+      "protocolName": "Superfluid",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Streaming Payments",
+      "chains": [
+        "Ethereum",
+        "Polygon",
+        "Optimism",
+        "Base"
+      ],
+      "tvlRiskRank": 38,
+      "repoUrl": "https://github.com/superfluid-finance/protocol-monorepo",
+      "repoUrls": [
+        "https://github.com/superfluid-finance/protocol-monorepo"
+      ],
+      "contractPaths": [
+        "packages/ethereum-contracts/contracts/agreements/ConstantFlowAgreementV1.sol"
+      ],
+      "docsUrl": "https://docs.superfluid.finance/",
+      "securityUrl": "https://github.com/superfluid-finance/protocol-monorepo",
+      "inScopeText": "Public read-only review of packages/ethereum-contracts/contracts/agreements/ConstantFlowAgreementV1.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 74,
+      "scopeText": "Focused path: packages/ethereum-contracts/contracts/agreements/ConstantFlowAgreementV1.sol\nProtocol: Superfluid\nCategory: Streaming Payments\nChains: Ethereum, Polygon, Optimism, Base\nStatic TVL/risk rank seed: 38\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Superfluid focused path packages/ethereum-contracts/contracts/agreements/ConstantFlowAgreementV1.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 209,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "streaming-payments",
+        "ethereum",
+        "polygon",
+        "optimism",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-041-nouns-dao-packages-nouns-contracts-contracts-governance-nounsdaologicv3-sol",
+      "protocolName": "Nouns DAO",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "DAO",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 41,
+      "repoUrl": "https://github.com/nounsDAO/nouns-monorepo",
+      "repoUrls": [
+        "https://github.com/nounsDAO/nouns-monorepo"
+      ],
+      "contractPaths": [
+        "packages/nouns-contracts/contracts/governance/NounsDAOLogicV3.sol"
+      ],
+      "docsUrl": "https://docs.nouns.build/",
+      "securityUrl": "https://github.com/nounsDAO/nouns-monorepo",
+      "inScopeText": "Public read-only review of packages/nouns-contracts/contracts/governance/NounsDAOLogicV3.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 74,
+      "scopeText": "Focused path: packages/nouns-contracts/contracts/governance/NounsDAOLogicV3.sol\nProtocol: Nouns DAO\nCategory: DAO\nChains: Ethereum\nStatic TVL/risk rank seed: 41\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Nouns DAO focused path packages/nouns-contracts/contracts/governance/NounsDAOLogicV3.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 204,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "dao",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-039-seaport-contracts-lib-ordervalidator-sol",
+      "protocolName": "Seaport",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Marketplace",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 39,
+      "repoUrl": "https://github.com/ProjectOpenSea/seaport",
+      "repoUrls": [
+        "https://github.com/ProjectOpenSea/seaport"
+      ],
+      "contractPaths": [
+        "contracts/lib/OrderValidator.sol"
+      ],
+      "docsUrl": "https://docs.opensea.io/",
+      "securityUrl": "https://github.com/ProjectOpenSea/seaport",
+      "inScopeText": "Public read-only review of contracts/lib/OrderValidator.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 73,
+      "scopeText": "Focused path: contracts/lib/OrderValidator.sol\nProtocol: Seaport\nCategory: Marketplace\nChains: Ethereum\nStatic TVL/risk rank seed: 39\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Seaport focused path contracts/lib/OrderValidator.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 208,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "marketplace",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-042-gitcoin-grants-packages-contracts-contracts-allo-allo-sol",
+      "protocolName": "Gitcoin Grants",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Public Goods",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 42,
+      "repoUrl": "https://github.com/gitcoinco/grants-stack",
+      "repoUrls": [
+        "https://github.com/gitcoinco/grants-stack"
+      ],
+      "contractPaths": [
+        "packages/contracts/contracts/allo/Allo.sol"
+      ],
+      "docsUrl": "https://docs.allo.gitcoin.co/",
+      "securityUrl": "https://github.com/gitcoinco/grants-stack",
+      "inScopeText": "Public read-only review of packages/contracts/contracts/allo/Allo.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 73,
+      "scopeText": "Focused path: packages/contracts/contracts/allo/Allo.sol\nProtocol: Gitcoin Grants\nCategory: Public Goods\nChains: Ethereum\nStatic TVL/risk rank seed: 42\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Gitcoin Grants focused path packages/contracts/contracts/allo/Allo.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 203,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "public-goods",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-043-zora-packages-protocol-contracts-src-market-zorav3-sol",
+      "protocolName": "Zora",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "NFT",
+      "chains": [
+        "Ethereum",
+        "Base"
+      ],
+      "tvlRiskRank": 43,
+      "repoUrl": "https://github.com/ourzora/zora-protocol",
+      "repoUrls": [
+        "https://github.com/ourzora/zora-protocol"
+      ],
+      "contractPaths": [
+        "packages/protocol-contracts/src/market/ZoraV3.sol"
+      ],
+      "docsUrl": "https://docs.zora.co/",
+      "securityUrl": "https://github.com/ourzora/zora-protocol",
+      "inScopeText": "Public read-only review of packages/protocol-contracts/src/market/ZoraV3.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 72,
+      "scopeText": "Focused path: packages/protocol-contracts/src/market/ZoraV3.sol\nProtocol: Zora\nCategory: NFT\nChains: Ethereum, Base\nStatic TVL/risk rank seed: 43\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Zora focused path packages/protocol-contracts/src/market/ZoraV3.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 201,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "nft",
+        "ethereum",
+        "base",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-041-nouns-dao-repository",
+      "protocolName": "Nouns DAO",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "DAO",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 41,
+      "repoUrl": "https://github.com/nounsDAO/nouns-monorepo",
+      "repoUrls": [
+        "https://github.com/nounsDAO/nouns-monorepo"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.nouns.build/",
+      "securityUrl": "https://github.com/nounsDAO/nouns-monorepo",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 71,
+      "scopeText": "Focused path: repository root\nProtocol: Nouns DAO\nCategory: DAO\nChains: Ethereum\nStatic TVL/risk rank seed: 41\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Nouns DAO repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 186,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "dao",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-044-reservoir-packages-indexer-src",
+      "protocolName": "Reservoir",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "NFT Infrastructure",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 44,
+      "repoUrl": "https://github.com/reservoirprotocol/indexer",
+      "repoUrls": [
+        "https://github.com/reservoirprotocol/indexer"
+      ],
+      "contractPaths": [
+        "packages/indexer/src"
+      ],
+      "docsUrl": "https://docs.reservoir.tools/",
+      "securityUrl": "https://github.com/reservoirprotocol/indexer",
+      "inScopeText": "Public read-only review of packages/indexer/src at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 71,
+      "scopeText": "Focused path: packages/indexer/src\nProtocol: Reservoir\nCategory: NFT Infrastructure\nChains: Ethereum\nStatic TVL/risk rank seed: 44\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Reservoir focused path packages/indexer/src for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 199,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "nft-infrastructure",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-042-gitcoin-grants-repository",
+      "protocolName": "Gitcoin Grants",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Public Goods",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 42,
+      "repoUrl": "https://github.com/gitcoinco/grants-stack",
+      "repoUrls": [
+        "https://github.com/gitcoinco/grants-stack"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.allo.gitcoin.co/",
+      "securityUrl": "https://github.com/gitcoinco/grants-stack",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 70,
+      "scopeText": "Focused path: repository root\nProtocol: Gitcoin Grants\nCategory: Public Goods\nChains: Ethereum\nStatic TVL/risk rank seed: 42\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Gitcoin Grants repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 185,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "public-goods",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-045-account-abstraction-contracts-core-entrypoint-sol",
+      "protocolName": "Account Abstraction",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Wallet Infrastructure",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 45,
+      "repoUrl": "https://github.com/eth-infinitism/account-abstraction",
+      "repoUrls": [
+        "https://github.com/eth-infinitism/account-abstraction"
+      ],
+      "contractPaths": [
+        "contracts/core/EntryPoint.sol"
+      ],
+      "docsUrl": "https://docs.erc4337.io/",
+      "securityUrl": "https://github.com/eth-infinitism/account-abstraction",
+      "inScopeText": "Public read-only review of contracts/core/EntryPoint.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 70,
+      "scopeText": "Focused path: contracts/core/EntryPoint.sol\nProtocol: Account Abstraction\nCategory: Wallet Infrastructure\nChains: Ethereum\nStatic TVL/risk rank seed: 45\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Account Abstraction focused path contracts/core/EntryPoint.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 198,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "wallet-infrastructure",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-043-zora-repository",
+      "protocolName": "Zora",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "NFT",
+      "chains": [
+        "Ethereum",
+        "Base"
+      ],
+      "tvlRiskRank": 43,
+      "repoUrl": "https://github.com/ourzora/zora-protocol",
+      "repoUrls": [
+        "https://github.com/ourzora/zora-protocol"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.zora.co/",
+      "securityUrl": "https://github.com/ourzora/zora-protocol",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 69,
+      "scopeText": "Focused path: repository root\nProtocol: Zora\nCategory: NFT\nChains: Ethereum, Base\nStatic TVL/risk rank seed: 43\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Zora repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 183,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "nft",
+        "ethereum",
+        "base",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-046-weth10-contracts-weth10-sol",
+      "protocolName": "WETH10",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Token Primitive",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 46,
+      "repoUrl": "https://github.com/WETH10/WETH10",
+      "repoUrls": [
+        "https://github.com/WETH10/WETH10"
+      ],
+      "contractPaths": [
+        "contracts/WETH10.sol"
+      ],
+      "docsUrl": "https://github.com/WETH10/WETH10",
+      "securityUrl": "https://github.com/WETH10/WETH10",
+      "inScopeText": "Public read-only review of contracts/WETH10.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 69,
+      "scopeText": "Focused path: contracts/WETH10.sol\nProtocol: WETH10\nCategory: Token Primitive\nChains: Ethereum\nStatic TVL/risk rank seed: 46\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review WETH10 focused path contracts/WETH10.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 196,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "token-primitive",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-044-reservoir-repository",
+      "protocolName": "Reservoir",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "NFT Infrastructure",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 44,
+      "repoUrl": "https://github.com/reservoirprotocol/indexer",
+      "repoUrls": [
+        "https://github.com/reservoirprotocol/indexer"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.reservoir.tools/",
+      "securityUrl": "https://github.com/reservoirprotocol/indexer",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 68,
+      "scopeText": "Focused path: repository root\nProtocol: Reservoir\nCategory: NFT Infrastructure\nChains: Ethereum\nStatic TVL/risk rank seed: 44\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Reservoir repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 181,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "nft-infrastructure",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-047-solmate-src-tokens-erc20-sol",
+      "protocolName": "Solmate",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 47,
+      "repoUrl": "https://github.com/transmissions11/solmate",
+      "repoUrls": [
+        "https://github.com/transmissions11/solmate"
+      ],
+      "contractPaths": [
+        "src/tokens/ERC20.sol"
+      ],
+      "docsUrl": "https://github.com/transmissions11/solmate",
+      "securityUrl": "https://github.com/transmissions11/solmate",
+      "inScopeText": "Public read-only review of src/tokens/ERC20.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 68,
+      "scopeText": "Focused path: src/tokens/ERC20.sol\nProtocol: Solmate\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 47\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solmate focused path src/tokens/ERC20.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 194,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-045-account-abstraction-repository",
+      "protocolName": "Account Abstraction",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Wallet Infrastructure",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 45,
+      "repoUrl": "https://github.com/eth-infinitism/account-abstraction",
+      "repoUrls": [
+        "https://github.com/eth-infinitism/account-abstraction"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.erc4337.io/",
+      "securityUrl": "https://github.com/eth-infinitism/account-abstraction",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 67,
+      "scopeText": "Focused path: repository root\nProtocol: Account Abstraction\nCategory: Wallet Infrastructure\nChains: Ethereum\nStatic TVL/risk rank seed: 45\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Account Abstraction repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 180,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "wallet-infrastructure",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-048-solady-src-tokens-erc20-sol",
+      "protocolName": "Solady",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 48,
+      "repoUrl": "https://github.com/Vectorized/solady",
+      "repoUrls": [
+        "https://github.com/Vectorized/solady"
+      ],
+      "contractPaths": [
+        "src/tokens/ERC20.sol"
+      ],
+      "docsUrl": "https://github.com/Vectorized/solady",
+      "securityUrl": "https://github.com/Vectorized/solady",
+      "inScopeText": "Public read-only review of src/tokens/ERC20.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 67,
+      "scopeText": "Focused path: src/tokens/ERC20.sol\nProtocol: Solady\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 48\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solady focused path src/tokens/ERC20.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 192,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-046-weth10-repository",
+      "protocolName": "WETH10",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Token Primitive",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 46,
+      "repoUrl": "https://github.com/WETH10/WETH10",
+      "repoUrls": [
+        "https://github.com/WETH10/WETH10"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://github.com/WETH10/WETH10",
+      "securityUrl": "https://github.com/WETH10/WETH10",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 66,
+      "scopeText": "Focused path: repository root\nProtocol: WETH10\nCategory: Token Primitive\nChains: Ethereum\nStatic TVL/risk rank seed: 46\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review WETH10 repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 178,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "token-primitive",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-049-prbmath-src-sd59x18-sol",
+      "protocolName": "PRBMath",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 49,
+      "repoUrl": "https://github.com/PaulRBerg/prb-math",
+      "repoUrls": [
+        "https://github.com/PaulRBerg/prb-math"
+      ],
+      "contractPaths": [
+        "src/SD59x18.sol"
+      ],
+      "docsUrl": "https://github.com/PaulRBerg/prb-math",
+      "securityUrl": "https://github.com/PaulRBerg/prb-math",
+      "inScopeText": "Public read-only review of src/SD59x18.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 66,
+      "scopeText": "Focused path: src/SD59x18.sol\nProtocol: PRBMath\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 49\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review PRBMath focused path src/SD59x18.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 191,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-041-nouns-dao-packages-nouns-contracts-contracts-nounstoken-sol",
+      "protocolName": "Nouns DAO",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "DAO",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 41,
+      "repoUrl": "https://github.com/nounsDAO/nouns-monorepo",
+      "repoUrls": [
+        "https://github.com/nounsDAO/nouns-monorepo"
+      ],
+      "contractPaths": [
+        "packages/nouns-contracts/contracts/NounsToken.sol"
+      ],
+      "docsUrl": "https://docs.nouns.build/",
+      "securityUrl": "https://github.com/nounsDAO/nouns-monorepo",
+      "inScopeText": "Public read-only review of packages/nouns-contracts/contracts/NounsToken.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 65,
+      "scopeText": "Focused path: packages/nouns-contracts/contracts/NounsToken.sol\nProtocol: Nouns DAO\nCategory: DAO\nChains: Ethereum\nStatic TVL/risk rank seed: 41\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Nouns DAO focused path packages/nouns-contracts/contracts/NounsToken.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 186,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "dao",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-047-solmate-repository",
+      "protocolName": "Solmate",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 47,
+      "repoUrl": "https://github.com/transmissions11/solmate",
+      "repoUrls": [
+        "https://github.com/transmissions11/solmate"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://github.com/transmissions11/solmate",
+      "securityUrl": "https://github.com/transmissions11/solmate",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 65,
+      "scopeText": "Focused path: repository root\nProtocol: Solmate\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 47\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solmate repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 176,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-050-solidity-libsolidity",
+      "protocolName": "Solidity",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Compiler",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 50,
+      "repoUrl": "https://github.com/ethereum/solidity",
+      "repoUrls": [
+        "https://github.com/ethereum/solidity"
+      ],
+      "contractPaths": [
+        "libsolidity"
+      ],
+      "docsUrl": "https://docs.soliditylang.org/",
+      "securityUrl": "https://github.com/ethereum/solidity/security",
+      "inScopeText": "Public read-only review of libsolidity at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 3,
+      "priorityScore": 65,
+      "scopeText": "Focused path: libsolidity\nProtocol: Solidity\nCategory: Compiler\nChains: Ethereum\nStatic TVL/risk rank seed: 50\nCriticality: 3/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solidity focused path libsolidity for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 189,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "compiler",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-048-solady-repository",
+      "protocolName": "Solady",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 48,
+      "repoUrl": "https://github.com/Vectorized/solady",
+      "repoUrls": [
+        "https://github.com/Vectorized/solady"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://github.com/Vectorized/solady",
+      "securityUrl": "https://github.com/Vectorized/solady",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 64,
+      "scopeText": "Focused path: repository root\nProtocol: Solady\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 48\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solady repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 174,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-043-zora-packages-erc721-drop-src-erc721drop-sol",
+      "protocolName": "Zora",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "NFT",
+      "chains": [
+        "Ethereum",
+        "Base"
+      ],
+      "tvlRiskRank": 43,
+      "repoUrl": "https://github.com/ourzora/zora-protocol",
+      "repoUrls": [
+        "https://github.com/ourzora/zora-protocol"
+      ],
+      "contractPaths": [
+        "packages/erc721-drop/src/ERC721Drop.sol"
+      ],
+      "docsUrl": "https://docs.zora.co/",
+      "securityUrl": "https://github.com/ourzora/zora-protocol",
+      "inScopeText": "Public read-only review of packages/erc721-drop/src/ERC721Drop.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 63,
+      "scopeText": "Focused path: packages/erc721-drop/src/ERC721Drop.sol\nProtocol: Zora\nCategory: NFT\nChains: Ethereum, Base\nStatic TVL/risk rank seed: 43\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Zora focused path packages/erc721-drop/src/ERC721Drop.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 183,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "nft",
+        "ethereum",
+        "base",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-049-prbmath-repository",
+      "protocolName": "PRBMath",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 49,
+      "repoUrl": "https://github.com/PaulRBerg/prb-math",
+      "repoUrls": [
+        "https://github.com/PaulRBerg/prb-math"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://github.com/PaulRBerg/prb-math",
+      "securityUrl": "https://github.com/PaulRBerg/prb-math",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 63,
+      "scopeText": "Focused path: repository root\nProtocol: PRBMath\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 49\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review PRBMath repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 173,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-050-solidity-repository",
+      "protocolName": "Solidity",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Compiler",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 50,
+      "repoUrl": "https://github.com/ethereum/solidity",
+      "repoUrls": [
+        "https://github.com/ethereum/solidity"
+      ],
+      "contractPaths": [],
+      "docsUrl": "https://docs.soliditylang.org/",
+      "securityUrl": "https://github.com/ethereum/solidity/security",
+      "inScopeText": "Public read-only review of repository security posture at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 62,
+      "scopeText": "Focused path: repository root\nProtocol: Solidity\nCategory: Compiler\nChains: Ethereum\nStatic TVL/risk rank seed: 50\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solidity repository root for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 171,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "compiler",
+        "ethereum",
+        "repository"
+      ]
+    },
+    {
+      "targetId": "guardian-045-account-abstraction-contracts-core-stakemanager-sol",
+      "protocolName": "Account Abstraction",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Wallet Infrastructure",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 45,
+      "repoUrl": "https://github.com/eth-infinitism/account-abstraction",
+      "repoUrls": [
+        "https://github.com/eth-infinitism/account-abstraction"
+      ],
+      "contractPaths": [
+        "contracts/core/StakeManager.sol"
+      ],
+      "docsUrl": "https://docs.erc4337.io/",
+      "securityUrl": "https://github.com/eth-infinitism/account-abstraction",
+      "inScopeText": "Public read-only review of contracts/core/StakeManager.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 61,
+      "scopeText": "Focused path: contracts/core/StakeManager.sol\nProtocol: Account Abstraction\nCategory: Wallet Infrastructure\nChains: Ethereum\nStatic TVL/risk rank seed: 45\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Account Abstraction focused path contracts/core/StakeManager.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 180,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "wallet-infrastructure",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-047-solmate-src-auth-owned-sol",
+      "protocolName": "Solmate",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 47,
+      "repoUrl": "https://github.com/transmissions11/solmate",
+      "repoUrls": [
+        "https://github.com/transmissions11/solmate"
+      ],
+      "contractPaths": [
+        "src/auth/Owned.sol"
+      ],
+      "docsUrl": "https://github.com/transmissions11/solmate",
+      "securityUrl": "https://github.com/transmissions11/solmate",
+      "inScopeText": "Public read-only review of src/auth/Owned.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 59,
+      "scopeText": "Focused path: src/auth/Owned.sol\nProtocol: Solmate\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 47\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solmate focused path src/auth/Owned.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 176,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-048-solady-src-auth-ownable-sol",
+      "protocolName": "Solady",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 48,
+      "repoUrl": "https://github.com/Vectorized/solady",
+      "repoUrls": [
+        "https://github.com/Vectorized/solady"
+      ],
+      "contractPaths": [
+        "src/auth/Ownable.sol"
+      ],
+      "docsUrl": "https://github.com/Vectorized/solady",
+      "securityUrl": "https://github.com/Vectorized/solady",
+      "inScopeText": "Public read-only review of src/auth/Ownable.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 58,
+      "scopeText": "Focused path: src/auth/Ownable.sol\nProtocol: Solady\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 48\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solady focused path src/auth/Ownable.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 174,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-049-prbmath-src-ud60x18-sol",
+      "protocolName": "PRBMath",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Library",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 49,
+      "repoUrl": "https://github.com/PaulRBerg/prb-math",
+      "repoUrls": [
+        "https://github.com/PaulRBerg/prb-math"
+      ],
+      "contractPaths": [
+        "src/UD60x18.sol"
+      ],
+      "docsUrl": "https://github.com/PaulRBerg/prb-math",
+      "securityUrl": "https://github.com/PaulRBerg/prb-math",
+      "inScopeText": "Public read-only review of src/UD60x18.sol at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 57,
+      "scopeText": "Focused path: src/UD60x18.sol\nProtocol: PRBMath\nCategory: Library\nChains: Ethereum\nStatic TVL/risk rank seed: 49\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review PRBMath focused path src/UD60x18.sol for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 173,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "library",
+        "ethereum",
+        "solidity"
+      ]
+    },
+    {
+      "targetId": "guardian-050-solidity-docs-security-considerations-rst",
+      "protocolName": "Solidity",
+      "source": [
+        "manual-curated",
+        "github",
+        "defillama"
+      ],
+      "category": "Compiler",
+      "chains": [
+        "Ethereum"
+      ],
+      "tvlRiskRank": 50,
+      "repoUrl": "https://github.com/ethereum/solidity",
+      "repoUrls": [
+        "https://github.com/ethereum/solidity"
+      ],
+      "contractPaths": [
+        "docs/security-considerations.rst"
+      ],
+      "docsUrl": "https://docs.soliditylang.org/",
+      "securityUrl": "https://github.com/ethereum/solidity/security",
+      "inScopeText": "Public read-only review of docs/security-considerations.rst at the pinned commit.",
+      "outOfScopeText": "No production interaction, no exploit execution against live systems, no repository writes, no bounty submission, no claims of affiliation.",
+      "lastAuditedCommit": null,
+      "lastObservedCommit": null,
+      "contractCriticality": 2,
+      "priorityScore": 56,
+      "scopeText": "Focused path: docs/security-considerations.rst\nProtocol: Solidity\nCategory: Compiler\nChains: Ethereum\nStatic TVL/risk rank seed: 50\nCriticality: 2/6\nPublic DeFi guardian coverage.\nNo repository writes, no code execution, no production interaction.",
+      "auditBrief": "CYPHES Guardian Index v2 autonomous coverage. Review Solidity focused path docs/security-considerations.rst for evidence-backed security observations, coverage gaps, and verification-ready notes. Prioritize externally verifiable evidence and uncertainty over speculative exploit claims. Do not submit externally.",
+      "creditBudget": 171,
+      "cadence": "commit-diff-watch",
+      "tags": [
+        "defi",
+        "compiler",
+        "ethereum",
+        "repository"
       ]
     }
   ]

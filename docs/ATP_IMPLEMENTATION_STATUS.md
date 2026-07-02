@@ -20,7 +20,7 @@ and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
 
 v0.5.6 hardens the Autonomous Guardian Loop: Auto Worker, Auto Verifier, and
-Quest Seeder run by default in the main app; Guardian Index v2 provides 100
+Quest Seeder run by default in the main app; Guardian Index v2 provides 142
 structured public coverage targets; CYPHES watches target commits, avoids
 duplicate unchanged target/path/commit campaigns, auto-claims remote work when
 a local model is selected, returns signed verification/ATP Credit receipts to
@@ -132,7 +132,7 @@ an ATP v0.3 wire verb.
 | v0.5 local/remote audit skill execution | Implemented |
 | Professional markdown report bundle export | Implemented locally |
 | Autonomous Guardian Loop | Implemented locally; default-on in main app |
-| Guardian Index v2 with 100 structured public targets | Implemented |
+| Guardian Index v2 with 142 structured public targets | Implemented |
 | Commit-diff watch and duplicate target/path/commit suppression | Implemented locally |
 | GitHub authenticated reads and rate-limit backoff | Implemented locally |
 | Local pinned-source cache for GitHub tree/raw-file reads | Implemented locally |

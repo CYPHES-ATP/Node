@@ -59,7 +59,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 2400;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 4;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.5";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.6";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {

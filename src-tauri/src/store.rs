@@ -18,7 +18,7 @@ use crate::{
         allocate_credits, allocate_provisional_credits, default_work_units, validate_campaign,
         verify_signed_contribution, verify_signed_verification, verify_signed_work_unit_claim,
         AuditWorkUnit, AuditWorkUnitClaim, CampaignReportSnapshot, CreditAllocation, CreditSummary,
-        NodeContribution, ProtocolAuditCampaign, VerificationResult,
+        NodeContribution, ProtocolAuditCampaign, VerificationResult, WORK_UNIT_CLAIM_TTL_MS,
     },
     audit_profile::{
         contract_hash, receipt_signature_value, validate_contract, validate_receipt,
@@ -147,7 +147,22 @@ pub struct AtpStore {
     connection: Arc<Mutex<Connection>>,
 }
 
-pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.5";
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLaborInventory {
+    pub claim_ids: Vec<String>,
+    pub contribution_ids: Vec<String>,
+    pub verification_ids: Vec<String>,
+    pub needs_verifier_contribution_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StaleContributionRepair {
+    pub claim: Option<AuditWorkUnitClaim>,
+    pub contribution: NodeContribution,
+}
+
+pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.6";
 const STORE_META_TESTNET_ID_KEY: &str = "testnet_id";
 const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
@@ -437,10 +452,15 @@ impl AtpStore {
         claim: &AuditWorkUnitClaim,
     ) -> Result<AuditWorkUnitClaim, String> {
         verify_signed_work_unit_claim(claim)?;
+        let now = now_millis() as i64;
+        if work_unit_claim_is_expired(claim, now)? {
+            return Err("work unit claim has expired".to_string());
+        }
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        expire_stale_claims_in_transaction(&transaction, claim_expiry_cutoff(now), now)?;
         let campaign = campaign_in_transaction(&transaction, &claim.campaign_id)?;
         if campaign.requester_agent_id != claim.requester_agent_id {
             return Err("claim requester does not match campaign requester".to_string());
@@ -508,6 +528,8 @@ impl AtpStore {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        let now = now_millis() as i64;
+        expire_stale_claims_in_transaction(&transaction, claim_expiry_cutoff(now), now)?;
         let existing = transaction
             .query_row(
                 "SELECT contribution_json FROM audit_contributions WHERE contribution_id = ?1",
@@ -937,7 +959,7 @@ impl AtpStore {
         let mut statement = connection
             .prepare(
                 "SELECT claim_json FROM audit_work_unit_claims
-                 WHERE requester_agent_id = ?1
+                 WHERE requester_agent_id = ?1 AND status = 'claimed'
                  ORDER BY created_at, claim_id",
             )
             .map_err(|error| error.to_string())?;
@@ -1092,6 +1114,220 @@ impl AtpStore {
             )
             .map_err(|error| error.to_string())?;
         Ok(count.max(0) as usize)
+    }
+
+    pub fn audit_labor_inventory(
+        &self,
+        local_agent_id: &str,
+        limit: usize,
+    ) -> Result<AuditLaborInventory, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut claim_statement = connection
+            .prepare(
+                "SELECT claim_id FROM audit_work_unit_claims
+                 WHERE status = 'claimed'
+                 ORDER BY created_at DESC, claim_id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let claim_ids = claim_statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .map(|row| row.map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(claim_statement);
+
+        let mut contribution_statement = connection
+            .prepare(
+                "SELECT c.contribution_id FROM audit_contributions c
+                 WHERE NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                 )
+                 ORDER BY c.created_at DESC, c.contribution_id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let contribution_ids = contribution_statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .map(|row| row.map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(contribution_statement);
+
+        let mut verification_statement = connection
+            .prepare(
+                "SELECT verification_id FROM audit_verifications
+                 ORDER BY created_at DESC, verification_id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let verification_ids = verification_statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .map(|row| row.map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(verification_statement);
+
+        let mut needs_statement = connection
+            .prepare(
+                "SELECT c.contribution_id FROM audit_contributions c
+                 WHERE c.worker_agent_id = ?1
+                   AND NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                   )
+                 ORDER BY c.created_at, c.contribution_id
+                 LIMIT ?2",
+            )
+            .map_err(|error| error.to_string())?;
+        let needs_verifier_contribution_ids = needs_statement
+            .query_map(params![local_agent_id, limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| error.to_string())?
+            .map(|row| row.map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(AuditLaborInventory {
+            claim_ids,
+            contribution_ids,
+            verification_ids,
+            needs_verifier_contribution_ids,
+        })
+    }
+
+    pub fn work_unit_claims_by_ids(
+        &self,
+        claim_ids: &[String],
+    ) -> Result<Vec<AuditWorkUnitClaim>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut claims = Vec::new();
+        for claim_id in claim_ids {
+            let claim_json = connection
+                .query_row(
+                    "SELECT claim_json FROM audit_work_unit_claims
+                     WHERE claim_id = ?1 AND status = 'claimed'",
+                    params![claim_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some(json) = claim_json {
+                claims.push(serde_json::from_str(&json).map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(claims)
+    }
+
+    pub fn contributions_by_ids(
+        &self,
+        contribution_ids: &[String],
+    ) -> Result<Vec<NodeContribution>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut contributions = Vec::new();
+        for contribution_id in contribution_ids {
+            let contribution_json = connection
+                .query_row(
+                    "SELECT contribution_json FROM audit_contributions WHERE contribution_id = ?1",
+                    params![contribution_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some(json) = contribution_json {
+                contributions.push(serde_json::from_str(&json).map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(contributions)
+    }
+
+    pub fn verification_bundles_by_ids(
+        &self,
+        verification_ids: &[String],
+    ) -> Result<Vec<(VerificationResult, Vec<CreditAllocation>)>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut bundles = Vec::new();
+        for verification_id in verification_ids {
+            let verification_json = connection
+                .query_row(
+                    "SELECT verification_json FROM audit_verifications WHERE verification_id = ?1",
+                    params![verification_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some(json) = verification_json {
+                let verification: VerificationResult =
+                    serde_json::from_str(&json).map_err(|error| error.to_string())?;
+                let allocations = credit_allocations_for_verification_id_in_connection(
+                    &connection,
+                    &verification.verification_id,
+                )?;
+                bundles.push((verification, allocations));
+            }
+        }
+        Ok(bundles)
+    }
+
+    pub fn stale_unverified_contributions_with_claims(
+        &self,
+        age_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<StaleContributionRepair>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let cutoff = (now_millis() as i64).saturating_sub(ttl_ms_to_i64(age_ms));
+        let contributions = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT c.contribution_json FROM audit_contributions c
+                     WHERE c.created_at <= ?1
+                       AND NOT EXISTS (
+                        SELECT 1 FROM audit_verifications v
+                        WHERE v.target_contribution_id = c.contribution_id
+                       )
+                     ORDER BY c.created_at, c.contribution_id
+                     LIMIT ?2",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(params![cutoff, limit as i64], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?;
+            rows.map(|row| {
+                let json = row.map_err(|error| error.to_string())?;
+                serde_json::from_str(&json).map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<NodeContribution>, String>>()?
+        };
+        let mut repairs = Vec::new();
+        for contribution in contributions {
+            let claim = active_claim_for_worker_in_connection(
+                &connection,
+                &contribution.campaign_id,
+                &contribution.work_unit_id,
+                &contribution.worker_agent_id,
+            )?;
+            repairs.push(StaleContributionRepair {
+                claim,
+                contribution,
+            });
+        }
+        Ok(repairs)
+    }
+
+    pub fn expire_stale_claims(&self, claim_ttl_ms: u64) -> Result<usize, String> {
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let now = now_millis() as i64;
+        let expired = expire_stale_claims_in_transaction(
+            &transaction,
+            now.saturating_sub(ttl_ms_to_i64(claim_ttl_ms)),
+            now,
+        )?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(expired)
     }
 
     pub fn campaign_report_snapshot(
@@ -2548,6 +2784,118 @@ fn update_work_unit_claim_status(
     Ok(())
 }
 
+fn expire_stale_claims_in_transaction(
+    transaction: &Transaction<'_>,
+    cutoff: i64,
+    now: i64,
+) -> Result<usize, String> {
+    let stale_claims = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT c.claim_id, c.campaign_id, c.work_unit_id
+                 FROM audit_work_unit_claims c
+                 WHERE c.status = 'claimed'
+                   AND c.created_at <= ?1
+                   AND NOT EXISTS (
+                    SELECT 1 FROM audit_contributions n
+                    WHERE n.campaign_id = c.campaign_id
+                      AND n.work_unit_id = c.work_unit_id
+                   )
+                 ORDER BY c.created_at, c.claim_id",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![cutoff], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| row.map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    let mut expired = 0;
+    for (claim_id, campaign_id, work_unit_id) in stale_claims {
+        let updated = transaction
+            .execute(
+                "UPDATE audit_work_unit_claims
+                 SET status = 'expired', updated_at = ?2
+                 WHERE claim_id = ?1 AND status = 'claimed'",
+                params![claim_id, now],
+            )
+            .map_err(|error| error.to_string())?;
+        if updated == 1 {
+            reset_work_unit_after_claim_expiry(
+                transaction,
+                &campaign_id,
+                &work_unit_id,
+                &claim_id,
+                now,
+            )?;
+            expired += 1;
+        }
+    }
+    Ok(expired)
+}
+
+fn reset_work_unit_after_claim_expiry(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+    claim_id: &str,
+    now: i64,
+) -> Result<(), String> {
+    let row = connection
+        .query_row(
+            "SELECT status, work_unit_json FROM audit_work_units
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![campaign_id, work_unit_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((status, json)) = row else {
+        return Ok(());
+    };
+    if is_submitted_or_terminal_work_unit_status(&status) {
+        return Ok(());
+    }
+
+    let mut work_unit: AuditWorkUnit =
+        serde_json::from_str(&json).map_err(|error| error.to_string())?;
+    if work_unit
+        .claim_id
+        .as_deref()
+        .is_some_and(|active_claim_id| active_claim_id != claim_id)
+    {
+        return Ok(());
+    }
+    work_unit.status = "open".to_string();
+    work_unit.claimed_by_agent_id = None;
+    work_unit.claim_id = None;
+    work_unit.claimed_at = None;
+
+    connection
+        .execute(
+            "UPDATE audit_work_units
+             SET status = 'open', work_unit_json = ?3, updated_at = ?4
+             WHERE campaign_id = ?1
+               AND work_unit_id = ?2
+               AND status = 'claimed'",
+            params![
+                campaign_id,
+                work_unit_id,
+                serde_json::to_string(&work_unit).map_err(|error| error.to_string())?,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn campaign_in_connection(
     connection: &Connection,
     campaign_id: &str,
@@ -2654,18 +3002,29 @@ fn claims_in_connection(
 ) -> Result<Vec<AuditWorkUnitClaim>, String> {
     let mut statement = connection
         .prepare(
-            "SELECT claim_json FROM audit_work_unit_claims
+            "SELECT claim_json, status FROM audit_work_unit_claims
              WHERE campaign_id = ?1 ORDER BY created_at, claim_id",
         )
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(params![campaign_id], |row| row.get::<_, String>(0))
+        .query_map(params![campaign_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|error| error.to_string())?;
     rows.map(|row| {
-        let json = row.map_err(|error| error.to_string())?;
-        serde_json::from_str(&json).map_err(|error| error.to_string())
+        let (json, status) = row.map_err(|error| error.to_string())?;
+        claim_from_json_with_status(&json, &status)
     })
     .collect()
+}
+
+fn claim_from_json_with_status(json: &str, status: &str) -> Result<AuditWorkUnitClaim, String> {
+    let mut claim: AuditWorkUnitClaim =
+        serde_json::from_str(json).map_err(|error| error.to_string())?;
+    if claim.status != status {
+        claim.status = status.to_string();
+    }
+    Ok(claim)
 }
 
 fn active_claim_for_worker_in_connection(
@@ -2983,6 +3342,24 @@ fn is_submitted_or_terminal_work_unit_status(status: &str) -> bool {
         status,
         "submitted" | "accepted" | "rejected" | "challenged" | "revision_requested"
     )
+}
+
+fn ttl_ms_to_i64(ttl_ms: u64) -> i64 {
+    i64::try_from(ttl_ms).unwrap_or(i64::MAX)
+}
+
+fn claim_expiry_cutoff(now: i64) -> i64 {
+    now.saturating_sub(ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS))
+}
+
+fn work_unit_claim_is_expired(claim: &AuditWorkUnitClaim, now: i64) -> Result<bool, String> {
+    if let Some(expires_at) = claim.expires_at.as_deref() {
+        if millis_from_rfc3339(expires_at)? <= now {
+            return Ok(true);
+        }
+    }
+    let created_at = millis_from_rfc3339(&claim.created_at)?;
+    Ok(created_at.saturating_add(ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS)) <= now)
 }
 
 fn expect_one_row(rows: usize, context: &str) -> Result<(), String> {
@@ -3934,6 +4311,233 @@ mod tests {
             replayable_contributions[0].contribution_id,
             claimed_worker_contribution.contribution_id
         );
+    }
+
+    #[test]
+    fn stale_claim_expiry_reopens_work_and_blocks_late_submission() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+
+        let claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+        let stale_created_at = now_millis() as i64 - ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS) - 1_000;
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_work_unit_claims
+                     SET created_at = ?1, updated_at = ?1
+                     WHERE claim_id = ?2",
+                    params![stale_created_at, claim.claim_id],
+                )
+                .unwrap();
+        }
+
+        let expired = store.expire_stale_claims(WORK_UNIT_CLAIM_TTL_MS).unwrap();
+        assert_eq!(expired, 1);
+        let reopened = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.work_unit_id == work_unit.work_unit_id)
+            .unwrap();
+        assert_eq!(reopened.status, "open");
+        assert!(reopened.claimed_by_agent_id.is_none());
+        assert!(reopened.claim_id.is_none());
+        assert!(reopened.claimed_at.is_none());
+        assert!(store.work_unit_claims_for_network(10).unwrap().is_empty());
+
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Late submission after a stale claim expired.".to_string(),
+            vec![],
+            vec![labor_artifact("late.md")],
+            vec![CoverageItem {
+                area: "stale claim".to_string(),
+                status: "expired".to_string(),
+                evidence: vec!["Late submissions must reclaim first.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        let error = store.record_contribution(&contribution).unwrap_err();
+        assert!(error.contains("claimed by this worker"));
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].status, "expired");
+    }
+
+    #[test]
+    fn stale_receipt_repair_returns_claim_before_pending_contribution() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "dependency-config-review")
+            .unwrap();
+        let claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Pending receipt should be repair-rebroadcast with its claim.".to_string(),
+            vec![],
+            vec![labor_artifact("dependency-review.md")],
+            vec![CoverageItem {
+                area: "dependency and config review".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Repair includes claim before contribution.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution).unwrap();
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_contributions
+                     SET created_at = ?1
+                     WHERE contribution_id = ?2",
+                    params![now_millis() as i64 - 60_000, contribution.contribution_id],
+                )
+                .unwrap();
+        }
+
+        let repairs = store
+            .stale_unverified_contributions_with_claims(1_000, 10)
+            .unwrap();
+        assert_eq!(repairs.len(), 1);
+        assert_eq!(
+            repairs[0]
+                .claim
+                .as_ref()
+                .map(|claim| claim.claim_id.as_str()),
+            Some(claim.claim_id.as_str())
+        );
+        assert_eq!(
+            repairs[0].contribution.contribution_id,
+            contribution.contribution_id
+        );
+    }
+
+    #[test]
+    fn labor_inventory_lists_and_fetches_repair_objects() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let verifier = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+        let claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Inventory should advertise this pending contribution.".to_string(),
+            vec![],
+            vec![labor_artifact("inventory.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Inventory advertises unverified work.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution).unwrap();
+
+        let worker_agent = agent_id(&worker.public());
+        let inventory = store.audit_labor_inventory(&worker_agent, 10).unwrap();
+        assert!(inventory.claim_ids.contains(&claim.claim_id));
+        assert!(inventory
+            .contribution_ids
+            .contains(&contribution.contribution_id));
+        assert!(inventory
+            .needs_verifier_contribution_ids
+            .contains(&contribution.contribution_id));
+        assert!(inventory.verification_ids.is_empty());
+        assert_eq!(
+            store
+                .work_unit_claims_by_ids(&[claim.claim_id.clone(), "missing".to_string()])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .contributions_by_ids(&[
+                    contribution.contribution_id.clone(),
+                    "missing".to_string()
+                ])
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "INVENTORY_FETCH_ACCEPTED".to_string(),
+            "Independent verifier accepted the inventory fixture.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+        let allocations = allocate_credits(&contribution, &verification).unwrap();
+        store
+            .record_verification_bundle(&verification, &allocations)
+            .unwrap();
+        let settled_inventory = store.audit_labor_inventory(&worker_agent, 10).unwrap();
+        assert!(!settled_inventory
+            .contribution_ids
+            .contains(&contribution.contribution_id));
+        assert!(settled_inventory
+            .verification_ids
+            .contains(&verification.verification_id));
+        let bundles = store
+            .verification_bundles_by_ids(&[
+                verification.verification_id.clone(),
+                "missing".to_string(),
+            ])
+            .unwrap();
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].0.verification_id, verification.verification_id);
+        assert_eq!(bundles[0].1.len(), allocations.len());
     }
 
     #[test]

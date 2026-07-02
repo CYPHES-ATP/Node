@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::PathBuf,
+    time::Duration,
+};
 
 use futures::StreamExt;
 use libp2p::{
@@ -16,15 +21,16 @@ use crate::{
     audit_labor::{
         signed_verification, AuditWorkUnitClaim, ContributionArtifact, CreditAllocation,
         NodeContribution, ProtocolAuditCampaign, VerificationEvidence, VerificationResult,
+        WORK_UNIT_CLAIM_TTL_MS,
     },
     bundle::export_receipt_bundle,
     state::{P2pState, PeerInfo},
-    store::{now_millis, rejection_ack, AtpStore, AuditEventBody},
+    store::{now_millis, rejection_ack, AtpStore, AuditEventBody, ATP_STORE_TESTNET_ID},
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.5";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.5";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.6";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.6";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -40,6 +46,9 @@ const LABOR_SYNC_CONTRIBUTION_LIMIT: usize = 512;
 const LABOR_SYNC_VERIFICATION_LIMIT: usize = 512;
 const LABOR_AUTO_VERIFY_LIMIT: usize = 8;
 const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
+const LABOR_INVENTORY_LIMIT: usize = 512;
+const STALE_RECEIPT_REPAIR_AFTER: Duration = Duration::from_secs(2 * 60);
+const STALE_RECEIPT_REPAIR_LIMIT: usize = 32;
 
 #[derive(Debug, Clone)]
 struct InfrastructureTarget {
@@ -99,6 +108,7 @@ enum WireRequest {
         verification: VerificationResult,
         allocations: Vec<CreditAllocation>,
     },
+    LaborInventory(LaborInventory),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +147,28 @@ enum WireResponse {
         credit_total: u32,
         reason: Option<String>,
     },
+    LaborInventory(LaborInventoryResponse),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LaborInventory {
+    testnet_id: String,
+    claims: Vec<String>,
+    contributions: Vec<String>,
+    verifications: Vec<String>,
+    needs_verifier: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LaborInventoryResponse {
+    accepted: bool,
+    testnet_id: String,
+    missing_claims: Vec<String>,
+    missing_contributions: Vec<String>,
+    missing_verifications: Vec<String>,
+    reason: Option<String>,
 }
 
 #[derive(Debug)]
@@ -167,6 +199,9 @@ enum PendingOutbound {
         verification_id: String,
         credit_total: u32,
         silent: bool,
+    },
+    LaborInventory {
+        peer_id: PeerId,
     },
 }
 
@@ -753,6 +788,19 @@ fn handle_swarm_event(
                             },
                         }
                     }
+                    WireRequest::LaborInventory(inventory) => {
+                        WireResponse::LaborInventory(handle_labor_inventory_request(
+                            swarm,
+                            app,
+                            state,
+                            store,
+                            keypair,
+                            local_agent_id,
+                            peer,
+                            inventory,
+                            outbound,
+                        ))
+                    }
                 };
                 let _ = swarm
                     .behaviour_mut()
@@ -896,6 +944,45 @@ fn handle_swarm_event(
                             }),
                         );
                     }
+                    WireResponse::LaborInventory(response) => {
+                        if response.accepted {
+                            let inventory_peer = pending
+                                .as_ref()
+                                .and_then(|pending| match pending {
+                                    PendingOutbound::LaborInventory { peer_id } => {
+                                        Some(peer_id.clone())
+                                    }
+                                    _ => None,
+                                })
+                                .unwrap_or(peer);
+                            push_labor_objects_to_peer(
+                                swarm,
+                                store,
+                                &inventory_peer,
+                                &response.missing_claims,
+                                &response.missing_contributions,
+                                &response.missing_verifications,
+                                outbound,
+                            );
+                            let _ = app.emit(
+                                "audit:labor_inventory_resynced",
+                                serde_json::json!({
+                                    "peerId": inventory_peer.to_string(),
+                                    "missingClaims": response.missing_claims.len(),
+                                    "missingContributions": response.missing_contributions.len(),
+                                    "missingVerifications": response.missing_verifications.len(),
+                                }),
+                            );
+                        } else {
+                            let _ = app.emit(
+                                "atp:delivery_failed",
+                                serde_json::json!({
+                                    "peerId": peer.to_string(),
+                                    "reason": response.reason,
+                                }),
+                            );
+                        }
+                    }
                 }
                 if pending.is_none() {
                     let _ = app.emit(
@@ -956,6 +1043,9 @@ fn handle_swarm_event(
                     Some(format!("{campaign_id}:{verification_id}:{credit_total}")),
                     None,
                 ),
+                Some(PendingOutbound::LaborInventory { peer_id }) => {
+                    (None, Some(format!("labor-inventory:{peer_id}")), None)
+                }
                 None => (None, None, None),
             };
             let _ = app.emit(
@@ -1369,6 +1459,7 @@ fn on_peer_connected(
             );
         }
     }
+    send_labor_inventory_to_peer(swarm, store, local_agent_id, &peer_id, outbound);
     if let Ok(claims) = store.work_unit_claims_for_requester(&peer_agent_id) {
         for claim in claims {
             let request_id = swarm
@@ -1504,39 +1595,260 @@ fn sync_audit_labor_network(
 ) {
     let has_peers = !target_peers(state, None).is_empty();
 
+    match store.expire_stale_claims(WORK_UNIT_CLAIM_TTL_MS) {
+        Ok(expired) if expired > 0 => {
+            let _ = app.emit("audit:labor_changed", ());
+            let _ = app.emit(
+                "audit:stale_claims_expired",
+                serde_json::json!({ "expiredClaims": expired }),
+            );
+        }
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({
+                    "reason": format!("stale claim repair failed: {reason}"),
+                }),
+            );
+        }
+        _ => {}
+    }
+
     if has_peers {
         if let Ok(campaigns) = store.list_protocol_campaigns() {
             for campaign in campaigns.into_iter().take(LABOR_SYNC_CAMPAIGN_LIMIT) {
                 broadcast_campaign(swarm, state, campaign, true, outbound);
             }
         }
-        if let Ok(claims) = store.work_unit_claims_for_network(LABOR_SYNC_CLAIM_LIMIT) {
-            for claim in claims {
-                broadcast_work_unit_claim(swarm, state, claim, true, outbound);
-            }
-        }
-        if let Ok(contributions) =
-            store.unverified_contributions_for_network(LABOR_SYNC_CONTRIBUTION_LIMIT)
-        {
-            for contribution in contributions {
-                broadcast_contribution(swarm, state, contribution, true, outbound);
-            }
-        }
-        if let Ok(bundles) = store.verification_bundles_for_network(LABOR_SYNC_VERIFICATION_LIMIT) {
-            for (verification, allocations) in bundles {
-                broadcast_verification_result(
-                    swarm,
-                    state,
-                    verification,
-                    allocations,
-                    true,
-                    outbound,
-                );
-            }
-        }
+        broadcast_labor_inventory(swarm, state, store, local_agent_id, outbound);
+        repair_stale_receipts(swarm, app, state, store, outbound);
     }
 
     verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
+}
+
+fn handle_labor_inventory_request(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    keypair: &identity::Keypair,
+    local_agent_id: &str,
+    peer_id: PeerId,
+    remote_inventory: LaborInventory,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) -> LaborInventoryResponse {
+    if remote_inventory.testnet_id != ATP_STORE_TESTNET_ID {
+        return LaborInventoryResponse {
+            accepted: false,
+            testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+            reason: Some(format!(
+                "peer testnet {} does not match {}",
+                remote_inventory.testnet_id, ATP_STORE_TESTNET_ID
+            )),
+            ..Default::default()
+        };
+    }
+
+    let local_inventory = match wire_labor_inventory(store, local_agent_id) {
+        Ok(inventory) => inventory,
+        Err(reason) => {
+            return LaborInventoryResponse {
+                accepted: false,
+                testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+                reason: Some(reason),
+                ..Default::default()
+            };
+        }
+    };
+
+    let peer_missing_claims =
+        missing_from_remote(&local_inventory.claims, &remote_inventory.claims);
+    let peer_missing_contributions = missing_from_remote(
+        &local_inventory.contributions,
+        &remote_inventory.contributions,
+    );
+    let peer_missing_verifications = missing_from_remote(
+        &local_inventory.verifications,
+        &remote_inventory.verifications,
+    );
+    push_labor_objects_to_peer(
+        swarm,
+        store,
+        &peer_id,
+        &peer_missing_claims,
+        &peer_missing_contributions,
+        &peer_missing_verifications,
+        outbound,
+    );
+
+    let missing_claims = missing_from_remote(&remote_inventory.claims, &local_inventory.claims);
+    let missing_contributions = missing_from_remote(
+        &remote_inventory.contributions,
+        &local_inventory.contributions,
+    );
+    let missing_verifications = missing_from_remote(
+        &remote_inventory.verifications,
+        &local_inventory.verifications,
+    );
+
+    let _ = app.emit(
+        "audit:labor_inventory_received",
+        serde_json::json!({
+            "peerId": peer_id.to_string(),
+            "peerNeedsClaims": peer_missing_claims.len(),
+            "peerNeedsContributions": peer_missing_contributions.len(),
+            "peerNeedsVerifications": peer_missing_verifications.len(),
+            "localNeedsClaims": missing_claims.len(),
+            "localNeedsContributions": missing_contributions.len(),
+            "localNeedsVerifications": missing_verifications.len(),
+            "peerNeedsVerifier": remote_inventory.needs_verifier.len(),
+        }),
+    );
+
+    if !remote_inventory.needs_verifier.is_empty() {
+        verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
+    }
+
+    LaborInventoryResponse {
+        accepted: true,
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        missing_claims,
+        missing_contributions,
+        missing_verifications,
+        reason: None,
+    }
+}
+
+fn wire_labor_inventory(store: &AtpStore, local_agent_id: &str) -> Result<LaborInventory, String> {
+    let inventory = store.audit_labor_inventory(local_agent_id, LABOR_INVENTORY_LIMIT)?;
+    Ok(LaborInventory {
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        claims: inventory.claim_ids,
+        contributions: inventory.contribution_ids,
+        verifications: inventory.verification_ids,
+        needs_verifier: inventory.needs_verifier_contribution_ids,
+    })
+}
+
+fn missing_from_remote(local_ids: &[String], remote_ids: &[String]) -> Vec<String> {
+    let remote = remote_ids.iter().collect::<HashSet<_>>();
+    local_ids
+        .iter()
+        .filter(|id| !remote.contains(id))
+        .take(LABOR_INVENTORY_LIMIT)
+        .cloned()
+        .collect()
+}
+
+fn send_labor_inventory_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    store: &AtpStore,
+    local_agent_id: &str,
+    peer_id: &PeerId,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let Ok(inventory) = wire_labor_inventory(store, local_agent_id) else {
+        return;
+    };
+    let request_id = swarm
+        .behaviour_mut()
+        .request_response
+        .send_request(peer_id, WireRequest::LaborInventory(inventory));
+    outbound.insert(
+        request_id,
+        PendingOutbound::LaborInventory {
+            peer_id: peer_id.clone(),
+        },
+    );
+}
+
+fn broadcast_labor_inventory(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    store: &AtpStore,
+    local_agent_id: &str,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    for peer_id in target_peers(state, None) {
+        send_labor_inventory_to_peer(swarm, store, local_agent_id, &peer_id, outbound);
+    }
+}
+
+fn push_labor_objects_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    store: &AtpStore,
+    peer_id: &PeerId,
+    claim_ids: &[String],
+    contribution_ids: &[String],
+    verification_ids: &[String],
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    if let Ok(claims) = store.work_unit_claims_by_ids(claim_ids) {
+        for claim in claims {
+            send_work_unit_claim_to_peer(swarm, peer_id, claim, true, outbound);
+        }
+    }
+    if let Ok(contributions) = store.contributions_by_ids(contribution_ids) {
+        for contribution in contributions {
+            send_contribution_to_peer(swarm, peer_id, contribution, true, outbound);
+        }
+    }
+    if let Ok(bundles) = store.verification_bundles_by_ids(verification_ids) {
+        for (verification, allocations) in bundles {
+            send_verification_result_to_peer(
+                swarm,
+                peer_id,
+                verification,
+                allocations,
+                true,
+                outbound,
+            );
+        }
+    }
+}
+
+fn repair_stale_receipts(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let repairs = match store.stale_unverified_contributions_with_claims(
+        STALE_RECEIPT_REPAIR_AFTER.as_millis() as u64,
+        STALE_RECEIPT_REPAIR_LIMIT,
+    ) {
+        Ok(repairs) => repairs,
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({
+                    "reason": format!("stale receipt repair failed: {reason}"),
+                }),
+            );
+            return;
+        }
+    };
+    let receipt_count = repairs.len();
+    if receipt_count == 0 {
+        return;
+    }
+    let mut claims = 0;
+    for repair in repairs {
+        if let Some(claim) = repair.claim {
+            claims += 1;
+            broadcast_work_unit_claim(swarm, state, claim, true, outbound);
+        }
+        broadcast_contribution(swarm, state, repair.contribution, true, outbound);
+    }
+    let _ = app.emit(
+        "audit:stale_receipts_rebroadcast",
+        serde_json::json!({
+            "receipts": receipt_count,
+            "claims": claims,
+        }),
+    );
 }
 
 fn verify_network_contributions(
@@ -1637,6 +1949,80 @@ fn verify_network_contributions(
             }),
         );
     }
+}
+
+fn send_work_unit_claim_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    peer_id: &PeerId,
+    claim: AuditWorkUnitClaim,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let request_id = swarm
+        .behaviour_mut()
+        .request_response
+        .send_request(peer_id, WireRequest::WorkUnitClaim(claim.clone()));
+    outbound.insert(
+        request_id,
+        PendingOutbound::WorkUnitClaim {
+            campaign_id: claim.campaign_id,
+            work_unit_id: claim.work_unit_id,
+            claim_id: claim.claim_id,
+            silent,
+        },
+    );
+}
+
+fn send_contribution_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    peer_id: &PeerId,
+    contribution: NodeContribution,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let request_id = swarm
+        .behaviour_mut()
+        .request_response
+        .send_request(peer_id, WireRequest::Contribution(contribution.clone()));
+    outbound.insert(
+        request_id,
+        PendingOutbound::Contribution {
+            campaign_id: contribution.campaign_id,
+            contribution_id: contribution.contribution_id,
+            receipt_hash: contribution.receipt_hash,
+            silent,
+        },
+    );
+}
+
+fn send_verification_result_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    peer_id: &PeerId,
+    verification: VerificationResult,
+    allocations: Vec<CreditAllocation>,
+    silent: bool,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    let credit_total = allocations
+        .iter()
+        .map(|allocation| allocation.total)
+        .sum::<u32>();
+    let request_id = swarm.behaviour_mut().request_response.send_request(
+        peer_id,
+        WireRequest::VerificationResult {
+            verification: verification.clone(),
+            allocations,
+        },
+    );
+    outbound.insert(
+        request_id,
+        PendingOutbound::VerificationResult {
+            campaign_id: verification.campaign_id,
+            verification_id: verification.verification_id,
+            credit_total,
+            silent,
+        },
+    );
 }
 
 fn send_envelope(
@@ -2226,7 +2612,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.5"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.7.6"
             }"#,
         )
         .expect("valid manifest");
