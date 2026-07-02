@@ -1336,12 +1336,14 @@ fn handle_swarm_event(
                         continue;
                     }
                     let addresses = registration.record.addresses();
-                    for address in addresses {
+                    let dial_candidates =
+                        discovered_peer_dial_candidates(network, peer_id, addresses);
+                    for address in &dial_candidates {
                         swarm.add_peer_address(peer_id, address.clone());
                     }
                     if !swarm.is_connected(&peer_id) {
-                        if let Some(address) = addresses.first() {
-                            let _ = swarm.dial(address.clone());
+                        for address in dial_candidates {
+                            let _ = swarm.dial(address);
                         }
                     }
                     discovered += 1;
@@ -2903,6 +2905,21 @@ fn relay_circuit_address(target: &InfrastructureTarget, local_peer_id: PeerId) -
     address
 }
 
+fn discovered_peer_dial_candidates(
+    network: &NetworkBootstrap,
+    peer_id: PeerId,
+    advertised_addresses: &[Multiaddr],
+) -> Vec<Multiaddr> {
+    let mut candidates = advertised_addresses.to_vec();
+    if let Some(relay) = network.relay.as_ref() {
+        let circuit_address = relay_circuit_address(relay, peer_id);
+        if !candidates.contains(&circuit_address) {
+            candidates.push(circuit_address);
+        }
+    }
+    candidates
+}
+
 fn register_rendezvous(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     app: &AppHandle,
@@ -3056,6 +3073,26 @@ mod tests {
         assert!(address
             .to_string()
             .ends_with(&format!("/p2p-circuit/p2p/{local_peer_id}")));
+    }
+
+    #[test]
+    fn discovered_peer_dial_candidates_include_relay_circuit_route() {
+        let relay_address = infrastructure_address();
+        let network =
+            build_network_bootstrap(Some(relay_address), None, None, Some("test".to_string()))
+                .expect("valid network");
+        let peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+        let private_address = format!("/ip4/172.16.8.82/tcp/47166/p2p/{peer_id}")
+            .parse::<Multiaddr>()
+            .unwrap();
+
+        let candidates =
+            discovered_peer_dial_candidates(&network, peer_id, &[private_address.clone()]);
+
+        assert!(candidates.contains(&private_address));
+        assert!(candidates.iter().any(|address| address
+            .to_string()
+            .ends_with(&format!("/p2p-circuit/p2p/{peer_id}"))));
     }
 
     #[test]

@@ -60,7 +60,7 @@ const MAX_SELF_PENDING_CONTRIBUTIONS = 12;
 const GUARDIAN_REAUDIT_EPOCH_MS = 12 * 60 * 60 * 1000;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.8";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.9";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
