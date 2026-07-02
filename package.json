@@ -1,7 +1,7 @@
 {
   "name": "cyphes-desktop",
   "private": true,
-  "version": "0.7.9",
+  "version": "0.7.10",
   "description": "Native ATP node for verifiable repository audit work orders",
   "license": "MIT",
   "repository": {
@@ -21,7 +21,7 @@
     "tauri": "tauri",
     "tauri:build:worker": "tauri build --config src-tauri/tauri.worker.conf.json",
     "tauri:build:partner": "tauri build --config src-tauri/tauri.partner.conf.json",
-    "release:mac:v0.7.9": "npm run tauri:build:worker"
+    "release:mac:v0.7.10": "npm run tauri:build:worker"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

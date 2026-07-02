@@ -172,7 +172,7 @@ pub struct PendingLaborObject {
 }
 
 pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.7";
-pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 12;
+pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 1;
 const STORE_META_TESTNET_ID_KEY: &str = "testnet_id";
 const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
@@ -188,6 +188,7 @@ const LEDGER_TABLES: &[&str] = &[
     "audit_verifications",
     "credit_allocations",
     "audit_labor_pending_objects",
+    "audit_labor_events",
 ];
 
 pub fn campaign_id_for_transaction(transaction_id: &str) -> String {
@@ -527,6 +528,60 @@ impl AtpStore {
             &claim.work_unit_id,
             claim,
         )?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(claim.clone())
+    }
+
+    pub fn record_historical_work_unit_claim(
+        &self,
+        claim: &AuditWorkUnitClaim,
+    ) -> Result<AuditWorkUnitClaim, String> {
+        verify_signed_work_unit_claim(claim)?;
+        let now = now_millis() as i64;
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        expire_stale_claims_in_transaction(&transaction, claim_expiry_cutoff(now), now)?;
+        let campaign = campaign_in_transaction(&transaction, &claim.campaign_id)?;
+        if campaign.requester_agent_id != claim.requester_agent_id {
+            return Err("claim requester does not match campaign requester".to_string());
+        }
+        let _work_unit =
+            work_unit_in_transaction(&transaction, &claim.campaign_id, &claim.work_unit_id)?;
+        let claim_json = serde_json::to_string(claim).map_err(|error| error.to_string())?;
+        let existing = transaction
+            .query_row(
+                "SELECT claim_json FROM audit_work_unit_claims WHERE claim_id = ?1",
+                params![claim.claim_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(existing_json) = existing {
+            if existing_json == claim_json {
+                return Ok(claim.clone());
+            }
+            return Err("claim id already exists with different signed content".to_string());
+        }
+        transaction
+            .execute(
+                "INSERT INTO audit_work_unit_claims
+                    (claim_id, campaign_id, work_unit_id, worker_agent_id, requester_agent_id,
+                     status, claim_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'expired', ?6, ?7, ?8)",
+                params![
+                    claim.claim_id,
+                    claim.campaign_id,
+                    claim.work_unit_id,
+                    claim.worker_agent_id,
+                    claim.requester_agent_id,
+                    claim_json,
+                    millis_from_rfc3339(&claim.created_at)?,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(claim.clone())
     }
@@ -1578,6 +1633,40 @@ impl AtpStore {
         Ok(())
     }
 
+    pub fn record_labor_event(
+        &self,
+        event_kind: &str,
+        peer_id: Option<&str>,
+        object_kind: Option<&str>,
+        object_id: Option<&str>,
+        accepted: bool,
+        reason: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let event_id = format!("labor_event_{}", uuid::Uuid::new_v4().simple());
+        connection
+            .execute(
+                "INSERT INTO audit_labor_events
+                    (event_id, event_kind, peer_id, object_kind, object_id, accepted, reason,
+                     payload_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    event_id,
+                    event_kind,
+                    peer_id,
+                    object_kind,
+                    object_id,
+                    if accepted { 1 } else { 0 },
+                    reason,
+                    serde_json::to_string(payload).map_err(|error| error.to_string())?,
+                    now_millis() as i64,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     pub fn expire_stale_claims(&self, claim_ttl_ms: u64) -> Result<usize, String> {
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
         let transaction = connection
@@ -2149,6 +2238,21 @@ impl AtpStore {
                  );
                  CREATE INDEX IF NOT EXISTS audit_labor_pending_objects_status
                     ON audit_labor_pending_objects(status, updated_at, object_kind, object_id);
+                 CREATE TABLE IF NOT EXISTS audit_labor_events (
+                    event_id TEXT PRIMARY KEY,
+                    event_kind TEXT NOT NULL,
+                    peer_id TEXT,
+                    object_kind TEXT,
+                    object_id TEXT,
+                    accepted INTEGER NOT NULL,
+                    reason TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS audit_labor_events_kind_created
+                    ON audit_labor_events(event_kind, created_at);
+                 CREATE INDEX IF NOT EXISTS audit_labor_events_peer_created
+                    ON audit_labor_events(peer_id, created_at);
                  CREATE INDEX IF NOT EXISTS deliveries_transaction_updated
                     ON deliveries(transaction_id, updated_at);
                  CREATE INDEX IF NOT EXISTS protocol_audit_campaigns_requester_created
@@ -4910,6 +5014,73 @@ mod tests {
     }
 
     #[test]
+    fn expired_claim_replay_is_stored_as_historical_evidence() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+
+        let mut claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        let historical_claim_created_at =
+            now_millis() as i64 - ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS) - 60_000;
+        let contribution_created_at =
+            historical_claim_created_at + ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS) / 2;
+        claim.created_at = rfc3339_from_millis(historical_claim_created_at as u64);
+        claim.expires_at = Some(rfc3339_from_millis(
+            (historical_claim_created_at + ttl_ms_to_i64(WORK_UNIT_CLAIM_TTL_MS)) as u64,
+        ));
+        resign_claim(&worker, &mut claim);
+
+        let active_error = store.record_work_unit_claim(&claim).unwrap_err();
+        assert!(active_error.contains("claim has expired"));
+        store.record_historical_work_unit_claim(&claim).unwrap();
+
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        let stored_claim = snapshot
+            .claims
+            .iter()
+            .find(|candidate| candidate.claim_id == claim.claim_id)
+            .unwrap();
+        assert_eq!(stored_claim.status, "expired");
+        let reopened_unit = snapshot
+            .work_units
+            .iter()
+            .find(|unit| unit.work_unit_id == work_unit.work_unit_id)
+            .unwrap();
+        assert_eq!(reopened_unit.status, "open");
+
+        let mut contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Receipt arrived after the claim expired on the verifier.".to_string(),
+            vec![],
+            vec![labor_artifact("historical-claim-replay.md")],
+            vec![CoverageItem {
+                area: "historical claim replay".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Claim evidence was retained after expiry.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        contribution.created_at = rfc3339_from_millis(contribution_created_at as u64);
+        resign_contribution(&worker, &mut contribution);
+
+        store.record_contribution(&contribution).unwrap();
+    }
+
+    #[test]
     fn stale_receipt_repair_returns_claim_before_pending_contribution() {
         let store = test_store();
         let requester = libp2p::identity::Keypair::generate_ed25519();
@@ -5146,6 +5317,7 @@ mod tests {
         let store = test_store();
         let requester = libp2p::identity::Keypair::generate_ed25519();
         let worker = libp2p::identity::Keypair::generate_ed25519();
+        let second_worker = libp2p::identity::Keypair::generate_ed25519();
         let campaign = labor_campaign(agent_id(&requester.public()));
         store.create_protocol_campaign(&campaign).unwrap();
         let work_units = store.list_work_units(&campaign.campaign_id).unwrap();
@@ -5180,7 +5352,7 @@ mod tests {
         store.record_contribution(&first_contribution).unwrap();
 
         let second_contribution = signed_contribution(
-            &worker,
+            &second_worker,
             campaign.campaign_id.clone(),
             second_unit.work_unit_id.clone(),
             RuntimeDescriptor::deterministic_fixture(),
@@ -5195,7 +5367,7 @@ mod tests {
             vec!["no code execution".to_string()],
         )
         .unwrap();
-        claim_work_unit(&store, &worker, &campaign, &second_unit);
+        claim_work_unit(&store, &second_worker, &campaign, &second_unit);
         store.record_contribution(&second_contribution).unwrap();
 
         let first_verification = signed_verification(
