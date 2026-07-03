@@ -15,6 +15,7 @@ import {
   Gauge,
   Play,
   ShieldCheck,
+  Square,
   Target,
   Trophy,
 } from "lucide-react";
@@ -60,7 +61,7 @@ const MAX_SELF_PENDING_CONTRIBUTIONS = 1;
 const GUARDIAN_REAUDIT_EPOCH_MS = 12 * 60 * 60 * 1000;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.12";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.13";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -567,6 +568,21 @@ function AppContent() {
     }));
     pushAutoPulse("Work mode enabled", "success");
     setNotice("CYPHES worker mode enabled; verifier duties remain active.");
+  }
+
+  function stopWorkMode() {
+    setAutoMode((current) => ({
+      ...current,
+      autoVerifier: true,
+      autoWorker: false,
+      questSeeder: false,
+    }));
+    pushAutoPulse(runtimeActive ? "Worker mode stopping after current model run" : "Worker mode stopped", "warn");
+    setNotice(
+      runtimeActive
+        ? "CYPHES will stop starting new local model work after the current run finishes."
+        : "CYPHES worker mode stopped; verifier duties remain active.",
+    );
   }
 
   useEffect(() => {
@@ -1218,6 +1234,16 @@ function AppContent() {
                     <Play size={14} aria-hidden="true" />
                     <span>{workModeEnabled ? "Running" : "Run"}</span>
                   </button>
+                  <button
+                    aria-label="Stop worker mode"
+                    className="runtime-run-button runtime-stop-button"
+                    disabled={!workModeEnabled && !runtimeActive}
+                    onClick={stopWorkMode}
+                    type="button"
+                  >
+                    <Square size={13} aria-hidden="true" />
+                    <span>Stop</span>
+                  </button>
                 </div>
               </div>
               <div className="campaign-target">
@@ -1374,6 +1400,16 @@ function AppContent() {
               >
                 <Play size={14} aria-hidden="true" />
                 <span>{workModeEnabled ? "Running" : "Run"}</span>
+              </button>
+              <button
+                aria-label="Stop worker mode"
+                className="runtime-run-button runtime-stop-button"
+                disabled={!workModeEnabled && !runtimeActive}
+                onClick={stopWorkMode}
+                type="button"
+              >
+                <Square size={13} aria-hidden="true" />
+                <span>Stop</span>
               </button>
             </div>
           ) : null}

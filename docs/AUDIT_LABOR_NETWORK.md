@@ -65,7 +65,8 @@ protocol-specific checklist items.
 
 ## Autonomous Guardian Loop
 
-v0.6.2 makes the main CYPHES node autonomous by default:
+v0.7.13 makes the main CYPHES node verifier-first by default. Run mode enables
+local model work and autonomous campaign seeding for the current session:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
   model, enforces the configured runtime limit, signs the contribution, and

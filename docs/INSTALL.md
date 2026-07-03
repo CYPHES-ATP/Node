@@ -2,29 +2,30 @@
 
 ## Download The Preview
 
-macOS users can download the current packaged v0.7.6 developer DMGs from:
+macOS users can download the current packaged v0.7.13 developer DMGs from:
 
-- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.6/CYPHES_0.7.6_aarch64.dmg
-- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.6/CYPHES_0.7.6_x64.dmg
+- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_aarch64.dmg
+- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_x64.dmg
 
-Windows users can download the current packaged v0.7.6 x64 NSIS setup build
+Windows users can download the current packaged v0.7.13 x64 NSIS setup build
 from:
 
-- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.6/CYPHES_0.7.6_x64-setup.exe
+- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_x64-setup.exe
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. The Windows setup build is unsigned and intended for
 testnet use. Linux binary distributions are not available yet.
 
-The current source tree is v0.7.6. Run from source to test Verified ATP
+The current source tree is v0.7.13. Run from source to test Verified ATP
 independent-verifier enforcement, the isolated testnet hotfixes, the separate
 `campaign.html` admin console, and the local pinned-source GitHub cache.
 
-- **CYPHES** opens into the autonomous guardian cockpit. Select a local LM
-  Studio or Ollama model and the node watches targets, creates non-duplicate
-  work, auto-claims remote work, runs bounded audit skill passes, and receives
-  receipt-backed ATP Credits after verifier acceptance.
+- **CYPHES** opens into the autonomous guardian cockpit as a verifier. Select
+  a local LM Studio or Ollama model and press Run to create non-duplicate work,
+  auto-claim remote work, run bounded audit skill passes, and receive
+  receipt-backed ATP Credits after verifier acceptance. Press Stop to return
+  to verifier-only participation.
 - The separate `campaign.html` admin/protocol console is available from source
   for manual campaign creation, verification inspection, ATP proof logs, and
   final report export.

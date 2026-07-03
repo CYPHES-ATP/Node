@@ -5,8 +5,8 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.7.6 testnet" src="https://img.shields.io/badge/CYPHES-v0.7.6_testnet-c7ff47"></a>
-    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.7.6" src="https://img.shields.io/badge/ATP_wire-v0.7.6-00f6ff"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.7.13 testnet" src="https://img.shields.io/badge/CYPHES-v0.7.13_testnet-c7ff47"></a>
+    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.7.13" src="https://img.shields.io/badge/ATP_wire-v0.7.13-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
@@ -17,14 +17,15 @@
 
 ## Download
 
-The current testnet seed is **CYPHES v0.7.6**. It moves CYPHES from a desktop
+The current testnet seed is **CYPHES v0.7.13**. It moves CYPHES from a desktop
 developer preview toward an autonomous digital labor network whose first use
 case is audit. Nodes use the CYPHES-operated `source.cyphes.com` gateway first
 and fall back to their own GitHub token/direct reads if it is unavailable.
-v0.7.6 starts a fresh isolated testnet with the v0.6.3-v0.6.5 audit and
-network liveness hardening, a new ATP wire protocol, a new rendezvous
-namespace, SQLite indexes for the hot pending, credit, and sync queries, and a
-2400/day autonomous campaign seed cap for sustained testnet load.
+v0.7.13 keeps the current `cyphes-dev-v0.7.7` testnet state, moves the ATP wire
+protocol to `/cyphes/atp/0.7.13`, moves rendezvous to
+`cyphes.repository-audit.v0.7.13`, keeps SQLite indexes for the hot pending,
+credit, and sync queries, and uses bounded peer fanout plus per-peer retry
+cooldowns to reduce outbound-stream storms during 24/7 runs.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -33,20 +34,21 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.7.6](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.6/CYPHES_0.7.6_aarch64.dmg)
-- [Download CYPHES v0.7.6 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.6/CYPHES_0.7.6_x64.dmg)
+- [Download CYPHES v0.7.13](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_aarch64.dmg)
+- [Download CYPHES v0.7.13 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.7.6 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.6/CYPHES_0.7.6_x64-setup.exe)
+- [Download CYPHES v0.7.13 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_x64-setup.exe)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
 confirm **Open**. The Windows x64 setup build is unsigned and intended for
 testnet use. Linux users should run from source for now.
 
-Use **CYPHES** to connect a local model and watch the autonomous guardian loop
-run. The separate protocol/admin console remains available from source at
+Use **CYPHES** to join as a verifier by default. Select a local model and press
+**Run** only when you want that node to start local audit work; press **Stop**
+to return to verifier-only participation. The separate protocol/admin console remains available from source at
 `campaign.html` for manual campaign creation, verification inspection, report
 export, and ATP proof logs.
 
@@ -172,11 +174,13 @@ Artifact Two independently returns:
   claim prerequisites heal before contribution verification, and pauses new
   worker submissions when self-authored pending receipts outrun verifier
   settlement.
-- v0.7.6 cuts a fresh isolated testnet using `/cyphes/atp/0.7.6` and
-  `cyphes.repository-audit.v0.7.6`, defaults every app boot to verifier mode
-  until Run is pressed in that session, keeps SQLite indexes for pending queue,
-  claim sync, verifier duty, credit summary, and campaign snapshot queries, and
-  raises autonomous campaign seeding to 2400/day.
+- v0.7.13 uses `/cyphes/atp/0.7.13` and
+  `cyphes.repository-audit.v0.7.13`, keeps the current `cyphes-dev-v0.7.7`
+  testnet state, defaults every app boot to verifier mode until Run is pressed
+  in that session, adds Stop to return to verifier-only mode, keeps SQLite
+  indexes for pending queue, claim sync, verifier duty, credit summary, and
+  campaign snapshot queries, bounds peer fanout, adds per-peer outbound
+  cooldowns, and keeps autonomous campaign seeding at 2400/day.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
@@ -192,12 +196,13 @@ Artifact Two independently returns:
 - Professional v0.4 audit passes for scope mapping, repository inventory,
   dependency/config review, smart-contract exploit-class review, finding
   validation, and final report synthesis.
-- Autonomous Guardian Loop for 24/7 participation: Auto Worker, Auto Verifier,
-  and Quest Seeder are on by default. CYPHES watches Guardian Index v2,
+- Autonomous Guardian Loop for 24/7 participation: verifier duty is on by
+  default, while Auto Worker and Quest Seeder stay off until the operator
+  presses Run for the current session. CYPHES watches Guardian Index v2,
   resolves GitHub commits, avoids duplicate unchanged target/commit campaigns,
-  auto-claims open remote work, runs the selected local model under the runtime
-  limit, signs contributions, and returns verifier receipts/ATP Credit
-  allocations.
+  auto-claims open remote work only while work mode is enabled, runs the
+  selected local model under the runtime limit, signs contributions, and
+  returns verifier receipts/ATP Credit allocations.
 - Guardian Index v2 contains 142 structured public coverage targets with
   source signals, category, chains, static TVL/risk rank seed, repo URLs,
   focused paths, docs/security references, in-scope/out-of-scope text,

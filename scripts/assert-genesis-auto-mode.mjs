@@ -21,14 +21,12 @@ const checks = [
     pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoVerifier:\s*true/,
   },
   {
-    label: "boot read no longer forces auto worker off",
+    label: "boot read keeps local model work off until Run",
     pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoWorker:\s*false/,
-    shouldMatch: false,
   },
   {
-    label: "persisted settings no longer force quest seeder off",
+    label: "persisted settings cannot auto-resume quest seeding",
     pattern: /writeGenesisAutoModeSettings\([\s\S]*questSeeder:\s*false/,
-    shouldMatch: false,
   },
 ];
 

@@ -19,13 +19,16 @@ exports a professional markdown report bundle. This is online peer coordination
 and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
 
-v0.5.6 hardens the Autonomous Guardian Loop: Auto Worker, Auto Verifier, and
-Quest Seeder run by default in the main app; Guardian Index v2 provides 142
-structured public coverage targets; CYPHES watches target commits, avoids
-duplicate unchanged target/path/commit campaigns, auto-claims remote work when
-a local model is selected, returns signed verification/ATP Credit receipts to
-workers after requester-owned verification, pauses visibly when GitHub rate
-limits the node, and supports a local GitHub token for higher API quota.
+v0.7.13 hardens the Autonomous Guardian Loop for the current verifier testnet:
+verifier duty runs by default, while Auto Worker and Quest Seeder stay off on
+boot until the operator presses Run for the current session. Guardian Index v2
+provides 142 structured public coverage targets; CYPHES watches target commits,
+avoids duplicate unchanged target/path/commit campaigns, auto-claims remote
+work when work mode is enabled and a local model is selected, returns signed
+verification/ATP Credit receipts to workers after independent verification,
+pauses visibly when GitHub rate limits the node, supports a local GitHub token
+for higher API quota, and bounds peer fanout with per-peer retry cooldowns to
+reduce outbound-stream storms during 24/7 operation.
 External disclosure, protocol contact, payout claims, and settlement remain
 human-gated and not implemented.
 
@@ -131,7 +134,7 @@ an ATP v0.3 wire verb.
 | Rejected/duplicate/non-reportable lead appendix | Implemented locally |
 | v0.5 local/remote audit skill execution | Implemented |
 | Professional markdown report bundle export | Implemented locally |
-| Autonomous Guardian Loop | Implemented locally; default-on in main app |
+| Autonomous Guardian Loop | Implemented locally; verifier-on by default, worker/seeder require Run |
 | Guardian Index v2 with 142 structured public targets | Implemented |
 | Commit-diff watch and duplicate target/path/commit suppression | Implemented locally |
 | GitHub authenticated reads and rate-limit backoff | Implemented locally |

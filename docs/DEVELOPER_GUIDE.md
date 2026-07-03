@@ -38,8 +38,8 @@ the returned projection, but it must not manufacture transaction state.
 
 The UI is intentionally split:
 
-- `src/App.tsx` owns the CYPHES cockpit: runtime selection, the default-on
-  Autonomous Guardian Loop, tokens/sec telemetry, target context, pending/earned
+- `src/App.tsx` owns the CYPHES cockpit: runtime selection, verifier-first
+  Guardian mode, tokens/sec telemetry, target context, pending/earned
   ATP labels, and live receipt events.
 - `src/campaign.tsx` owns `campaign.html`: protocol/admin campaign creation,
   network state, guardian target index visibility, ATP proof logs, and
@@ -68,7 +68,7 @@ The Rust backend:
   rendezvous registrations;
 - connects peers directly or through Circuit Relay v2;
 - exposes QUIC, TCP, WebSocket, Identify, Ping, and DCUtR behavior;
-- negotiates `/cyphes/atp/0.7.6` request/response streams;
+- negotiates `/cyphes/atp/0.7.13` request/response streams;
 - commits inbound envelopes before returning an ACK;
 - binds each ATP issuer to the authenticated libp2p source;
 - synchronizes locally issued envelopes when a peer is discovered;
@@ -79,7 +79,7 @@ The Rust backend:
 - stores protocol audit campaigns, work units, claims, contributions,
   verifier decisions, ATP Credit allocations, and final report bundles;
 - exposes Guardian Index v2;
-- enforces Auto Worker runtime limits when the v0.6.2 autonomous loop runs
+- enforces Auto Worker runtime limits when the Guardian loop runs
   claimed work units.
 
 Current audit transaction uses:

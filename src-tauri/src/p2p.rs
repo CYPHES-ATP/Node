@@ -29,8 +29,8 @@ use crate::{
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.12";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.12";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.13";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.13";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -43,6 +43,10 @@ const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(12);
 const LABOR_AUTO_VERIFY_LIMIT: usize = 8;
 const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
 const LABOR_INVENTORY_LIMIT: usize = 512;
+const MAX_BROADCAST_PEERS_PER_TICK: usize = 32;
+const MAX_OUTBOUND_REQUESTS_PER_PEER: usize = 8;
+const PEER_FAILURE_BASE_COOLDOWN_MS: u64 = 30_000;
+const PEER_FAILURE_MAX_COOLDOWN_MS: u64 = 5 * 60_000;
 const STALE_RECEIPT_REPAIR_AFTER: Duration = Duration::from_secs(2 * 60);
 const STALE_RECEIPT_REPAIR_INTERVAL: Duration = Duration::from_secs(60);
 const STALE_RECEIPT_REPAIR_LIMIT: usize = 32;
@@ -243,28 +247,36 @@ struct LaborObjectBundleResponse {
 
 #[derive(Debug)]
 enum PendingOutbound {
-    Envelope(String),
+    Envelope {
+        peer_id: PeerId,
+        event_hash: String,
+    },
     Campaign {
+        peer_id: PeerId,
         campaign_id: String,
         silent: bool,
     },
     WorkUnitClaim {
+        peer_id: PeerId,
         campaign_id: String,
         work_unit_id: String,
         claim_id: String,
         silent: bool,
     },
     ExecutionResult {
+        peer_id: PeerId,
         transaction_id: String,
         result_hash: String,
     },
     Contribution {
+        peer_id: PeerId,
         campaign_id: String,
         contribution_id: String,
         receipt_hash: String,
         silent: bool,
     },
     VerificationResult {
+        peer_id: PeerId,
         campaign_id: String,
         verification_id: String,
         credit_total: u32,
@@ -283,6 +295,20 @@ enum PendingOutbound {
 }
 
 impl PendingOutbound {
+    fn peer_id(&self) -> &PeerId {
+        match self {
+            Self::Envelope { peer_id, .. }
+            | Self::Campaign { peer_id, .. }
+            | Self::WorkUnitClaim { peer_id, .. }
+            | Self::ExecutionResult { peer_id, .. }
+            | Self::Contribution { peer_id, .. }
+            | Self::VerificationResult { peer_id, .. }
+            | Self::LaborInventory { peer_id }
+            | Self::LaborObjectRequest { peer_id }
+            | Self::LaborObjectBundle { peer_id, .. } => peer_id,
+        }
+    }
+
     fn is_silent(&self) -> bool {
         match self {
             Self::Campaign { silent, .. }
@@ -293,6 +319,51 @@ impl PendingOutbound {
             _ => false,
         }
     }
+}
+
+fn send_wire_request_to_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+    request: WireRequest,
+    pending: PendingOutbound,
+) -> bool {
+    let peer_id = pending.peer_id().clone();
+    if !peer_send_allowed(state, outbound, &peer_id) {
+        return false;
+    }
+    let request_id = swarm
+        .behaviour_mut()
+        .request_response
+        .send_request(&peer_id, request);
+    outbound.insert(request_id, pending);
+    true
+}
+
+fn peer_send_allowed(
+    state: &P2pState,
+    outbound: &HashMap<OutboundRequestId, PendingOutbound>,
+    peer_id: &PeerId,
+) -> bool {
+    let now = now_millis();
+    let cooled_down = state
+        .inner
+        .lock()
+        .map(|inner| {
+            inner
+                .peers
+                .get(&peer_id.to_string())
+                .is_none_or(|peer| peer.cooldown_until <= now)
+        })
+        .unwrap_or(true);
+    if !cooled_down {
+        return false;
+    }
+    outbound
+        .values()
+        .filter(|pending| pending.peer_id() == peer_id)
+        .count()
+        < MAX_OUTBOUND_REQUESTS_PER_PEER
 }
 
 fn labor_wire_capabilities() -> Vec<String> {
@@ -695,6 +766,7 @@ fn handle_swarm_event(
                                     maybe_attest(
                                         swarm,
                                         app,
+                                        state,
                                         store,
                                         keypair,
                                         local_agent_id,
@@ -988,7 +1060,7 @@ fn handle_swarm_event(
                 response,
             } => {
                 let pending = outbound.remove(&request_id);
-                touch_peer(state, peer);
+                mark_peer_success(state, peer);
                 if pending.as_ref().is_some_and(PendingOutbound::is_silent) {
                     return;
                 }
@@ -1133,6 +1205,7 @@ fn handle_swarm_event(
                                 .unwrap_or(peer);
                             push_labor_objects_to_peer(
                                 swarm,
+                                state,
                                 store,
                                 &inventory_peer,
                                 &response.missing_campaigns,
@@ -1230,7 +1303,7 @@ fn handle_swarm_event(
         )) => {
             let pending = outbound.remove(&request_id);
             let silent = pending.as_ref().is_some_and(PendingOutbound::is_silent);
-            touch_peer(state, peer);
+            mark_peer_failure(state, peer);
             *rendezvous_cookie = None;
             discover_rendezvous(swarm, network.rendezvous.as_ref(), &network.namespace, None);
             let peer_string = peer.to_string();
@@ -1260,7 +1333,9 @@ fn handle_swarm_event(
                 return;
             }
             let (event_hash, transaction_id, result_hash) = match pending {
-                Some(PendingOutbound::Envelope(event_hash)) => (Some(event_hash), None, None),
+                Some(PendingOutbound::Envelope { event_hash, .. }) => {
+                    (Some(event_hash), None, None)
+                }
                 Some(PendingOutbound::Campaign { campaign_id, .. }) => {
                     (None, Some(campaign_id), None)
                 }
@@ -1277,6 +1352,7 @@ fn handle_swarm_event(
                 Some(PendingOutbound::ExecutionResult {
                     transaction_id,
                     result_hash,
+                    ..
                 }) => (None, Some(transaction_id), Some(result_hash)),
                 Some(PendingOutbound::Contribution {
                     campaign_id,
@@ -1596,6 +1672,7 @@ fn handle_swarm_event(
 fn maybe_attest(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     app: &AppHandle,
+    state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
     local_agent_id: &str,
@@ -1648,11 +1725,16 @@ fn maybe_attest(
         Ok(_) => {
             emit_bundle_export(app, store, &attest.transaction_id);
             let event_hash = crate::atp::event_hash(&attest).unwrap_or_default();
-            let request_id = swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer, WireRequest::Envelope(attest));
-            outbound.insert(request_id, PendingOutbound::Envelope(event_hash));
+            send_wire_request_to_peer(
+                swarm,
+                state,
+                outbound,
+                WireRequest::Envelope(attest),
+                PendingOutbound::Envelope {
+                    peer_id: peer,
+                    event_hash,
+                },
+            );
             let _ = app.emit("atp:jobs_changed", ());
         }
         Err(reason) => {
@@ -1699,14 +1781,19 @@ fn on_peer_connected(
     if let Ok(envelopes) = store.envelopes_for_peer(local_agent_id, &peer_agent_id) {
         for envelope in envelopes {
             let event_hash = crate::atp::event_hash(&envelope).unwrap_or_default();
-            let request_id = swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer_id, WireRequest::Envelope(envelope));
-            outbound.insert(request_id, PendingOutbound::Envelope(event_hash));
+            send_wire_request_to_peer(
+                swarm,
+                state,
+                outbound,
+                WireRequest::Envelope(envelope),
+                PendingOutbound::Envelope {
+                    peer_id,
+                    event_hash,
+                },
+            );
         }
     }
-    send_labor_inventory_to_peer(swarm, store, local_agent_id, &peer_id, outbound);
+    send_labor_inventory_to_peer(swarm, state, store, local_agent_id, &peer_id, outbound);
     let _ = app.emit(
         "p2p:peer_connected",
         serde_json::json!({ "peerId": peer_id.to_string() }),
@@ -1921,6 +2008,7 @@ fn handle_labor_inventory_request(
     );
     push_labor_objects_to_peer(
         swarm,
+        state,
         store,
         &peer_id,
         &peer_missing_campaigns,
@@ -1943,6 +2031,7 @@ fn handle_labor_inventory_request(
     );
     request_labor_objects_from_peer(
         swarm,
+        state,
         &peer_id,
         &missing_campaigns,
         &missing_claims,
@@ -2010,6 +2099,7 @@ fn missing_from_remote(local_ids: &[String], remote_ids: &[String]) -> Vec<Strin
 
 fn send_labor_inventory_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
     store: &AtpStore,
     local_agent_id: &str,
     peer_id: &PeerId,
@@ -2018,12 +2108,11 @@ fn send_labor_inventory_to_peer(
     let Ok(inventory) = wire_labor_inventory(store, local_agent_id) else {
         return;
     };
-    let request_id = swarm
-        .behaviour_mut()
-        .request_response
-        .send_request(peer_id, WireRequest::LaborInventory(inventory));
-    outbound.insert(
-        request_id,
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
+        WireRequest::LaborInventory(inventory),
         PendingOutbound::LaborInventory {
             peer_id: peer_id.clone(),
         },
@@ -2038,12 +2127,13 @@ fn broadcast_labor_inventory(
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     for peer_id in target_peers(state, None) {
-        send_labor_inventory_to_peer(swarm, store, local_agent_id, &peer_id, outbound);
+        send_labor_inventory_to_peer(swarm, state, store, local_agent_id, &peer_id, outbound);
     }
 }
 
 fn request_labor_objects_from_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
     peer_id: &PeerId,
     campaign_ids: &[String],
     claim_ids: &[String],
@@ -2067,12 +2157,11 @@ fn request_labor_objects_from_peer(
         contribution_ids: contribution_ids.to_vec(),
         verification_ids: verification_ids.to_vec(),
     };
-    let request_id = swarm
-        .behaviour_mut()
-        .request_response
-        .send_request(peer_id, WireRequest::LaborObjectRequest(request));
-    outbound.insert(
-        request_id,
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
+        WireRequest::LaborObjectRequest(request),
         PendingOutbound::LaborObjectRequest {
             peer_id: peer_id.clone(),
         },
@@ -2432,6 +2521,7 @@ fn is_historical_claim_error(reason: &str) -> bool {
 
 fn push_labor_objects_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
     store: &AtpStore,
     peer_id: &PeerId,
     campaign_ids: &[String],
@@ -2442,23 +2532,24 @@ fn push_labor_objects_to_peer(
 ) {
     if let Ok(campaigns) = store.campaigns_by_ids(campaign_ids) {
         for campaign in campaigns {
-            send_campaign_to_peer(swarm, peer_id, campaign, true, outbound);
+            send_campaign_to_peer(swarm, state, peer_id, campaign, true, outbound);
         }
     }
     if let Ok(claims) = store.work_unit_claims_by_ids(claim_ids) {
         for claim in claims {
-            send_work_unit_claim_to_peer(swarm, peer_id, claim, true, outbound);
+            send_work_unit_claim_to_peer(swarm, state, peer_id, claim, true, outbound);
         }
     }
     if let Ok(contributions) = store.contributions_by_ids(contribution_ids) {
         for contribution in contributions {
-            send_contribution_to_peer(swarm, peer_id, contribution, true, outbound);
+            send_contribution_to_peer(swarm, state, peer_id, contribution, true, outbound);
         }
     }
     if let Ok(bundles) = store.verification_bundles_by_ids(verification_ids) {
         for (verification, allocations) in bundles {
             send_verification_result_to_peer(
                 swarm,
+                state,
                 peer_id,
                 verification,
                 allocations,
@@ -2690,18 +2781,19 @@ fn verify_network_contributions(
 
 fn send_work_unit_claim_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
     peer_id: &PeerId,
     claim: AuditWorkUnitClaim,
     silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let request_id = swarm
-        .behaviour_mut()
-        .request_response
-        .send_request(peer_id, WireRequest::WorkUnitClaim(claim.clone()));
-    outbound.insert(
-        request_id,
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
+        WireRequest::WorkUnitClaim(claim.clone()),
         PendingOutbound::WorkUnitClaim {
+            peer_id: peer_id.clone(),
             campaign_id: claim.campaign_id,
             work_unit_id: claim.work_unit_id,
             claim_id: claim.claim_id,
@@ -2712,18 +2804,19 @@ fn send_work_unit_claim_to_peer(
 
 fn send_campaign_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
     peer_id: &PeerId,
     campaign: ProtocolAuditCampaign,
     silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let request_id = swarm
-        .behaviour_mut()
-        .request_response
-        .send_request(peer_id, WireRequest::Campaign(campaign.clone()));
-    outbound.insert(
-        request_id,
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
+        WireRequest::Campaign(campaign.clone()),
         PendingOutbound::Campaign {
+            peer_id: peer_id.clone(),
             campaign_id: campaign.campaign_id,
             silent,
         },
@@ -2732,18 +2825,19 @@ fn send_campaign_to_peer(
 
 fn send_contribution_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
     peer_id: &PeerId,
     contribution: NodeContribution,
     silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let request_id = swarm
-        .behaviour_mut()
-        .request_response
-        .send_request(peer_id, WireRequest::Contribution(contribution.clone()));
-    outbound.insert(
-        request_id,
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
+        WireRequest::Contribution(contribution.clone()),
         PendingOutbound::Contribution {
+            peer_id: peer_id.clone(),
             campaign_id: contribution.campaign_id,
             contribution_id: contribution.contribution_id,
             receipt_hash: contribution.receipt_hash,
@@ -2754,6 +2848,7 @@ fn send_contribution_to_peer(
 
 fn send_verification_result_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
     peer_id: &PeerId,
     verification: VerificationResult,
     allocations: Vec<CreditAllocation>,
@@ -2764,16 +2859,16 @@ fn send_verification_result_to_peer(
         .iter()
         .map(|allocation| allocation.total)
         .sum::<u32>();
-    let request_id = swarm.behaviour_mut().request_response.send_request(
-        peer_id,
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
         WireRequest::VerificationResult {
             verification: verification.clone(),
             allocations,
         },
-    );
-    outbound.insert(
-        request_id,
         PendingOutbound::VerificationResult {
+            peer_id: peer_id.clone(),
             campaign_id: verification.campaign_id,
             verification_id: verification.verification_id,
             credit_total,
@@ -2791,11 +2886,16 @@ fn send_envelope(
     let peers = target_peers(state, envelope.audience.as_deref());
     let hash = crate::atp::event_hash(&envelope).unwrap_or_default();
     for peer_id in peers {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::Envelope(envelope.clone()));
-        outbound.insert(request_id, PendingOutbound::Envelope(hash.clone()));
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
+            WireRequest::Envelope(envelope.clone()),
+            PendingOutbound::Envelope {
+                peer_id,
+                event_hash: hash.clone(),
+            },
+        );
     }
 }
 
@@ -2816,13 +2916,13 @@ fn broadcast_campaign(
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     for peer_id in target_peers(state, None) {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::Campaign(campaign.clone()));
-        outbound.insert(
-            request_id,
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
+            WireRequest::Campaign(campaign.clone()),
             PendingOutbound::Campaign {
+                peer_id,
                 campaign_id: campaign.campaign_id.clone(),
                 silent,
             },
@@ -2839,13 +2939,13 @@ fn send_work_unit_claim(
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     for peer_id in target_peers(state, Some(audience)) {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::WorkUnitClaim(claim.clone()));
-        outbound.insert(
-            request_id,
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
+            WireRequest::WorkUnitClaim(claim.clone()),
             PendingOutbound::WorkUnitClaim {
+                peer_id,
                 campaign_id: claim.campaign_id.clone(),
                 work_unit_id: claim.work_unit_id.clone(),
                 claim_id: claim.claim_id.clone(),
@@ -2864,13 +2964,13 @@ fn send_execution_result(
 ) {
     let peers = target_peers(state, Some(audience));
     for peer_id in peers {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::ExecutionResult(result.clone()));
-        outbound.insert(
-            request_id,
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
+            WireRequest::ExecutionResult(result.clone()),
             PendingOutbound::ExecutionResult {
+                peer_id,
                 transaction_id: result.transaction_id.clone(),
                 result_hash: result.result_hash.clone(),
             },
@@ -2887,13 +2987,13 @@ fn send_contribution(
 ) {
     let peers = target_peers(state, Some(audience));
     for peer_id in peers {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::Contribution(contribution.clone()));
-        outbound.insert(
-            request_id,
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
+            WireRequest::Contribution(contribution.clone()),
             PendingOutbound::Contribution {
+                peer_id,
                 campaign_id: contribution.campaign_id.clone(),
                 contribution_id: contribution.contribution_id.clone(),
                 receipt_hash: contribution.receipt_hash.clone(),
@@ -2917,16 +3017,16 @@ fn send_verification_result(
         .map(|allocation| allocation.total)
         .sum::<u32>();
     for peer_id in peers {
-        let request_id = swarm.behaviour_mut().request_response.send_request(
-            &peer_id,
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
             WireRequest::VerificationResult {
                 verification: verification.clone(),
                 allocations: allocations.clone(),
             },
-        );
-        outbound.insert(
-            request_id,
             PendingOutbound::VerificationResult {
+                peer_id,
                 campaign_id: verification.campaign_id.clone(),
                 verification_id: verification.verification_id.clone(),
                 credit_total,
@@ -2949,16 +3049,16 @@ fn broadcast_verification_result(
         .map(|allocation| allocation.total)
         .sum::<u32>();
     for peer_id in target_peers(state, None) {
-        let request_id = swarm.behaviour_mut().request_response.send_request(
-            &peer_id,
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
             WireRequest::VerificationResult {
                 verification: verification.clone(),
                 allocations: allocations.clone(),
             },
-        );
-        outbound.insert(
-            request_id,
             PendingOutbound::VerificationResult {
+                peer_id,
                 campaign_id: verification.campaign_id.clone(),
                 verification_id: verification.verification_id.clone(),
                 credit_total,
@@ -2976,29 +3076,45 @@ fn broadcast_labor_object_bundle(
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     for peer_id in target_peers(state, None) {
-        let request_id = swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer_id, WireRequest::LaborObjectBundle(bundle.clone()));
-        outbound.insert(
-            request_id,
+        send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
+            WireRequest::LaborObjectBundle(bundle.clone()),
             PendingOutbound::LaborObjectBundle { peer_id, silent },
         );
     }
 }
 
 fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
+    let now = now_millis();
     state
         .inner
         .lock()
         .map(|inner| {
-            inner
+            let mut peers = inner
                 .peers
-                .keys()
-                .filter_map(|peer| peer.parse::<PeerId>().ok())
-                .filter(|peer| {
+                .values()
+                .filter(|peer| peer.cooldown_until <= now)
+                .filter_map(|peer| {
+                    peer.peer_id
+                        .parse::<PeerId>()
+                        .ok()
+                        .map(|peer_id| (peer_id, peer.last_seen))
+                })
+                .filter(|(peer, _)| {
                     audience.is_none_or(|audience| audience == format!("urn:libp2p:{peer}"))
                 })
+                .collect::<Vec<_>>();
+            peers.sort_by(|left, right| right.1.cmp(&left.1));
+            peers
+                .into_iter()
+                .take(if audience.is_some() {
+                    usize::MAX
+                } else {
+                    MAX_BROADCAST_PEERS_PER_TICK
+                })
+                .map(|(peer, _)| peer)
                 .collect()
         })
         .unwrap_or_default()
@@ -3006,13 +3122,63 @@ fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
 
 fn touch_peer(state: &P2pState, peer_id: PeerId) {
     if let Ok(mut inner) = state.inner.lock() {
-        inner.peers.insert(
-            peer_id.to_string(),
-            PeerInfo {
+        let now = now_millis();
+        inner
+            .peers
+            .entry(peer_id.to_string())
+            .and_modify(|peer| {
+                peer.last_seen = now;
+            })
+            .or_insert_with(|| PeerInfo {
                 peer_id: peer_id.to_string(),
-                last_seen: now_millis(),
-            },
-        );
+                last_seen: now,
+                failure_streak: 0,
+                cooldown_until: 0,
+            });
+    }
+}
+
+fn mark_peer_success(state: &P2pState, peer_id: PeerId) {
+    if let Ok(mut inner) = state.inner.lock() {
+        let now = now_millis();
+        inner
+            .peers
+            .entry(peer_id.to_string())
+            .and_modify(|peer| {
+                peer.last_seen = now;
+                peer.failure_streak = 0;
+                peer.cooldown_until = 0;
+            })
+            .or_insert_with(|| PeerInfo {
+                peer_id: peer_id.to_string(),
+                last_seen: now,
+                failure_streak: 0,
+                cooldown_until: 0,
+            });
+    }
+}
+
+fn mark_peer_failure(state: &P2pState, peer_id: PeerId) {
+    if let Ok(mut inner) = state.inner.lock() {
+        let now = now_millis();
+        inner
+            .peers
+            .entry(peer_id.to_string())
+            .and_modify(|peer| {
+                peer.last_seen = now;
+                peer.failure_streak = peer.failure_streak.saturating_add(1);
+                let multiplier = 1u64 << peer.failure_streak.min(4);
+                let cooldown = PEER_FAILURE_BASE_COOLDOWN_MS
+                    .saturating_mul(multiplier)
+                    .min(PEER_FAILURE_MAX_COOLDOWN_MS);
+                peer.cooldown_until = now.saturating_add(cooldown);
+            })
+            .or_insert_with(|| PeerInfo {
+                peer_id: peer_id.to_string(),
+                last_seen: now,
+                failure_streak: 1,
+                cooldown_until: now.saturating_add(PEER_FAILURE_BASE_COOLDOWN_MS),
+            });
     }
 }
 
@@ -3375,7 +3541,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.12"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.7.13"
             }"#,
         )
         .expect("valid manifest");

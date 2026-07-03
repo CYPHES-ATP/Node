@@ -974,6 +974,8 @@ form > label,
 .runtime-radar {
   display: grid;
   align-content: center;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   min-height: 126px;
   padding: 12px;
   border: 1px solid rgba(0, 246, 255, 0.18);
@@ -984,12 +986,13 @@ form > label,
 
 .runtime-radar label {
   display: grid;
+  grid-column: 1 / -1;
   gap: 4px;
   margin: 0;
 }
 
 .runtime-radar label + label {
-  margin-top: 8px;
+  margin-top: 0;
 }
 
 .runtime-radar span {
@@ -1034,7 +1037,7 @@ form > label,
   align-items: center;
   justify-content: center;
   gap: 7px;
-  margin-top: 10px;
+  margin-top: 2px;
   border: 1px solid rgba(199, 255, 71, 0.38);
   border-radius: 0;
   background:
@@ -1047,6 +1050,24 @@ form > label,
   font-weight: 820;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+.runtime-stop-button {
+  border-color: rgba(255, 112, 91, 0.38);
+  background:
+    linear-gradient(90deg, rgba(255, 112, 91, 0.14), transparent),
+    rgba(0, 0, 0, 0.32);
+}
+
+.runtime-stop-button svg {
+  color: #ff705b;
+}
+
+.runtime-stop-button:hover:not(:disabled) {
+  border-color: #ff705b;
+  background:
+    linear-gradient(90deg, rgba(255, 112, 91, 0.2), transparent),
+    rgba(0, 0, 0, 0.42);
 }
 
 .runtime-run-button svg {

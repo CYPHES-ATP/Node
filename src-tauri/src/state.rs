@@ -12,6 +12,8 @@ use crate::p2p::SwarmCommand;
 pub struct PeerInfo {
     pub peer_id: String,
     pub last_seen: u64,
+    pub failure_streak: u32,
+    pub cooldown_until: u64,
 }
 
 #[derive(Default)]

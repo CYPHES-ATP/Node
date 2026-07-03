@@ -1,20 +1,20 @@
 # Autonomous Guardian Loop
 
-Status: v0.6.2 testnet seed
+Status: v0.7.13 verifier testnet
 
-The v0.6.2 main CYPHES app is autonomous by default. Users open the app,
-select a local LM Studio or Ollama model, and watch CYPHES coordinate public
-audit work. There are no Auto Worker, Auto Verifier, Quest Seeder, or Work
-Order controls in the main node UI.
+The v0.7.13 main CYPHES app joins as a verifier by default. Users can select a
+local LM Studio or Ollama model and press Run when they want the node to create
+or execute local audit work. Pressing Stop returns the node to verifier-only
+participation while peer sync and receipt settlement continue.
 
 ## Runtime Loop
 
 ```text
 Guardian Index v2
 -> resolve GitHub target to pinned commit
--> create work only if target/path/commit is not already active
--> discovered worker auto-claims open work
--> local model runs bounded audit skill
+-> Run mode creates work only if target/path/commit is not already active
+-> discovered worker auto-claims open work while Run mode is enabled
+-> local model runs bounded audit skill while Run mode is enabled
 -> worker signs contribution receipt
 -> requester or verifier accepts independent worker contributions
 -> signed verification/credit receipt returns to worker
@@ -23,13 +23,18 @@ Guardian Index v2
 
 ## What Runs By Default
 
-- **Auto Worker** claims one open remote work unit when a selected local model
-  is available, runs the bounded audit skill, signs the contribution, and sends
-  the receipt back to the requester.
 - **Auto Verifier** accepts pending signed contributions only for campaigns
   requested by this same local identity and only when the worker is a different
   ATP identity. Self-verification can test the local loop, but it cannot mint
   Verified ATP.
+- **Peer sync** keeps campaigns, claims, contributions, and verification
+  receipts moving while the node is online.
+
+## What Run Enables
+
+- **Auto Worker** claims one open remote work unit when a selected local model
+  is available, runs the bounded audit skill, signs the contribution, and sends
+  the receipt back to the requester.
 - **Quest Seeder** watches `protocol/targets/guardian-target-index.json`,
   resolves targets to pinned commits, and creates a signed campaign only when
   the same target/path/commit is not already covered locally.
@@ -37,7 +42,7 @@ Guardian Index v2
 The runtime limit remains enforced by Rust for autonomous worker runs. If a local
 model exceeds the limit, CYPHES does not create a signed contribution.
 
-v0.6.2 raises the default autonomous caps to support long-running testnet nodes:
+The default autonomous caps support long-running testnet nodes:
 
 - **Observation cap**: 2880 Guardian target observations per day.
 - **Model audit cap**: 2880 local-model work-unit runs per day.
