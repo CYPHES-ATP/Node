@@ -5,8 +5,8 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.7.13 testnet" src="https://img.shields.io/badge/CYPHES-v0.7.13_testnet-c7ff47"></a>
-    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.7.13" src="https://img.shields.io/badge/ATP_wire-v0.7.13-00f6ff"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.7.14 testnet" src="https://img.shields.io/badge/CYPHES-v0.7.14_testnet-c7ff47"></a>
+    <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.7.14" src="https://img.shields.io/badge/ATP_wire-v0.7.14-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
@@ -17,15 +17,15 @@
 
 ## Download
 
-The current testnet seed is **CYPHES v0.7.13**. It moves CYPHES from a desktop
+The current testnet seed is **CYPHES v0.7.14**. It moves CYPHES from a desktop
 developer preview toward an autonomous digital labor network whose first use
 case is audit. Nodes use the CYPHES-operated `source.cyphes.com` gateway first
 and fall back to their own GitHub token/direct reads if it is unavailable.
-v0.7.13 keeps the current `cyphes-dev-v0.7.7` testnet state, moves the ATP wire
-protocol to `/cyphes/atp/0.7.13`, moves rendezvous to
-`cyphes.repository-audit.v0.7.13`, keeps SQLite indexes for the hot pending,
-credit, and sync queries, and uses bounded peer fanout plus per-peer retry
-cooldowns to reduce outbound-stream storms during 24/7 runs.
+v0.7.14 keeps the current `cyphes-dev-v0.7.7` testnet state, moves the ATP wire
+protocol to `/cyphes/atp/0.7.14`, moves rendezvous to
+`cyphes.repository-audit.v0.7.14`, adds verifier-pull bundle repair for stuck
+receipts, expands Guardian coverage to 165 targets, and starts a new Guardian
+epoch after completing a full target pass instead of waiting on a wall clock.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -34,12 +34,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.7.13](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_aarch64.dmg)
-- [Download CYPHES v0.7.13 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_x64.dmg)
+- [Download CYPHES v0.7.14](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.14/CYPHES_0.7.14_aarch64.dmg)
+- [Download CYPHES v0.7.14 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.14/CYPHES_0.7.14_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.7.13 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.13/CYPHES_0.7.13_x64-setup.exe)
+- [Download CYPHES v0.7.14 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.7.14/CYPHES_0.7.14_x64-setup.exe)
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -174,13 +174,14 @@ Artifact Two independently returns:
   claim prerequisites heal before contribution verification, and pauses new
   worker submissions when self-authored pending receipts outrun verifier
   settlement.
-- v0.7.13 uses `/cyphes/atp/0.7.13` and
-  `cyphes.repository-audit.v0.7.13`, keeps the current `cyphes-dev-v0.7.7`
+- v0.7.14 uses `/cyphes/atp/0.7.14` and
+  `cyphes.repository-audit.v0.7.14`, keeps the current `cyphes-dev-v0.7.7`
   testnet state, defaults every app boot to verifier mode until Run is pressed
   in that session, adds Stop to return to verifier-only mode, keeps SQLite
   indexes for pending queue, claim sync, verifier duty, credit summary, and
-  campaign snapshot queries, bounds peer fanout, adds per-peer outbound
-  cooldowns, and keeps autonomous campaign seeding at 2400/day.
+  campaign snapshot queries, raises the provisional self-pending work queue to
+  25 receipts, sends dependency-complete labor bundles for verifier pull, and
+  keeps autonomous campaign seeding at 2400/day.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
@@ -199,11 +200,12 @@ Artifact Two independently returns:
 - Autonomous Guardian Loop for 24/7 participation: verifier duty is on by
   default, while Auto Worker and Quest Seeder stay off until the operator
   presses Run for the current session. CYPHES watches Guardian Index v2,
-  resolves GitHub commits, avoids duplicate unchanged target/commit campaigns,
+  resolves GitHub commits, avoids duplicate target/commit campaigns within the
+  current coverage epoch, starts the next epoch after a full target pass,
   auto-claims open remote work only while work mode is enabled, runs the
   selected local model under the runtime limit, signs contributions, and
   returns verifier receipts/ATP Credit allocations.
-- Guardian Index v2 contains 142 structured public coverage targets with
+- Guardian Index v2 contains 165 structured public coverage targets with
   source signals, category, chains, static TVL/risk rank seed, repo URLs,
   focused paths, docs/security references, in-scope/out-of-scope text,
   criticality, and priority score. It is a bundled seed, not a live bounty or

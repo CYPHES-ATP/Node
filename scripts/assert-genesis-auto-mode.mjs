@@ -35,6 +35,14 @@ const appChecks = [
     label: "campaign seed cap supports sustained testnet load",
     pattern: /MAX_AUTO_CAMPAIGNS_PER_DAY\s*=\s*2400/,
   },
+  {
+    label: "worker self-pending cap allows verifier catch-up without minting ATP",
+    pattern: /MAX_SELF_PENDING_CONTRIBUTIONS\s*=\s*25/,
+  },
+  {
+    label: "guardian epochs are target-pass based instead of wall-clock based",
+    pattern: /guardianEpochKey\(targetCursor:\s*number,\s*targetCount:\s*number\)/,
+  },
 ];
 
 const failures = [

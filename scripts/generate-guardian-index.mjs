@@ -56,6 +56,29 @@ const protocols = [
   ["Solady", "Library", ["Ethereum"], 48, "https://github.com/Vectorized/solady", ["src/tokens/ERC20.sol", "src/auth/Ownable.sol"], "https://github.com/Vectorized/solady", "https://github.com/Vectorized/solady"],
   ["PRBMath", "Library", ["Ethereum"], 49, "https://github.com/PaulRBerg/prb-math", ["src/SD59x18.sol", "src/UD60x18.sol"], "https://github.com/PaulRBerg/prb-math", "https://github.com/PaulRBerg/prb-math"],
   ["Solidity", "Compiler", ["Ethereum"], 50, "https://github.com/ethereum/solidity", ["libsolidity", "docs/security-considerations.rst"], "https://docs.soliditylang.org/", "https://github.com/ethereum/solidity/security"],
+  ["Uniswap V4", "DEX", ["Ethereum"], 51, "https://github.com/Uniswap/v4-core", [], "https://docs.uniswap.org/", "https://github.com/Uniswap/v4-core/security"],
+  ["Permit2", "Token Approval", ["Ethereum"], 52, "https://github.com/Uniswap/permit2", [], "https://docs.uniswap.org/contracts/permit2/overview", "https://github.com/Uniswap/permit2/security"],
+  ["Universal Router", "DEX Aggregator", ["Ethereum"], 53, "https://github.com/Uniswap/universal-router", [], "https://docs.uniswap.org/contracts/universal-router/overview", "https://github.com/Uniswap/universal-router/security"],
+  ["Aave V3 Periphery", "Lending", ["Ethereum", "Arbitrum", "Optimism", "Base", "Polygon"], 54, "https://github.com/aave/aave-v3-periphery", [], "https://aave.com/docs", "https://github.com/aave/aave-v3-periphery/security"],
+  ["Balancer V3", "DEX", ["Ethereum", "Arbitrum", "Base", "Polygon"], 55, "https://github.com/balancer/balancer-v3-monorepo", [], "https://docs.balancer.fi/", "https://github.com/balancer/balancer-v3-monorepo/security"],
+  ["CoW Protocol", "DEX Aggregator", ["Ethereum"], 56, "https://github.com/cowprotocol/contracts", [], "https://docs.cow.fi/", "https://github.com/cowprotocol/contracts/security"],
+  ["Wormhole", "Bridge", ["Ethereum", "Solana", "Base", "Arbitrum"], 57, "https://github.com/wormhole-foundation/wormhole", [], "https://wormhole.com/docs/", "https://github.com/wormhole-foundation/wormhole/security"],
+  ["Optimism Bedrock", "L2", ["Ethereum", "Optimism"], 58, "https://github.com/ethereum-optimism/optimism", [], "https://docs.optimism.io/", "https://github.com/ethereum-optimism/optimism/security"],
+  ["Arbitrum Nitro", "L2", ["Ethereum", "Arbitrum"], 59, "https://github.com/OffchainLabs/nitro", [], "https://docs.arbitrum.io/", "https://github.com/OffchainLabs/nitro/security"],
+  ["zkSync Era", "L2", ["Ethereum", "zkSync"], 60, "https://github.com/matter-labs/era-contracts", [], "https://docs.zksync.io/", "https://github.com/matter-labs/era-contracts/security"],
+  ["Polygon zkEVM", "L2", ["Ethereum", "Polygon"], 61, "https://github.com/0xPolygonHermez/zkevm-contracts", [], "https://docs.polygon.technology/zkEVM/", "https://github.com/0xPolygonHermez/zkevm-contracts/security"],
+  ["Axelar GMP", "Bridge", ["Ethereum", "Cosmos"], 62, "https://github.com/axelarnetwork/axelar-gmp-sdk-solidity", [], "https://docs.axelar.dev/", "https://github.com/axelarnetwork/axelar-gmp-sdk-solidity/security"],
+  ["LayerZero V2", "Bridge", ["Ethereum", "Arbitrum", "Base", "Optimism"], 63, "https://github.com/LayerZero-Labs/LayerZero-v2", [], "https://docs.layerzero.network/", "https://github.com/LayerZero-Labs/LayerZero-v2/security"],
+  ["Gearbox V3", "Credit", ["Ethereum"], 64, "https://github.com/Gearbox-protocol/core-v3", [], "https://docs.gearbox.fi/", "https://github.com/Gearbox-protocol/core-v3/security"],
+  ["Sablier V2", "Streaming Payments", ["Ethereum"], 65, "https://github.com/sablier-labs/v2-core", [], "https://docs.sablier.com/", "https://github.com/sablier-labs/v2-core/security"],
+  ["ENS Name Wrapper", "Identity", ["Ethereum"], 66, "https://github.com/ensdomains/name-wrapper", [], "https://docs.ens.domains/", "https://github.com/ensdomains/name-wrapper/security"],
+  ["Safe Modules", "Smart Account", ["Ethereum", "Base", "Arbitrum", "Optimism"], 67, "https://github.com/safe-global/safe-modules", [], "https://docs.safe.global/", "https://github.com/safe-global/safe-modules/security"],
+  ["Fraxlend", "Lending", ["Ethereum", "Fraxtal"], 68, "https://github.com/fraxfinance/fraxlend", [], "https://docs.frax.finance/", "https://github.com/fraxfinance/fraxlend/security"],
+  ["Ribbon V2", "Options", ["Ethereum"], 69, "https://github.com/ribbon-finance/ribbon-v2", [], "https://docs.ribbon.finance/", "https://github.com/ribbon-finance/ribbon-v2/security"],
+  ["PoolTogether V5", "Savings", ["Ethereum", "Optimism", "Base"], 70, "https://github.com/pooltogether/v5-prize-pool", [], "https://dev.pooltogether.com/", "https://github.com/pooltogether/v5-prize-pool/security"],
+  ["Forge Std", "Testing Library", ["Ethereum"], 71, "https://github.com/foundry-rs/forge-std", [], "https://book.getfoundry.sh/forge/forge-std", "https://github.com/foundry-rs/forge-std/security"],
+  ["Ethereum Execution Specs", "Protocol", ["Ethereum"], 72, "https://github.com/ethereum/execution-specs", [], "https://ethereum.github.io/execution-specs/", "https://github.com/ethereum/execution-specs/security"],
+  ["Reth", "Execution Client", ["Ethereum"], 73, "https://github.com/paradigmxyz/reth", [], "https://reth.rs/", "https://github.com/paradigmxyz/reth/security"],
 ];
 
 function slug(value) {
@@ -124,16 +147,16 @@ for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securi
 targets.sort((a, b) => b.priorityScore - a.priorityScore || a.tvlRiskRank - b.tvlRiskRank);
 
 const index = {
-  version: "0.7.6",
+  version: "0.7.14",
   label: "CYPHES Guardian Index v2",
-  generatedAt: "2026-07-02T00:00:00Z",
+  generatedAt: "2026-07-03T00:00:00Z",
   policy,
   notes: [
     "Bundled static seed for autonomous public guardian coverage.",
     "DeFiLlama is used as a risk-ranking source signal only; GitHub targets are manually curated and resolved to pinned commits by the app before work is created.",
     "No external bounty submission or protocol contact occurs in auto mode.",
   ],
-  targets: targets.slice(0, 150),
+  targets,
 };
 
 writeFileSync(

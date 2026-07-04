@@ -1,8 +1,8 @@
 # Autonomous Guardian Loop
 
-Status: v0.7.13 verifier testnet
+Status: v0.7.14 verifier testnet
 
-The v0.7.13 main CYPHES app joins as a verifier by default. Users can select a
+The v0.7.14 main CYPHES app joins as a verifier by default. Users can select a
 local LM Studio or Ollama model and press Run when they want the node to create
 or execute local audit work. Pressing Stop returns the node to verifier-only
 participation while peer sync and receipt settlement continue.
@@ -47,6 +47,9 @@ The default autonomous caps support long-running testnet nodes:
 - **Observation cap**: 2880 Guardian target observations per day.
 - **Model audit cap**: 2880 local-model work-unit runs per day.
 - **Campaign seed cap**: 2400 new autonomous campaigns per UTC day.
+- **Self-pending cap**: 25 provisional worker receipts awaiting independent
+  verification. This does not mint ATP; it only prevents local work from
+  stalling while independent verifiers catch up.
 
 ## GitHub Backoff
 
@@ -71,7 +74,7 @@ remaining gateway work is cache limits, metrics, and per-node quotas.
 
 ## Guardian Index v2
 
-The bundled index contains 142 structured public coverage targets. Each target
+The bundled index contains 165 structured public coverage targets. Each target
 includes:
 
 - source signals: `manual-curated`, `github`, and `defillama`;
@@ -88,8 +91,11 @@ not a live bounty feed, not an affiliation claim, and not a payout guarantee.
 ## Anti-Spam Rule
 
 CYPHES creates at most one active local campaign per Guardian target/path/commit.
-If the commit has not changed, the node records the observation and keeps
-watching instead of creating duplicate work.
+If the commit has not changed inside the current coverage epoch, the node
+records the observation and keeps watching instead of creating duplicate work.
+When the target cursor completes a full pass through the Guardian Index, CYPHES
+starts the next Guardian epoch and may re-audit unchanged commits as fresh
+coverage work. Epochs are target-completion based, not wall-clock based.
 
 v0.5.6 also enforces duplicate suppression in SQLite for the same
 requester/repository/commit/scope tuple, so UI races or reconnect replay do not

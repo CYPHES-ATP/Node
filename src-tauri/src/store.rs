@@ -172,7 +172,7 @@ pub struct PendingLaborObject {
 }
 
 pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.7";
-pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 1;
+pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 25;
 const STORE_META_TESTNET_ID_KEY: &str = "testnet_id";
 const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
@@ -4360,7 +4360,8 @@ mod tests {
         let requester_agent = agent_id(&requester.public());
         let mut submitted = 0usize;
 
-        for campaign_index in 0..3 {
+        let campaign_count = (MAX_PENDING_CONTRIBUTIONS_PER_WORKER / 7) + 2;
+        for campaign_index in 0..campaign_count {
             let campaign = ProtocolAuditCampaign::new(
                 format!("Backpressure Fixture {campaign_index}"),
                 RepositoryTarget {

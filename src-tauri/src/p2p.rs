@@ -29,8 +29,8 @@ use crate::{
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.13";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.13";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.14";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.14";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -57,6 +57,7 @@ const LABOR_CAPABILITY_INVENTORY_V2: &str = "audit_labor_inventory_v2";
 const LABOR_CAPABILITY_HISTORICAL_CLAIMS: &str = "historical_claim_evidence_v1";
 const LABOR_CAPABILITY_VERIFY_AFTER_BUNDLE: &str = "verify_after_bundle_v1";
 const LABOR_CAPABILITY_TELEMETRY: &str = "audit_labor_telemetry_v1";
+const LABOR_CAPABILITY_VERIFIER_PULL: &str = "verifier_pull_v1";
 
 #[derive(Debug, Clone)]
 struct InfrastructureTarget {
@@ -372,6 +373,7 @@ fn labor_wire_capabilities() -> Vec<String> {
         LABOR_CAPABILITY_HISTORICAL_CLAIMS,
         LABOR_CAPABILITY_VERIFY_AFTER_BUNDLE,
         LABOR_CAPABILITY_TELEMETRY,
+        LABOR_CAPABILITY_VERIFIER_PULL,
     ]
     .into_iter()
     .map(ToString::to_string)
@@ -1303,7 +1305,9 @@ fn handle_swarm_event(
         )) => {
             let pending = outbound.remove(&request_id);
             let silent = pending.as_ref().is_some_and(PendingOutbound::is_silent);
-            mark_peer_failure(state, peer);
+            if !silent {
+                mark_peer_failure(state, peer);
+            }
             *rendezvous_cookie = None;
             discover_rendezvous(swarm, network.rendezvous.as_ref(), &network.namespace, None);
             let peer_string = peer.to_string();
@@ -2021,9 +2025,13 @@ fn handle_labor_inventory_request(
     let missing_campaigns =
         missing_from_remote(&remote_inventory.campaigns, &local_inventory.campaigns);
     let missing_claims = missing_from_remote(&remote_inventory.claims, &local_inventory.claims);
-    let missing_contributions = missing_from_remote(
+    let mut missing_contributions = missing_from_remote(
         &remote_inventory.contributions,
         &local_inventory.contributions,
+    );
+    merge_strings(
+        &mut missing_contributions,
+        remote_inventory.needs_verifier.clone(),
     );
     let missing_verifications = missing_from_remote(
         &remote_inventory.verifications,
@@ -2400,6 +2408,15 @@ fn dedupe_strings(values: &mut Vec<String>) {
     values.retain(|value| seen.insert(value.clone()));
 }
 
+fn merge_strings(target: &mut Vec<String>, incoming: Vec<String>) {
+    for value in incoming {
+        if !target.iter().any(|existing| existing == &value) {
+            target.push(value);
+        }
+    }
+    target.truncate(LABOR_INVENTORY_LIMIT);
+}
+
 fn queue_pending_labor_object<T: Serialize>(
     store: &AtpStore,
     object_kind: &str,
@@ -2530,34 +2547,40 @@ fn push_labor_objects_to_peer(
     verification_ids: &[String],
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    if let Ok(campaigns) = store.campaigns_by_ids(campaign_ids) {
-        for campaign in campaigns {
-            send_campaign_to_peer(swarm, state, peer_id, campaign, true, outbound);
-        }
+    if campaign_ids.is_empty()
+        && claim_ids.is_empty()
+        && contribution_ids.is_empty()
+        && verification_ids.is_empty()
+    {
+        return;
     }
-    if let Ok(claims) = store.work_unit_claims_by_ids(claim_ids) {
-        for claim in claims {
-            send_work_unit_claim_to_peer(swarm, state, peer_id, claim, true, outbound);
-        }
+    let request = LaborObjectRequest {
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        app_version: labor_wire_app_version(),
+        capabilities: labor_wire_capabilities(),
+        campaign_ids: campaign_ids.to_vec(),
+        claim_ids: claim_ids.to_vec(),
+        contribution_ids: contribution_ids.to_vec(),
+        verification_ids: verification_ids.to_vec(),
+    };
+    let bundle = build_labor_object_bundle(store, request);
+    if bundle.campaigns.is_empty()
+        && bundle.claims.is_empty()
+        && bundle.contributions.is_empty()
+        && bundle.verifications.is_empty()
+    {
+        return;
     }
-    if let Ok(contributions) = store.contributions_by_ids(contribution_ids) {
-        for contribution in contributions {
-            send_contribution_to_peer(swarm, state, peer_id, contribution, true, outbound);
-        }
-    }
-    if let Ok(bundles) = store.verification_bundles_by_ids(verification_ids) {
-        for (verification, allocations) in bundles {
-            send_verification_result_to_peer(
-                swarm,
-                state,
-                peer_id,
-                verification,
-                allocations,
-                true,
-                outbound,
-            );
-        }
-    }
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
+        WireRequest::LaborObjectBundle(bundle),
+        PendingOutbound::LaborObjectBundle {
+            peer_id: peer_id.clone(),
+            silent: true,
+        },
+    );
 }
 
 fn maybe_repair_stale_receipts(
@@ -2777,104 +2800,6 @@ fn verify_network_contributions(
             }),
         );
     }
-}
-
-fn send_work_unit_claim_to_peer(
-    swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    state: &P2pState,
-    peer_id: &PeerId,
-    claim: AuditWorkUnitClaim,
-    silent: bool,
-    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    send_wire_request_to_peer(
-        swarm,
-        state,
-        outbound,
-        WireRequest::WorkUnitClaim(claim.clone()),
-        PendingOutbound::WorkUnitClaim {
-            peer_id: peer_id.clone(),
-            campaign_id: claim.campaign_id,
-            work_unit_id: claim.work_unit_id,
-            claim_id: claim.claim_id,
-            silent,
-        },
-    );
-}
-
-fn send_campaign_to_peer(
-    swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    state: &P2pState,
-    peer_id: &PeerId,
-    campaign: ProtocolAuditCampaign,
-    silent: bool,
-    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    send_wire_request_to_peer(
-        swarm,
-        state,
-        outbound,
-        WireRequest::Campaign(campaign.clone()),
-        PendingOutbound::Campaign {
-            peer_id: peer_id.clone(),
-            campaign_id: campaign.campaign_id,
-            silent,
-        },
-    );
-}
-
-fn send_contribution_to_peer(
-    swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    state: &P2pState,
-    peer_id: &PeerId,
-    contribution: NodeContribution,
-    silent: bool,
-    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    send_wire_request_to_peer(
-        swarm,
-        state,
-        outbound,
-        WireRequest::Contribution(contribution.clone()),
-        PendingOutbound::Contribution {
-            peer_id: peer_id.clone(),
-            campaign_id: contribution.campaign_id,
-            contribution_id: contribution.contribution_id,
-            receipt_hash: contribution.receipt_hash,
-            silent,
-        },
-    );
-}
-
-fn send_verification_result_to_peer(
-    swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    state: &P2pState,
-    peer_id: &PeerId,
-    verification: VerificationResult,
-    allocations: Vec<CreditAllocation>,
-    silent: bool,
-    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    let credit_total = allocations
-        .iter()
-        .map(|allocation| allocation.total)
-        .sum::<u32>();
-    send_wire_request_to_peer(
-        swarm,
-        state,
-        outbound,
-        WireRequest::VerificationResult {
-            verification: verification.clone(),
-            allocations,
-        },
-        PendingOutbound::VerificationResult {
-            peer_id: peer_id.clone(),
-            campaign_id: verification.campaign_id,
-            verification_id: verification.verification_id,
-            credit_total,
-            silent,
-        },
-    );
 }
 
 fn send_envelope(
@@ -3541,7 +3466,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.13"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.7.14"
             }"#,
         )
         .expect("valid manifest");

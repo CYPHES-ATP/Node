@@ -57,11 +57,10 @@ const AUDIT_SCOPE = [
 const AUTO_TICK_INTERVAL_MS = 12_000;
 const TELEMETRY_TICK_INTERVAL_MS = 1_000;
 const MAX_AUTO_CAMPAIGNS_PER_DAY = 2400;
-const MAX_SELF_PENDING_CONTRIBUTIONS = 1;
-const GUARDIAN_REAUDIT_EPOCH_MS = 12 * 60 * 60 * 1000;
+const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.13";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.14";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -328,8 +327,10 @@ function updateAutoCounter(
   });
 }
 
-function guardianEpochKey(date = new Date()) {
-  return `epoch-${Math.floor(date.getTime() / GUARDIAN_REAUDIT_EPOCH_MS)}`;
+function guardianEpochKey(targetCursor: number, targetCount: number) {
+  const size = Math.max(1, targetCount);
+  const round = Math.floor(Math.max(0, targetCursor) / size) + 1;
+  return `epoch-${round}`;
 }
 
 function AppContent() {
@@ -912,7 +913,7 @@ function AppContent() {
   async function seedGuardianCampaign(target: GuardianTarget, nextCursor: number) {
     pushAutoPulse(`Watching ${target.protocolName}`, "info");
     const inspected = await inspectRepository(target.repoUrl);
-    const currentEpoch = guardianEpochKey();
+    const currentEpoch = guardianEpochKey(normalizedAutoCounters.targetCursor, guardianTargets.length);
     const epochScopeLine = `Guardian epoch: ${currentEpoch}`;
     const existingCampaign = campaigns.find(
       (campaign) =>

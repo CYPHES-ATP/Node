@@ -30,7 +30,10 @@ Each target includes:
 
 CYPHES resolves the GitHub repository to the current default-branch commit. It
 creates work only when the same target/path/commit is not already active in the
-local campaign set. If unchanged, it records the observation and moves on.
+local campaign set for the current coverage epoch. If unchanged inside that
+epoch, it records the observation and moves on. After the target cursor
+completes a full Guardian Index pass, CYPHES starts the next epoch and can
+create fresh work for unchanged commits again.
 v0.5.6 also rejects duplicate local campaign persistence for the same
 requester/repository/commit/scope tuple.
 

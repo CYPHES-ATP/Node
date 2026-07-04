@@ -65,7 +65,7 @@ protocol-specific checklist items.
 
 ## Autonomous Guardian Loop
 
-v0.7.13 makes the main CYPHES node verifier-first by default. Run mode enables
+v0.7.14 makes the main CYPHES node verifier-first by default. Run mode enables
 local model work and autonomous campaign seeding for the current session:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
@@ -78,7 +78,9 @@ local model work and autonomous campaign seeding for the current session:
 - **Quest Seeder** watches Guardian Index v2 at
   `protocol/targets/guardian-target-index.json`, resolves targets to pinned
   commits, and creates work only when the same target/path/commit is not
-  already active locally.
+  already active locally in the current coverage epoch. A new epoch starts
+  after the target cursor completes a full Guardian Index pass, so unchanged
+  commits can be re-audited as fresh round-based coverage.
 - **GitHub backoff** pauses repository reads when GitHub rate-limits the node,
   surfaces the reset window in the UI, and resumes without killing peer
   networking. Nodes can set a local GitHub token for higher quota. v0.6.2 also
@@ -87,6 +89,9 @@ local model work and autonomous campaign seeding for the current session:
 - **Daily caps** default to 2880 Guardian observations/day, 2880 model-audit
   work-unit runs/day, and 2400 autonomous campaign seeds/day for long-running
   testnet participation.
+- **Verifier-pull repair** advertises pending self-authored receipts, lets
+  independent peers explicitly request them, and sends campaign, claim, and
+  contribution context together as a dependency-complete bundle.
 - **Quality deductions** reduce parser-fallback, zero-structured-finding
   contributions by 90% and show the deduction in red runtime telemetry.
 
