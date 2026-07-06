@@ -28,6 +28,12 @@ export interface InspectedRepository {
   focusRef?: string;
 }
 
+export interface RepositoryTarget {
+  fullName: string;
+  url: string;
+  commitSha: string;
+}
+
 export interface GitHubAccessStatus {
   authenticated: boolean;
   paused: boolean;
@@ -128,6 +134,53 @@ export interface AuditWorkUnitClaim {
   signature: string;
 }
 
+export interface CognitionProof {
+  profile: string;
+  profileVersion: string;
+  proofId: string;
+  contributionId: string;
+  workerAgentId: string;
+  proofHash: string;
+  target: {
+    campaignId: string;
+    workUnitId: string;
+    workUnitKind: string;
+    workUnitTitle: string;
+    protocolName?: string;
+    repository?: RepositoryTarget;
+    scopeHash?: string;
+    authorizationHash?: string;
+  };
+  claim: {
+    claimType: string;
+    vulnerabilityClass: string;
+    status: string;
+    hypothesis: string;
+  };
+  evidence: {
+    notesHash: string;
+    artifactHashes: string[];
+    findingCount: number;
+    reportableFindingCount: number;
+    coverageCount: number;
+    coverageEvidenceCount: number;
+    reproducibleSteps: string[];
+  };
+  quality: {
+    parserFallback: boolean;
+    structuredOutput: boolean;
+    qualityMultiplier: number;
+    tier: string;
+  };
+  settlement: {
+    finalityRule: string;
+    requiredIndependentVerifiers: number;
+    settlementStatus: string;
+    creditProfile: string;
+    penaltyPolicy: string;
+  };
+}
+
 export interface NodeContribution {
   contributionId: string;
   campaignId: string;
@@ -163,6 +216,8 @@ export interface NodeContribution {
     evidence: string[];
   }>;
   commands?: string[];
+  cognitionProof?: CognitionProof;
+  defenseProof?: CognitionProof;
 }
 
 export interface VerificationResult {
@@ -173,6 +228,19 @@ export interface VerificationResult {
   decision: string;
   reasonCode: string;
   reason: string;
+  autonomousFinality?: {
+    profile: string;
+    profileVersion: string;
+    rule: string;
+    targetReceiptHash: string;
+    targetProofHash?: string;
+    decision: string;
+    disposition: string;
+    settlesImmediately: boolean;
+    requiredIndependentVerifiers: number;
+    verifierIndependent: boolean;
+    qualityTier: string;
+  };
 }
 
 export interface CreditAllocation {

@@ -2,22 +2,20 @@
 
 ## Download The Preview
 
-macOS users can download the current packaged v0.7.14 developer DMGs from:
+macOS users can download the current packaged v0.15.1 developer DMGs from:
 
-- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.14/CYPHES_0.7.14_aarch64.dmg
-- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.14/CYPHES_0.7.14_x64.dmg
+- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.15.1/CYPHES_0.15.1_aarch64.dmg
+- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.15.1/CYPHES_0.15.1_x64.dmg
 
-Windows users can download the current packaged v0.7.14 x64 NSIS setup build
-from:
-
-- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.7.14/CYPHES_0.7.14_x64-setup.exe
+The Windows x64 v0.15.1 setup build is pending a Windows-capable packaging
+host.
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. The Windows setup build is unsigned and intended for
 testnet use. Linux binary distributions are not available yet.
 
-The current source tree is v0.7.14. Run from source to test Verified ATP
+The current source tree is v0.15.1. Run from source to test Verified ATP
 independent-verifier enforcement, the isolated testnet hotfixes, the separate
 `campaign.html` admin console, and the local pinned-source GitHub cache.
 

@@ -9,10 +9,11 @@ use crate::{
         agent_id, create_signed_envelope, create_signed_envelope_with_expiry, now_rfc3339, AtpVerb,
     },
     audit_labor::{
-        signed_contribution, signed_verification, signed_work_unit_claim, AuditFinding,
-        AuditWorkUnit, AuditWorkUnitClaim, CampaignAttachment, CampaignReportSnapshot,
-        ContributionArtifact, CoverageItem, CreditSummary, NodeContribution, ProtocolAuditCampaign,
-        RuntimeDescriptor, VerificationEvidence,
+        signed_autonomous_finality_verification, signed_contribution_for_work_unit,
+        signed_work_unit_claim, AuditFinding, AuditWorkUnit, AuditWorkUnitClaim,
+        CampaignAttachment, CampaignReportSnapshot, ContributionArtifact, CoverageItem,
+        CreditSummary, NodeContribution, ProtocolAuditCampaign, RuntimeDescriptor,
+        VerificationEvidence,
     },
     audit_profile::{is_git_commit_sha, AuditContract, ReceiptApproval, RepositoryTarget},
     audit_runtime::{
@@ -395,10 +396,10 @@ pub async fn record_campaign_contribution(
         sha256: crate::audit_labor::sha256_ref(artifact_bytes),
         size_bytes: artifact_bytes.len() as u64,
     };
-    let contribution = signed_contribution(
+    let contribution = signed_contribution_for_work_unit(
         &keypair,
-        campaign.campaign_id.clone(),
-        work_unit.work_unit_id,
+        &campaign,
+        &work_unit,
         RuntimeDescriptor::deterministic_fixture(),
         note,
         vec![AuditFinding {
@@ -470,10 +471,10 @@ pub async fn run_campaign_audit_skill(
         &prior_contributions,
     )
     .await?;
-    let contribution = signed_contribution(
+    let contribution = signed_contribution_for_work_unit(
         &keypair,
-        campaign.campaign_id.clone(),
-        work_unit.work_unit_id,
+        &campaign,
+        &work_unit,
         output.runtime,
         output.notes_markdown,
         output.findings,
@@ -578,10 +579,10 @@ pub async fn run_claimed_work_unit(
     } else {
         run.await?
     };
-    let contribution = signed_contribution(
+    let contribution = signed_contribution_for_work_unit(
         &keypair,
-        campaign.campaign_id.clone(),
-        work_unit.work_unit_id,
+        &campaign,
+        &work_unit,
         output.runtime,
         output.notes_markdown,
         output.findings,
@@ -672,10 +673,10 @@ pub async fn run_accepted_audit_skill(
         &snapshot.contributions,
     )
     .await?;
-    let contribution = signed_contribution(
+    let contribution = signed_contribution_for_work_unit(
         &keypair,
-        campaign.campaign_id.clone(),
-        work_unit.work_unit_id,
+        &campaign,
+        &work_unit,
         output.runtime,
         output.notes_markdown,
         output.findings,
@@ -805,10 +806,10 @@ async fn run_professional_audit_pipeline(
             &prior_contributions,
         )
         .await?;
-        let contribution = signed_contribution(
+        let contribution = signed_contribution_for_work_unit(
             keypair,
-            campaign.campaign_id.clone(),
-            work_unit.work_unit_id,
+            &campaign,
+            &work_unit,
             output.runtime,
             output.notes_markdown,
             output.findings,
@@ -932,10 +933,9 @@ pub async fn verify_campaign_contribution(
     let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
     let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
     let evidence_size = evidence_ref.len() as u64;
-    let verification = signed_verification(
+    let verification = signed_autonomous_finality_verification(
         &keypair,
-        contribution.campaign_id.clone(),
-        contribution.contribution_id.clone(),
+        &contribution,
         decision,
         reason_code,
         reason,

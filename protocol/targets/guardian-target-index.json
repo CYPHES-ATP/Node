@@ -1,7 +1,7 @@
 {
-  "version": "0.7.14",
+  "version": "0.15.1",
   "label": "CYPHES Guardian Index v2",
-  "generatedAt": "2026-07-03T00:00:00Z",
+  "generatedAt": "2026-07-05T16:20:35Z",
   "policy": "Public guardian coverage only. CYPHES does not submit external reports in auto mode. Human approval is required before disclosure, escalation, payout claim, protocol contact, or any production interaction.",
   "notes": [
     "Bundled static seed for autonomous public guardian coverage.",

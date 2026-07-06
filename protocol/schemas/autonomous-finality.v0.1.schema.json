@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/autonomous-finality.v0.1.schema.json",
+  "title": "CYPHES Autonomous Finality",
+  "type": "object",
+  "required": [
+    "profile",
+    "profileVersion",
+    "rule",
+    "targetReceiptHash",
+    "decision",
+    "disposition",
+    "settlesImmediately",
+    "requiredIndependentVerifiers",
+    "verifierIndependent",
+    "qualityTier"
+  ],
+  "properties": {
+    "profile": { "const": "cyphes.autonomous-finality/0.1" },
+    "profileVersion": { "const": "0.1" },
+    "rule": { "const": "independent-verifier-before-settlement" },
+    "targetReceiptHash": { "$ref": "#/$defs/sha256Ref" },
+    "targetProofHash": { "$ref": "#/$defs/sha256Ref" },
+    "decision": {
+      "enum": ["accepted", "rejected", "reproduced", "revision_requested", "challenged"]
+    },
+    "disposition": { "type": "string", "minLength": 1 },
+    "settlesImmediately": { "type": "boolean" },
+    "requiredIndependentVerifiers": { "type": "integer", "minimum": 1 },
+    "verifierIndependent": { "type": "boolean" },
+    "qualityTier": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256Ref": {
+      "type": "string",
+      "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+    }
+  }
+}

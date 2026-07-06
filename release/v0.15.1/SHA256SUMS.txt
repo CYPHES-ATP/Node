@@ -1,0 +1,2 @@
+04fecaa45db35a6b0c45c54054840f281e349eb9f0fd3f5c9454a2cc67d233a8  CYPHES_0.15.1_aarch64.dmg
+aaf83ad4c45ccca68cebaf0b6cd88b5cabc2e92d408e18de7a5f18b36f60b2a1  CYPHES_0.15.1_x64.dmg

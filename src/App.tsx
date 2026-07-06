@@ -60,7 +60,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 2400;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.7.14";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.15.1";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -265,6 +265,8 @@ function formatCreditAmount(value: number) {
 }
 
 function isParserFallbackContribution(contribution: NodeContribution) {
+  const proof = contribution.cognitionProof ?? contribution.defenseProof;
+  if (proof?.quality?.parserFallback) return true;
   if (contribution.findings.length > 0) return false;
   const notes = contribution.notesMarkdown || "";
   if (notes.includes("CYPHES parser note: model output was not valid structured JSON")) return true;
@@ -1026,8 +1028,8 @@ function AppContent() {
         const credits = await p2p.verifyCampaignContribution(
           contribution.contributionId,
           "accepted",
-          "NETWORK_SIGNED_RECEIPT_ACCEPTED",
-          "Independent network verifier accepted a signed contribution receipt for ATP settlement.",
+          "AUTONOMOUS_FINALITY_ACCEPTED",
+          "Independent network verifier accepted the signed Cognition Proof and receipt for immediate ATP finality.",
         );
         issued.push(...credits.map((credit) => credit.total));
       }

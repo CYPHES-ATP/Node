@@ -5,6 +5,9 @@ currently contains the original repository-audit transaction profile and the
 first protocol audit labor network objects.
 
 - `schemas/` contains JSON Schema 2020-12 profile definitions.
+- `schemas/cognition-proof.v0.1.schema.json` and
+  `schemas/autonomous-finality.v0.1.schema.json` define the v0.15.1
+  Cognition Proof packets signed into contributions and verifier settlement.
 - `skills/` contains versioned CYPHES audit skill prompts and manifests used
   by local model runtime receipts. v0.4 is the current professional multi-pass
   audit pipeline skill and v0.5 records it as the default campaign skill pack.
@@ -35,6 +38,9 @@ python3 ../../Artifact-Two/tools/verify_atp_bundle.py \
 ```
 
 See [the profile guide](../docs/REPOSITORY_AUDIT_PROFILE.md).
+
+See [Cognition Proofs](../docs/COGNITION_PROOFS.md) for the signed local-model
+work packet and autonomous finality rule.
 
 See [the audit labor network guide](../docs/AUDIT_LABOR_NETWORK.md) for the
 campaign, work-unit claim, contribution, verification, credit, and report

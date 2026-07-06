@@ -147,9 +147,9 @@ for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securi
 targets.sort((a, b) => b.priorityScore - a.priorityScore || a.tvlRiskRank - b.tvlRiskRank);
 
 const index = {
-  version: "0.7.14",
+  version: "0.15.1",
   label: "CYPHES Guardian Index v2",
-  generatedAt: "2026-07-03T00:00:00Z",
+  generatedAt: "2026-07-05T16:20:35Z",
   policy,
   notes: [
     "Bundled static seed for autonomous public guardian coverage.",

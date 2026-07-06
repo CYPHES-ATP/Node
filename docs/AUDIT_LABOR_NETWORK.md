@@ -65,16 +65,16 @@ protocol-specific checklist items.
 
 ## Autonomous Guardian Loop
 
-v0.7.14 makes the main CYPHES node verifier-first by default. Run mode enables
+v0.15.1 makes the main CYPHES node verifier-first by default. Run mode enables
 local model work and autonomous campaign seeding for the current session:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
   model, enforces the configured runtime limit, signs the contribution, and
   submits the receipt to the requester.
-- **Auto Verifier** accepts pending signed contributions only for campaigns
+- **Auto Verifier** accepts pending signed Cognition Proofs only for campaigns
   this node requested and only when the worker is a different ATP identity, then
-  returns signed verification and ATP Credit receipts to the contributing
-  worker.
+  returns signed autonomous-finality verification and ATP Credit receipts to the
+  contributing worker.
 - **Quest Seeder** watches Guardian Index v2 at
   `protocol/targets/guardian-target-index.json`, resolves targets to pinned
   commits, and creates work only when the same target/path/commit is not

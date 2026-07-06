@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyphes.com/atp/schemas/cognition-proof.v0.1.schema.json",
+  "title": "CYPHES Cognition Proof",
+  "type": "object",
+  "required": [
+    "profile",
+    "profileVersion",
+    "proofId",
+    "contributionId",
+    "workerAgentId",
+    "target",
+    "claim",
+    "method",
+    "evidence",
+    "quality",
+    "settlement",
+    "proofHash"
+  ],
+  "properties": {
+    "profile": { "const": "cyphes.cognition-proof/0.1" },
+    "profileVersion": { "const": "0.1" },
+    "proofId": { "type": "string", "minLength": 1 },
+    "contributionId": { "type": "string", "minLength": 1 },
+    "workerAgentId": { "type": "string", "minLength": 1 },
+    "target": {
+      "type": "object",
+      "required": ["campaignId", "workUnitId", "workUnitKind", "workUnitTitle"],
+      "properties": {
+        "campaignId": { "type": "string", "minLength": 1 },
+        "workUnitId": { "type": "string", "minLength": 1 },
+        "workUnitKind": { "type": "string", "minLength": 1 },
+        "workUnitTitle": { "type": "string", "minLength": 1 },
+        "protocolName": { "type": "string" },
+        "repository": {
+          "type": "object",
+          "required": ["fullName", "url", "commitSha"],
+          "properties": {
+            "fullName": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "minLength": 1 },
+            "commitSha": { "type": "string", "pattern": "^[A-Fa-f0-9]{40}$" }
+          },
+          "additionalProperties": false
+        },
+        "scopeHash": { "$ref": "#/$defs/sha256Ref" },
+        "authorizationHash": { "$ref": "#/$defs/sha256Ref" }
+      },
+      "additionalProperties": false
+    },
+    "claim": {
+      "type": "object",
+      "required": ["claimType", "vulnerabilityClass", "status", "hypothesis"],
+      "properties": {
+        "claimType": { "type": "string", "minLength": 1 },
+        "vulnerabilityClass": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "hypothesis": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "method": {
+      "type": "object",
+      "required": [
+        "runtimeOperator",
+        "runtimeAdapter",
+        "runtimeModel",
+        "modelMultiplier",
+        "toolPolicy",
+        "commands",
+        "constraints"
+      ],
+      "properties": {
+        "runtimeOperator": { "type": "string", "minLength": 1 },
+        "runtimeAdapter": { "type": "string", "minLength": 1 },
+        "runtimeModel": { "type": "string", "minLength": 1 },
+        "modelMultiplier": { "type": "number", "minimum": 0 },
+        "toolPolicy": { "type": "array", "items": { "type": "string" } },
+        "skillHash": { "$ref": "#/$defs/sha256Ref" },
+        "inputHash": { "$ref": "#/$defs/sha256Ref" },
+        "outputHash": { "$ref": "#/$defs/sha256Ref" },
+        "commands": { "type": "array", "items": { "type": "string" } },
+        "constraints": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "notesHash",
+        "artifactHashes",
+        "findingCount",
+        "reportableFindingCount",
+        "coverageCount",
+        "coverageEvidenceCount",
+        "reproducibleSteps"
+      ],
+      "properties": {
+        "notesHash": { "$ref": "#/$defs/sha256Ref" },
+        "artifactHashes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256Ref" }
+        },
+        "findingCount": { "type": "integer", "minimum": 0 },
+        "reportableFindingCount": { "type": "integer", "minimum": 0 },
+        "coverageCount": { "type": "integer", "minimum": 0 },
+        "coverageEvidenceCount": { "type": "integer", "minimum": 0 },
+        "reproducibleSteps": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "quality": {
+      "type": "object",
+      "required": ["parserFallback", "structuredOutput", "qualityMultiplier", "tier"],
+      "properties": {
+        "parserFallback": { "type": "boolean" },
+        "structuredOutput": { "type": "boolean" },
+        "qualityMultiplier": { "type": "number", "minimum": 0 },
+        "tier": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "settlement": {
+      "type": "object",
+      "required": [
+        "finalityRule",
+        "requiredIndependentVerifiers",
+        "settlementStatus",
+        "creditProfile",
+        "penaltyPolicy"
+      ],
+      "properties": {
+        "finalityRule": { "const": "independent-verifier-before-settlement" },
+        "requiredIndependentVerifiers": { "type": "integer", "minimum": 1 },
+        "settlementStatus": { "type": "string", "minLength": 1 },
+        "creditProfile": { "const": "cyphes.credit-ledger/0.1" },
+        "penaltyPolicy": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "proofHash": { "$ref": "#/$defs/sha256Ref" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256Ref": {
+      "type": "string",
+      "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+    }
+  }
+}

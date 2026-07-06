@@ -19,9 +19,9 @@ use tokio::{select, sync::mpsc, time::MissedTickBehavior};
 use crate::{
     atp::{agent_id, create_signed_envelope, AtpAck, AtpEnvelope, AtpVerb},
     audit_labor::{
-        signed_verification, AuditWorkUnitClaim, ContributionArtifact, CreditAllocation,
-        NodeContribution, ProtocolAuditCampaign, VerificationEvidence, VerificationResult,
-        WORK_UNIT_CLAIM_TTL_MS,
+        signed_autonomous_finality_verification, AuditWorkUnitClaim, ContributionArtifact,
+        CreditAllocation, NodeContribution, ProtocolAuditCampaign, VerificationEvidence,
+        VerificationResult, WORK_UNIT_CLAIM_TTL_MS,
     },
     bundle::export_receipt_bundle,
     state::{P2pState, PeerInfo},
@@ -29,8 +29,8 @@ use crate::{
     worker::SignedExecutionResult,
 };
 
-pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.7.14";
-pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.7.14";
+pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.15.1";
+pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.15.1";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -2689,16 +2689,14 @@ fn verify_network_contributions(
         let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
         let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
         let evidence_size = evidence_ref.len() as u64;
-        let verification = match signed_verification(
+        let verification = match signed_autonomous_finality_verification(
             keypair,
-            contribution.campaign_id.clone(),
-            contribution.contribution_id.clone(),
+            &contribution,
             "accepted".to_string(),
-            "NETWORK_SIGNED_RECEIPT_ACCEPTED".to_string(),
-            "Independent network verifier accepted a signed contribution receipt for ATP settlement."
-                .to_string(),
+            "AUTONOMOUS_FINALITY_ACCEPTED".to_string(),
+            "Independent network verifier accepted the signed Cognition Proof and receipt for immediate ATP finality.".to_string(),
             vec![VerificationEvidence {
-                label: "signed contribution receipt".to_string(),
+                label: "signed Cognition Proof receipt".to_string(),
                 reference: evidence_ref,
             }],
             vec![ContributionArtifact {
@@ -3466,7 +3464,7 @@ mod tests {
             r#"{
                 "relayAddr": null,
                 "rendezvousAddr": null,
-                "rendezvousNamespace": "cyphes.repository-audit.v0.7.14"
+                "rendezvousNamespace": "cyphes.repository-audit.v0.15.1"
             }"#,
         )
         .expect("valid manifest");

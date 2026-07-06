@@ -4,6 +4,7 @@ use libp2p::identity;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::{
@@ -21,6 +22,9 @@ pub const CONTRIBUTION_PROFILE: &str = "cyphes.audit-contribution/0.1";
 pub const VERIFICATION_PROFILE: &str = "cyphes.verification-result/0.1";
 pub const CREDIT_PROFILE: &str = "cyphes.credit-ledger/0.1";
 pub const FINAL_REPORT_PROFILE: &str = "cyphes.final-audit-report/0.1";
+pub const COGNITION_PROOF_PROFILE: &str = "cyphes.cognition-proof/0.1";
+pub const LEGACY_DEFENSE_PROOF_PROFILE: &str = "cyphes.defense-proof/0.1";
+pub const AUTONOMOUS_FINALITY_PROFILE: &str = "cyphes.autonomous-finality/0.1";
 pub const AUDIT_LABOR_PROFILE_VERSION: &str = "0.1";
 pub const DEFAULT_SKILL_PACK_ID: &str = "cyphes-audit-skill";
 pub const DEFAULT_SKILL_PACK_VERSION: &str = "0.4";
@@ -280,6 +284,98 @@ pub struct CoverageItem {
     pub evidence: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionProofTarget {
+    pub campaign_id: String,
+    pub work_unit_id: String,
+    pub work_unit_kind: String,
+    pub work_unit_title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<RepositoryTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionProofMethod {
+    pub runtime_operator: String,
+    pub runtime_adapter: String,
+    pub runtime_model: String,
+    pub model_multiplier: f64,
+    pub tool_policy: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_hash: Option<String>,
+    pub commands: Vec<String>,
+    pub constraints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionProofClaim {
+    pub claim_type: String,
+    pub vulnerability_class: String,
+    pub status: String,
+    pub hypothesis: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionProofEvidence {
+    pub notes_hash: String,
+    pub artifact_hashes: Vec<String>,
+    pub finding_count: u32,
+    pub reportable_finding_count: u32,
+    pub coverage_count: u32,
+    pub coverage_evidence_count: u32,
+    pub reproducible_steps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionProofQuality {
+    pub parser_fallback: bool,
+    pub structured_output: bool,
+    pub quality_multiplier: f64,
+    pub tier: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionProofSettlement {
+    pub finality_rule: String,
+    pub required_independent_verifiers: u32,
+    pub settlement_status: String,
+    pub credit_profile: String,
+    pub penalty_policy: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionProofPacket {
+    pub profile: String,
+    pub profile_version: String,
+    pub proof_id: String,
+    pub contribution_id: String,
+    pub worker_agent_id: String,
+    pub target: CognitionProofTarget,
+    pub claim: CognitionProofClaim,
+    pub method: CognitionProofMethod,
+    pub evidence: CognitionProofEvidence,
+    pub quality: CognitionProofQuality,
+    pub settlement: CognitionProofSettlement,
+    pub proof_hash: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeContribution {
@@ -295,6 +391,12 @@ pub struct NodeContribution {
     pub artifacts: Vec<ContributionArtifact>,
     pub coverage: Vec<CoverageItem>,
     pub commands: Vec<String>,
+    #[serde(
+        alias = "defenseProof",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cognition_proof: Option<CognitionProofPacket>,
     pub created_at: String,
     pub public_key_base64_url: String,
     pub contribution_hash: String,
@@ -323,10 +425,29 @@ pub struct VerificationResult {
     pub reason: String,
     pub reproduction_evidence: Vec<VerificationEvidence>,
     pub artifacts: Vec<ContributionArtifact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomous_finality: Option<AutonomousFinality>,
     pub created_at: String,
     pub public_key_base64_url: String,
     pub verification_hash: String,
     pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutonomousFinality {
+    pub profile: String,
+    pub profile_version: String,
+    pub rule: String,
+    pub target_receipt_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_proof_hash: Option<String>,
+    pub decision: String,
+    pub disposition: String,
+    pub settles_immediately: bool,
+    pub required_independent_verifiers: u32,
+    pub verifier_independent: bool,
+    pub quality_tier: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -435,7 +556,7 @@ pub fn default_work_units(campaign: &ProtocolAuditCampaign) -> Vec<AuditWorkUnit
         (
             "peer-verification",
             "Peer verification",
-            "Accept, reject, reproduce, challenge, or request revision for another node's signed contribution with evidence and reason codes.",
+            "Accept, reject, reproduce, or request revision for another node's signed Cognition Proof with evidence and reason codes. Valid work settles immediately after independent verification.",
             vec!["verification.json", "reproduction-notes.md"],
         ),
         (
@@ -517,23 +638,114 @@ pub fn signed_contribution(
     coverage: Vec<CoverageItem>,
     commands: Vec<String>,
 ) -> Result<NodeContribution, String> {
-    if notes_markdown.trim().is_empty() || artifacts.is_empty() || coverage.is_empty() {
-        return Err("contribution requires notes, artifacts, and coverage evidence".to_string());
-    }
-    let public_key = raw_ed25519_public_key(&keypair.public())?;
-    let mut contribution = NodeContribution {
-        profile: CONTRIBUTION_PROFILE.to_string(),
-        profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
-        contribution_id: format!("contribution_{}", Uuid::new_v4().simple()),
+    signed_contribution_with_context(
+        keypair,
+        None,
+        None,
         campaign_id,
         work_unit_id,
-        worker_agent_id: agent_id(&keypair.public()),
         runtime,
         notes_markdown,
         findings,
         artifacts,
         coverage,
         commands,
+    )
+}
+
+pub fn signed_contribution_for_work_unit(
+    keypair: &identity::Keypair,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
+    runtime: RuntimeDescriptor,
+    notes_markdown: String,
+    findings: Vec<AuditFinding>,
+    artifacts: Vec<ContributionArtifact>,
+    coverage: Vec<CoverageItem>,
+    commands: Vec<String>,
+) -> Result<NodeContribution, String> {
+    validate_campaign(campaign)?;
+    validate_work_unit(work_unit)?;
+    if work_unit.campaign_id != campaign.campaign_id {
+        return Err("work unit does not belong to campaign".to_string());
+    }
+    signed_contribution_with_context(
+        keypair,
+        Some(campaign),
+        Some(work_unit),
+        campaign.campaign_id.clone(),
+        work_unit.work_unit_id.clone(),
+        runtime,
+        notes_markdown,
+        findings,
+        artifacts,
+        coverage,
+        commands,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn signed_contribution_with_context(
+    keypair: &identity::Keypair,
+    campaign: Option<&ProtocolAuditCampaign>,
+    work_unit: Option<&AuditWorkUnit>,
+    campaign_id: String,
+    work_unit_id: String,
+    runtime: RuntimeDescriptor,
+    notes_markdown: String,
+    findings: Vec<AuditFinding>,
+    artifacts: Vec<ContributionArtifact>,
+    coverage: Vec<CoverageItem>,
+    commands: Vec<String>,
+) -> Result<NodeContribution, String> {
+    if notes_markdown.trim().is_empty() || artifacts.is_empty() || coverage.is_empty() {
+        return Err("contribution requires notes, artifacts, and coverage evidence".to_string());
+    }
+    let mut artifacts = artifacts;
+    let public_key = raw_ed25519_public_key(&keypair.public())?;
+    let contribution_id = format!("contribution_{}", Uuid::new_v4().simple());
+    let worker_agent_id = agent_id(&keypair.public());
+    let cognition_proof = build_cognition_proof_packet(
+        campaign,
+        work_unit,
+        contribution_id.clone(),
+        worker_agent_id.clone(),
+        campaign_id.clone(),
+        work_unit_id.clone(),
+        &runtime,
+        &notes_markdown,
+        &findings,
+        &artifacts,
+        &coverage,
+        &commands,
+    )?;
+    if !artifacts
+        .iter()
+        .any(|artifact| artifact.path == "cognition-proof.json")
+    {
+        let proof_json =
+            serde_json::to_vec_pretty(&cognition_proof).map_err(|error| error.to_string())?;
+        artifacts.push(ContributionArtifact {
+            path: "cognition-proof.json".to_string(),
+            media_type: "application/json".to_string(),
+            sha256: sha256_ref(&proof_json),
+            size_bytes: proof_json.len() as u64,
+        });
+    }
+    let mut contribution = NodeContribution {
+        profile: CONTRIBUTION_PROFILE.to_string(),
+        profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
+        contribution_id,
+        campaign_id,
+        work_unit_id,
+        worker_agent_id,
+        runtime,
+        notes_markdown,
+        findings,
+        artifacts,
+        coverage,
+        commands,
+        cognition_proof: Some(cognition_proof),
         created_at: now_rfc3339(),
         public_key_base64_url: URL_SAFE_NO_PAD.encode(public_key),
         contribution_hash: String::new(),
@@ -547,6 +759,211 @@ pub fn signed_contribution(
     Ok(contribution)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_cognition_proof_packet(
+    campaign: Option<&ProtocolAuditCampaign>,
+    work_unit: Option<&AuditWorkUnit>,
+    contribution_id: String,
+    worker_agent_id: String,
+    campaign_id: String,
+    work_unit_id: String,
+    runtime: &RuntimeDescriptor,
+    notes_markdown: &str,
+    findings: &[AuditFinding],
+    artifacts: &[ContributionArtifact],
+    coverage: &[CoverageItem],
+    commands: &[String],
+) -> Result<CognitionProofPacket, String> {
+    let parser_fallback = parser_fallback_signal(notes_markdown, coverage, commands);
+    let reportable_finding_count = findings
+        .iter()
+        .filter(|finding| finding.reportable && finding.status == "candidate")
+        .count() as u32;
+    let coverage_evidence_count = coverage
+        .iter()
+        .map(|item| item.evidence.len() as u32)
+        .sum::<u32>();
+    let quality_multiplier = if parser_fallback {
+        PARSER_FALLBACK_CREDIT_MULTIPLIER
+    } else {
+        1.0
+    };
+    let quality_tier = if parser_fallback {
+        "parser_fallback"
+    } else if reportable_finding_count > 0 {
+        "structured_candidate_finding"
+    } else if coverage_evidence_count >= EXCELLENT_OUTPUT_COVERAGE_THRESHOLD {
+        "structured_high_evidence_coverage"
+    } else {
+        "structured_coverage"
+    };
+    let work_unit_kind = work_unit
+        .map(|unit| unit.kind.clone())
+        .unwrap_or_else(|| work_unit_kind_from_id(&work_unit_id));
+    let work_unit_title = work_unit
+        .map(|unit| unit.title.clone())
+        .unwrap_or_else(|| work_unit_kind.replace('-', " "));
+    let hypothesis = findings
+        .iter()
+        .find(|finding| finding.reportable)
+        .map(|finding| finding.title.clone())
+        .or_else(|| work_unit.map(|unit| unit.instructions.clone()))
+        .unwrap_or_else(|| "Bounded security coverage or negative finding claim.".to_string());
+    let mut constraints = runtime.tool_policy.clone();
+    for constraint in [
+        "verify-before-settlement",
+        "independent-verifier-required",
+        "autonomous-finality-no-challenge-window",
+    ] {
+        if !constraints.iter().any(|value| value == constraint) {
+            constraints.push(constraint.to_string());
+        }
+    }
+    let mut proof = CognitionProofPacket {
+        profile: COGNITION_PROOF_PROFILE.to_string(),
+        profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
+        proof_id: format!("proof_{}", Uuid::new_v4().simple()),
+        contribution_id,
+        worker_agent_id,
+        target: CognitionProofTarget {
+            campaign_id,
+            work_unit_id,
+            work_unit_kind: work_unit_kind.clone(),
+            work_unit_title,
+            protocol_name: campaign.map(|campaign| campaign.protocol_name.clone()),
+            repository: campaign.map(|campaign| campaign.repository.clone()),
+            scope_hash: campaign.map(|campaign| sha256_ref(campaign.scope_text.as_bytes())),
+            authorization_hash: campaign.map(campaign_authorization_hash),
+        },
+        claim: CognitionProofClaim {
+            claim_type: if reportable_finding_count > 0 {
+                "candidate_vulnerability"
+            } else {
+                "security_coverage"
+            }
+            .to_string(),
+            vulnerability_class: work_unit_kind,
+            status: if parser_fallback {
+                "needs_structured_reproduction"
+            } else if reportable_finding_count > 0 {
+                "candidate"
+            } else {
+                "negative_or_non_reportable"
+            }
+            .to_string(),
+            hypothesis: truncate_string(&hypothesis, 600),
+        },
+        method: CognitionProofMethod {
+            runtime_operator: runtime.operator.clone(),
+            runtime_adapter: runtime.adapter.clone(),
+            runtime_model: runtime.model.clone(),
+            model_multiplier: runtime.model_multiplier,
+            tool_policy: runtime.tool_policy.clone(),
+            skill_hash: runtime.skill_hash.clone(),
+            input_hash: runtime.input_hash.clone(),
+            output_hash: runtime.output_hash.clone(),
+            commands: commands
+                .iter()
+                .take(16)
+                .map(|command| truncate_string(command, 240))
+                .collect(),
+            constraints,
+        },
+        evidence: CognitionProofEvidence {
+            notes_hash: sha256_ref(notes_markdown.as_bytes()),
+            artifact_hashes: artifacts.iter().map(|artifact| artifact.sha256.clone()).collect(),
+            finding_count: findings.len() as u32,
+            reportable_finding_count,
+            coverage_count: coverage.len() as u32,
+            coverage_evidence_count,
+            reproducible_steps: reproducible_steps(findings, coverage, commands),
+        },
+        quality: CognitionProofQuality {
+            parser_fallback,
+            structured_output: !parser_fallback,
+            quality_multiplier,
+            tier: quality_tier.to_string(),
+        },
+        settlement: CognitionProofSettlement {
+            finality_rule: "independent-verifier-before-settlement".to_string(),
+            required_independent_verifiers: 1,
+            settlement_status: "pending_independent_verification".to_string(),
+            credit_profile: CREDIT_PROFILE.to_string(),
+            penalty_policy: "parser fallback receives 0.10x quality multiplier; malformed proofs are rejected before credit allocation".to_string(),
+        },
+        proof_hash: String::new(),
+    };
+    proof.proof_hash = cognition_proof_hash(&proof)?;
+    Ok(proof)
+}
+
+fn work_unit_kind_from_id(work_unit_id: &str) -> String {
+    work_unit_id
+        .rsplit_once('-')
+        .map(|(_, kind)| kind.to_string())
+        .unwrap_or_else(|| "security-coverage".to_string())
+}
+
+fn campaign_authorization_hash(campaign: &ProtocolAuditCampaign) -> String {
+    sha256_ref(
+        json!({
+            "requesterAgentId": campaign.requester_agent_id,
+            "bountyUrl": campaign.bounty_url,
+            "impactsInScope": campaign.impacts_in_scope,
+            "outOfScope": campaign.out_of_scope,
+            "auditBriefHash": campaign.audit_brief_hash,
+            "skillPack": campaign.skill_pack,
+        })
+        .to_string()
+        .as_bytes(),
+    )
+}
+
+fn reproducible_steps(
+    findings: &[AuditFinding],
+    coverage: &[CoverageItem],
+    commands: &[String],
+) -> Vec<String> {
+    let mut steps = Vec::new();
+    for command in commands.iter().take(6) {
+        steps.push(truncate_string(command, 240));
+    }
+    for finding in findings.iter().take(6) {
+        for evidence in finding.evidence.iter().take(3) {
+            steps.push(truncate_string(
+                &format!("Review finding {} evidence: {}", finding.id, evidence),
+                240,
+            ));
+        }
+    }
+    for item in coverage.iter().take(6) {
+        for evidence in item.evidence.iter().take(2) {
+            steps.push(truncate_string(
+                &format!("Recheck {} coverage evidence: {}", item.area, evidence),
+                240,
+            ));
+        }
+    }
+    if steps.is_empty() {
+        steps.push(
+            "Review signed notes and artifact hashes at the pinned repository commit.".to_string(),
+        );
+    }
+    steps.truncate(20);
+    steps
+}
+
+fn truncate_string(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) && end > 0 {
+        end -= 1;
+    }
+    format!("{}...", &value[..end])
+}
+
 pub fn signed_verification(
     keypair: &identity::Keypair,
     campaign_id: String,
@@ -556,6 +973,81 @@ pub fn signed_verification(
     reason: String,
     reproduction_evidence: Vec<VerificationEvidence>,
     artifacts: Vec<ContributionArtifact>,
+) -> Result<VerificationResult, String> {
+    signed_verification_with_finality(
+        keypair,
+        campaign_id,
+        target_contribution_id,
+        decision,
+        reason_code,
+        reason,
+        reproduction_evidence,
+        artifacts,
+        None,
+    )
+}
+
+pub fn signed_autonomous_finality_verification(
+    keypair: &identity::Keypair,
+    contribution: &NodeContribution,
+    decision: String,
+    reason_code: String,
+    reason: String,
+    reproduction_evidence: Vec<VerificationEvidence>,
+    artifacts: Vec<ContributionArtifact>,
+) -> Result<VerificationResult, String> {
+    verify_signed_contribution(contribution)?;
+    let verifier_agent_id = agent_id(&keypair.public());
+    let finality = AutonomousFinality {
+        profile: AUTONOMOUS_FINALITY_PROFILE.to_string(),
+        profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
+        rule: "independent-verifier-before-settlement".to_string(),
+        target_receipt_hash: contribution.receipt_hash.clone(),
+        target_proof_hash: contribution
+            .cognition_proof
+            .as_ref()
+            .map(|proof| proof.proof_hash.clone()),
+        decision: decision.clone(),
+        disposition: finality_disposition(&decision).to_string(),
+        settles_immediately: matches!(decision.as_str(), "accepted" | "reproduced"),
+        required_independent_verifiers: 1,
+        verifier_independent: verifier_agent_id != contribution.worker_agent_id,
+        quality_tier: contribution
+            .cognition_proof
+            .as_ref()
+            .map(|proof| proof.quality.tier.clone())
+            .unwrap_or_else(|| {
+                if is_parser_fallback_contribution(contribution) {
+                    "legacy_parser_fallback".to_string()
+                } else {
+                    "legacy_signed_contribution".to_string()
+                }
+            }),
+    };
+    signed_verification_with_finality(
+        keypair,
+        contribution.campaign_id.clone(),
+        contribution.contribution_id.clone(),
+        decision,
+        reason_code,
+        reason,
+        reproduction_evidence,
+        artifacts,
+        Some(finality),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn signed_verification_with_finality(
+    keypair: &identity::Keypair,
+    campaign_id: String,
+    target_contribution_id: String,
+    decision: String,
+    reason_code: String,
+    reason: String,
+    reproduction_evidence: Vec<VerificationEvidence>,
+    artifacts: Vec<ContributionArtifact>,
+    autonomous_finality: Option<AutonomousFinality>,
 ) -> Result<VerificationResult, String> {
     validate_verification_decision(&decision)?;
     if reason_code.trim().is_empty() || reason.trim().is_empty() {
@@ -574,6 +1066,7 @@ pub fn signed_verification(
         reason,
         reproduction_evidence,
         artifacts,
+        autonomous_finality,
         created_at: now_rfc3339(),
         public_key_base64_url: URL_SAFE_NO_PAD.encode(public_key),
         verification_hash: String::new(),
@@ -583,6 +1076,16 @@ pub fn signed_verification(
     verification.signature =
         sign_canonical(keypair, &verification_signature_value(&verification)?)?;
     Ok(verification)
+}
+
+fn finality_disposition(decision: &str) -> &'static str {
+    match decision {
+        "accepted" | "reproduced" => "final_settled",
+        "rejected" => "final_rejected",
+        "revision_requested" => "final_needs_revision",
+        "challenged" => "legacy_challenged",
+        _ => "final_reviewed",
+    }
 }
 
 pub fn verify_signed_contribution(contribution: &NodeContribution) -> Result<(), String> {
@@ -708,6 +1211,7 @@ fn allocate_credits_with_policy(
     if contribution.receipt_hash.trim().is_empty() || !is_sha256_ref(&contribution.receipt_hash) {
         return Err("credits require a signed contribution receipt hash".to_string());
     }
+    validate_verification_finality_for_contribution(contribution, verification)?;
 
     let reportable_findings = contribution
         .findings
@@ -819,27 +1323,48 @@ fn qualifies_for_large_model_bonus(reportable_findings: u32, high_quality_covera
 }
 
 fn contribution_quality_multiplier(contribution: &NodeContribution) -> f64 {
-    if is_parser_fallback_contribution(contribution) {
-        PARSER_FALLBACK_CREDIT_MULTIPLIER
-    } else {
-        1.0
-    }
+    contribution
+        .cognition_proof
+        .as_ref()
+        .map(|proof| proof.quality.quality_multiplier)
+        .unwrap_or_else(|| {
+            if is_parser_fallback_contribution(contribution) {
+                PARSER_FALLBACK_CREDIT_MULTIPLIER
+            } else {
+                1.0
+            }
+        })
 }
 
 fn is_parser_fallback_contribution(contribution: &NodeContribution) -> bool {
-    contribution.findings.is_empty()
-        && (contribution
-            .notes_markdown
-            .contains("CYPHES parser note: model output was not valid structured JSON")
-            || contribution.commands.iter().any(|command| {
-                command
-                    .to_ascii_lowercase()
-                    .contains("structured parse failed")
-            })
-            || contribution.coverage.iter().any(|coverage| {
-                coverage.area.eq_ignore_ascii_case("local model output")
-                    && coverage.status.eq_ignore_ascii_case("needs_review")
-            }))
+    contribution
+        .cognition_proof
+        .as_ref()
+        .map(|proof| proof.quality.parser_fallback)
+        .unwrap_or_else(|| {
+            parser_fallback_signal(
+                &contribution.notes_markdown,
+                &contribution.coverage,
+                &contribution.commands,
+            )
+        })
+}
+
+fn parser_fallback_signal(
+    notes_markdown: &str,
+    coverage: &[CoverageItem],
+    commands: &[String],
+) -> bool {
+    notes_markdown.contains("CYPHES parser note: model output was not valid structured JSON")
+        || commands.iter().any(|command| {
+            command
+                .to_ascii_lowercase()
+                .contains("structured parse failed")
+        })
+        || coverage.iter().any(|coverage| {
+            coverage.area.eq_ignore_ascii_case("local model output")
+                && coverage.status.eq_ignore_ascii_case("needs_review")
+        })
 }
 
 fn scaled_credit_bucket(points: u32, multiplier: f64) -> u32 {
@@ -1271,6 +1796,9 @@ pub fn validate_contribution(contribution: &NodeContribution) -> Result<(), Stri
     for artifact in &contribution.artifacts {
         validate_artifact(artifact)?;
     }
+    if let Some(cognition_proof) = &contribution.cognition_proof {
+        validate_cognition_proof_for_contribution(contribution, cognition_proof)?;
+    }
     Ok(())
 }
 
@@ -1287,7 +1815,11 @@ pub fn validate_verification(verification: &VerificationResult) -> Result<(), St
     {
         return Err("invalid signed verification".to_string());
     }
-    validate_verification_decision(&verification.decision)
+    validate_verification_decision(&verification.decision)?;
+    if let Some(finality) = &verification.autonomous_finality {
+        validate_autonomous_finality_shape(finality)?;
+    }
+    Ok(())
 }
 
 pub fn sha256_ref(bytes: &[u8]) -> String {
@@ -1324,6 +1856,165 @@ fn verification_signature_value(
     object.remove("verificationHash");
     object.remove("signature");
     Ok(value)
+}
+
+fn cognition_proof_hash(proof: &CognitionProofPacket) -> Result<String, String> {
+    let mut value = serde_json::to_value(proof).map_err(|error| error.to_string())?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "cognition proof must serialize as an object".to_string())?;
+    object.remove("proofHash");
+    canonical_hash(&value)
+}
+
+fn validate_cognition_proof_for_contribution(
+    contribution: &NodeContribution,
+    proof: &CognitionProofPacket,
+) -> Result<(), String> {
+    if !matches!(
+        proof.profile.as_str(),
+        COGNITION_PROOF_PROFILE | LEGACY_DEFENSE_PROOF_PROFILE
+    ) || proof.profile_version != AUDIT_LABOR_PROFILE_VERSION
+        || proof.proof_id.trim().is_empty()
+        || proof.proof_hash.trim().is_empty()
+    {
+        return Err("invalid cognition proof packet".to_string());
+    }
+    if proof.contribution_id != contribution.contribution_id
+        || proof.worker_agent_id != contribution.worker_agent_id
+        || proof.target.campaign_id != contribution.campaign_id
+        || proof.target.work_unit_id != contribution.work_unit_id
+    {
+        return Err("cognition proof target does not match contribution".to_string());
+    }
+    if proof.proof_hash != cognition_proof_hash(proof)? {
+        return Err("cognition proof hash mismatch".to_string());
+    }
+    if proof.method.runtime_adapter != contribution.runtime.adapter
+        || proof.method.runtime_model != contribution.runtime.model
+        || (proof.method.model_multiplier - contribution.runtime.model_multiplier).abs()
+            > f64::EPSILON
+    {
+        return Err("cognition proof method does not match contribution runtime".to_string());
+    }
+    if proof.method.skill_hash != contribution.runtime.skill_hash
+        || proof.method.input_hash != contribution.runtime.input_hash
+        || proof.method.output_hash != contribution.runtime.output_hash
+    {
+        return Err("cognition proof method hashes do not match contribution runtime".to_string());
+    }
+    if proof.evidence.notes_hash != sha256_ref(contribution.notes_markdown.as_bytes()) {
+        return Err("cognition proof notes hash does not match contribution".to_string());
+    }
+    if proof.evidence.finding_count != contribution.findings.len() as u32
+        || proof.evidence.reportable_finding_count
+            != contribution
+                .findings
+                .iter()
+                .filter(|finding| finding.reportable && finding.status == "candidate")
+                .count() as u32
+        || proof.evidence.coverage_count != contribution.coverage.len() as u32
+        || proof.evidence.coverage_evidence_count
+            != contribution
+                .coverage
+                .iter()
+                .map(|coverage| coverage.evidence.len() as u32)
+                .sum::<u32>()
+    {
+        return Err("cognition proof evidence counters do not match contribution".to_string());
+    }
+    let artifact_hashes = contribution
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.sha256.as_str())
+        .collect::<HashSet<_>>();
+    for hash in &proof.evidence.artifact_hashes {
+        if !is_sha256_ref(hash) || !artifact_hashes.contains(hash.as_str()) {
+            return Err("cognition proof references an unknown artifact hash".to_string());
+        }
+    }
+    let parser_fallback = parser_fallback_signal(
+        &contribution.notes_markdown,
+        &contribution.coverage,
+        &contribution.commands,
+    );
+    if proof.quality.parser_fallback != parser_fallback
+        || proof.quality.structured_output == parser_fallback
+    {
+        return Err("cognition proof quality does not match contribution".to_string());
+    }
+    let expected_multiplier = if parser_fallback {
+        PARSER_FALLBACK_CREDIT_MULTIPLIER
+    } else {
+        1.0
+    };
+    if (proof.quality.quality_multiplier - expected_multiplier).abs() > f64::EPSILON {
+        return Err("cognition proof quality multiplier does not match contribution".to_string());
+    }
+    if proof.settlement.finality_rule != "independent-verifier-before-settlement"
+        || proof.settlement.required_independent_verifiers != 1
+        || proof.settlement.credit_profile != CREDIT_PROFILE
+    {
+        return Err("cognition proof settlement rule is unsupported".to_string());
+    }
+    Ok(())
+}
+
+fn validate_autonomous_finality_shape(finality: &AutonomousFinality) -> Result<(), String> {
+    if finality.profile != AUTONOMOUS_FINALITY_PROFILE
+        || finality.profile_version != AUDIT_LABOR_PROFILE_VERSION
+        || finality.rule != "independent-verifier-before-settlement"
+        || finality.target_receipt_hash.trim().is_empty()
+        || !is_sha256_ref(&finality.target_receipt_hash)
+        || finality.required_independent_verifiers != 1
+        || finality.disposition.trim().is_empty()
+        || finality.quality_tier.trim().is_empty()
+    {
+        return Err("invalid autonomous finality packet".to_string());
+    }
+    if let Some(proof_hash) = &finality.target_proof_hash {
+        if !is_sha256_ref(proof_hash) {
+            return Err("autonomous finality proof hash is invalid".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_verification_finality_for_contribution(
+    contribution: &NodeContribution,
+    verification: &VerificationResult,
+) -> Result<(), String> {
+    if let Some(finality) = &verification.autonomous_finality {
+        validate_autonomous_finality_shape(finality)?;
+        if finality.target_receipt_hash != contribution.receipt_hash
+            || finality.decision != verification.decision
+            || finality.verifier_independent
+                != (verification.verifier_agent_id != contribution.worker_agent_id)
+        {
+            return Err(
+                "autonomous finality packet does not match verification target".to_string(),
+            );
+        }
+        match (&contribution.cognition_proof, &finality.target_proof_hash) {
+            (Some(proof), Some(target_hash)) if proof.proof_hash == *target_hash => {}
+            (Some(_), Some(_)) => {
+                return Err("autonomous finality proof hash does not match contribution".to_string())
+            }
+            (Some(_), None) => {
+                return Err("autonomous finality must bind the cognition proof hash".to_string())
+            }
+            (None, Some(_)) => {
+                return Err("autonomous finality references a missing cognition proof".to_string())
+            }
+            (None, None) => {}
+        }
+        if matches!(verification.decision.as_str(), "accepted" | "reproduced")
+            && !finality.settles_immediately
+        {
+            return Err("accepted autonomous finality must settle immediately".to_string());
+        }
+    }
+    Ok(())
 }
 
 fn claim_signature_value(claim: &AuditWorkUnitClaim) -> Result<serde_json::Value, String> {
@@ -1606,6 +2297,99 @@ mod tests {
         assert!(fallback_worker_credit
             .formula
             .contains("quality(0.10 parser fallback)"));
+    }
+
+    #[test]
+    fn cognition_proof_and_autonomous_finality_are_signed_credit_inputs() {
+        let requester = identity::Keypair::generate_ed25519();
+        let worker = identity::Keypair::generate_ed25519();
+        let verifier = identity::Keypair::generate_ed25519();
+        let campaign = ProtocolAuditCampaign::new(
+            "ProofNet".to_string(),
+            RepositoryTarget {
+                full_name: "example/proofnet".to_string(),
+                url: "https://github.com/example/proofnet".to_string(),
+                commit_sha: "1111111111111111111111111111111111111111".to_string(),
+            },
+            "Authorized read-only security review.".to_string(),
+            None,
+            vec!["loss of funds".to_string()],
+            vec!["social engineering".to_string()],
+            Some("Defend the pinned commit.".to_string()),
+            None,
+            vec![],
+            None,
+            agent_id(&requester.public()),
+        )
+        .unwrap();
+        let work_unit = default_work_units(&campaign)
+            .into_iter()
+            .find(|unit| unit.kind == "finding-validation")
+            .unwrap();
+        let contribution = signed_contribution_for_work_unit(
+            &worker,
+            &campaign,
+            &work_unit,
+            RuntimeDescriptor::deterministic_fixture(),
+            "Validated candidate finding and recorded reproducible evidence.".to_string(),
+            vec![AuditFinding {
+                id: "CYPHES-001".to_string(),
+                title: "Unchecked withdrawal accounting".to_string(),
+                severity: "high".to_string(),
+                status: "candidate".to_string(),
+                impact: Some("fund loss".to_string()),
+                evidence: vec!["src/Vault.sol:42".to_string()],
+                reportable: true,
+            }],
+            vec![artifact("validation-notes.md")],
+            vec![CoverageItem {
+                area: "finding validation".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["src/Vault.sol:42 reviewed at pinned commit.".to_string()],
+            }],
+            vec!["read pinned source and compared accounting invariant".to_string()],
+        )
+        .unwrap();
+        verify_signed_contribution(&contribution).unwrap();
+        let proof = contribution.cognition_proof.as_ref().unwrap();
+        assert_eq!(
+            proof.target.repository.as_ref().unwrap().full_name,
+            "example/proofnet"
+        );
+        assert_eq!(proof.target.work_unit_kind, "finding-validation");
+        assert_eq!(proof.quality.tier, "structured_candidate_finding");
+        assert!(contribution
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path == "cognition-proof.json"));
+
+        let verification = signed_autonomous_finality_verification(
+            &verifier,
+            &contribution,
+            "accepted".to_string(),
+            "AUTONOMOUS_FINALITY_ACCEPTED".to_string(),
+            "Independent verifier reproduced the proof packet evidence.".to_string(),
+            vec![VerificationEvidence {
+                label: "proof packet".to_string(),
+                reference: proof.proof_hash.clone(),
+            }],
+            vec![artifact("verification.md")],
+        )
+        .unwrap();
+        let finality = verification.autonomous_finality.as_ref().unwrap();
+        assert_eq!(finality.target_receipt_hash, contribution.receipt_hash);
+        assert_eq!(
+            finality.target_proof_hash.as_deref(),
+            Some(proof.proof_hash.as_str())
+        );
+        assert!(finality.settles_immediately);
+        assert!(finality.verifier_independent);
+        assert_eq!(
+            allocate_credits(&contribution, &verification)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]

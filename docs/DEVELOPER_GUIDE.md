@@ -68,7 +68,7 @@ The Rust backend:
   rendezvous registrations;
 - connects peers directly or through Circuit Relay v2;
 - exposes QUIC, TCP, WebSocket, Identify, Ping, and DCUtR behavior;
-- negotiates `/cyphes/atp/0.7.14` request/response streams;
+- negotiates `/cyphes/atp/0.15.1` request/response streams;
 - commits inbound envelopes before returning an ACK;
 - binds each ATP issuer to the authenticated libp2p source;
 - synchronizes locally issued envelopes when a peer is discovered;
