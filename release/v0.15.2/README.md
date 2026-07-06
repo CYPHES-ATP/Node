@@ -12,6 +12,9 @@ Assets:
 
 - `CYPHES_0.15.2_aarch64.dmg`
 - `CYPHES_0.15.2_x64.dmg`
+- `CYPHES_0.15.2_x64-setup.exe`
 - `SHA256SUMS.txt`
 
-Windows x64 packaging remains pending a Windows-capable packaging host.
+The macOS builds are ad hoc signed and verified locally, but not
+Apple-notarized yet. The Windows x64 setup build is an unsigned NSIS installer
+cross-built from macOS for verifier testnet use.
