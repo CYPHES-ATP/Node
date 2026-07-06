@@ -31,6 +31,7 @@ use crate::{
 
 pub const ATP_PROTOCOL: &str = "/cyphes/atp/0.15.1";
 pub const DEFAULT_RENDEZVOUS_NAMESPACE: &str = "cyphes.repository-audit.v0.15.1";
+const LABOR_WIRE_COMPAT_APP_VERSION: &str = "0.15.1";
 const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
@@ -381,7 +382,11 @@ fn labor_wire_capabilities() -> Vec<String> {
 }
 
 fn labor_wire_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    LABOR_WIRE_COMPAT_APP_VERSION.to_string()
+}
+
+fn is_labor_wire_compatible_app_version(app_version: &str) -> bool {
+    app_version == LABOR_WIRE_COMPAT_APP_VERSION || app_version == env!("CARGO_PKG_VERSION")
 }
 
 fn has_labor_capability(capabilities: &[String], capability: &str) -> bool {
@@ -1950,7 +1955,7 @@ fn handle_labor_inventory_request(
             ..Default::default()
         };
     }
-    if remote_inventory.app_version != env!("CARGO_PKG_VERSION") {
+    if !is_labor_wire_compatible_app_version(&remote_inventory.app_version) {
         return LaborInventoryResponse {
             accepted: false,
             testnet_id: ATP_STORE_TESTNET_ID.to_string(),
@@ -1963,7 +1968,7 @@ fn handle_labor_inventory_request(
                 } else {
                     remote_inventory.app_version.as_str()
                 },
-                env!("CARGO_PKG_VERSION")
+                LABOR_WIRE_COMPAT_APP_VERSION
             )),
             ..Default::default()
         };
@@ -2178,7 +2183,7 @@ fn request_labor_objects_from_peer(
 
 fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> LaborObjectBundle {
     if request.testnet_id != ATP_STORE_TESTNET_ID
-        || request.app_version != env!("CARGO_PKG_VERSION")
+        || !is_labor_wire_compatible_app_version(&request.app_version)
         || !has_labor_capability(&request.capabilities, LABOR_CAPABILITY_INVENTORY_V2)
     {
         return LaborObjectBundle {
@@ -2247,7 +2252,7 @@ fn ingest_labor_object_bundle(
     bundle: LaborObjectBundle,
 ) -> LaborObjectBundleResponse {
     if bundle.testnet_id != ATP_STORE_TESTNET_ID
-        || bundle.app_version != env!("CARGO_PKG_VERSION")
+        || !is_labor_wire_compatible_app_version(&bundle.app_version)
         || !has_labor_capability(&bundle.capabilities, LABOR_CAPABILITY_INVENTORY_V2)
     {
         let reason = if bundle.testnet_id != ATP_STORE_TESTNET_ID {
@@ -2255,7 +2260,7 @@ fn ingest_labor_object_bundle(
                 "peer testnet {} does not match {}",
                 bundle.testnet_id, ATP_STORE_TESTNET_ID
             )
-        } else if bundle.app_version != env!("CARGO_PKG_VERSION") {
+        } else if !is_labor_wire_compatible_app_version(&bundle.app_version) {
             format!(
                 "peer app version {} does not match {}",
                 if bundle.app_version.is_empty() {
@@ -2263,7 +2268,7 @@ fn ingest_labor_object_bundle(
                 } else {
                     bundle.app_version.as_str()
                 },
-                env!("CARGO_PKG_VERSION")
+                LABOR_WIRE_COMPAT_APP_VERSION
             )
         } else {
             format!("peer lacks required labor capability {LABOR_CAPABILITY_INVENTORY_V2}")

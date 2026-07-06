@@ -24,6 +24,7 @@ pub const CREDIT_PROFILE: &str = "cyphes.credit-ledger/0.1";
 pub const FINAL_REPORT_PROFILE: &str = "cyphes.final-audit-report/0.1";
 pub const COGNITION_PROOF_PROFILE: &str = "cyphes.cognition-proof/0.1";
 pub const LEGACY_DEFENSE_PROOF_PROFILE: &str = "cyphes.defense-proof/0.1";
+const LEGACY_PROOF_WIRE_COMPAT: bool = true;
 pub const AUTONOMOUS_FINALITY_PROFILE: &str = "cyphes.autonomous-finality/0.1";
 pub const AUDIT_LABOR_PROFILE_VERSION: &str = "0.1";
 pub const DEFAULT_SKILL_PACK_ID: &str = "cyphes-audit-skill";
@@ -392,7 +393,8 @@ pub struct NodeContribution {
     pub coverage: Vec<CoverageItem>,
     pub commands: Vec<String>,
     #[serde(
-        alias = "defenseProof",
+        rename = "defenseProof",
+        alias = "cognitionProof",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -719,14 +721,14 @@ fn signed_contribution_with_context(
         &coverage,
         &commands,
     )?;
-    if !artifacts
-        .iter()
-        .any(|artifact| artifact.path == "cognition-proof.json")
-    {
-        let proof_json =
-            serde_json::to_vec_pretty(&cognition_proof).map_err(|error| error.to_string())?;
+    let proof_json =
+        serde_json::to_vec_pretty(&cognition_proof).map_err(|error| error.to_string())?;
+    for path in ["defense-proof.json", "cognition-proof.json"] {
+        if artifacts.iter().any(|artifact| artifact.path == path) {
+            continue;
+        }
         artifacts.push(ContributionArtifact {
-            path: "cognition-proof.json".to_string(),
+            path: path.to_string(),
             media_type: "application/json".to_string(),
             sha256: sha256_ref(&proof_json),
             size_bytes: proof_json.len() as u64,
@@ -820,7 +822,12 @@ fn build_cognition_proof_packet(
         }
     }
     let mut proof = CognitionProofPacket {
-        profile: COGNITION_PROOF_PROFILE.to_string(),
+        profile: if LEGACY_PROOF_WIRE_COMPAT {
+            LEGACY_DEFENSE_PROOF_PROFILE
+        } else {
+            COGNITION_PROOF_PROFILE
+        }
+        .to_string(),
         profile_version: AUDIT_LABOR_PROFILE_VERSION.to_string(),
         proof_id: format!("proof_{}", Uuid::new_v4().simple()),
         contribution_id,
@@ -2352,6 +2359,7 @@ mod tests {
         .unwrap();
         verify_signed_contribution(&contribution).unwrap();
         let proof = contribution.cognition_proof.as_ref().unwrap();
+        assert_eq!(proof.profile, LEGACY_DEFENSE_PROOF_PROFILE);
         assert_eq!(
             proof.target.repository.as_ref().unwrap().full_name,
             "example/proofnet"
@@ -2361,7 +2369,14 @@ mod tests {
         assert!(contribution
             .artifacts
             .iter()
+            .any(|artifact| artifact.path == "defense-proof.json"));
+        assert!(contribution
+            .artifacts
+            .iter()
             .any(|artifact| artifact.path == "cognition-proof.json"));
+        let serialized = serde_json::to_value(&contribution).unwrap();
+        assert!(serialized.get("defenseProof").is_some());
+        assert!(serialized.get("cognitionProof").is_none());
 
         let verification = signed_autonomous_finality_verification(
             &verifier,

@@ -5,7 +5,7 @@
   <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.1 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.1_testnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.2 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.2_testnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,17 +17,18 @@
 
 ## Download
 
-The current testnet seed is **CYPHES v0.15.1**. It moves CYPHES from a desktop
+The current testnet seed is **CYPHES v0.15.2**. It moves CYPHES from a desktop
 developer preview toward an autonomous digital labor network whose first use
 case is audit. Nodes use the CYPHES-operated `source.cyphes.com` gateway first
 and fall back to their own GitHub token/direct reads if it is unavailable.
-v0.15.1 keeps the current `cyphes-dev-v0.7.7` testnet state, moves the ATP wire
-protocol to `/cyphes/atp/0.15.1`, moves rendezvous to
-`cyphes.repository-audit.v0.15.1`, and adds standardized Cognition Proof packets
-with autonomous verifier finality. A Cognition Proof is CYPHES' receipt-native
-record of useful local AI work: the exact target, claim, method, evidence,
-quality tier, and settlement rule signed into the contribution. Independent
-verifier acceptance binds to that proof and settles immediately.
+v0.15.2 keeps the current `cyphes-dev-v0.7.7` testnet state and the
+`/cyphes/atp/0.15.1` labor wire so existing testnet nodes can resync. It keeps
+the Cognition Proof product language while restoring the legacy signed
+`defenseProof` wire alias/profile for contribution hash compatibility. A
+Cognition Proof is CYPHES' receipt-native record of useful local AI work: the
+exact target, claim, method, evidence, quality tier, and settlement rule signed
+into the contribution. Independent verifier acceptance binds to that proof and
+settles immediately.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -36,12 +37,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.15.1](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.1/CYPHES_0.15.1_aarch64.dmg)
-- [Download CYPHES v0.15.1 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.1/CYPHES_0.15.1_x64.dmg)
+- [Download CYPHES v0.15.2](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.2/CYPHES_0.15.2_aarch64.dmg)
+- [Download CYPHES v0.15.2 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.2/CYPHES_0.15.2_x64.dmg)
 
 Windows download:
 
-- Windows x64 v0.15.1 is pending a Windows-capable packaging host.
+- Windows x64 v0.15.2 is pending a Windows-capable packaging host.
 
 These developer builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -190,6 +191,12 @@ Artifact Two independently returns:
   contribution, emits `cognition-proof.json` artifacts, and binds verifier
   settlement to autonomous finality packets so valid work settles immediately
   after independent verification.
+- v0.15.2 keeps the same testnet, ATP stream, and rendezvous namespace as
+  v0.15.1, but signs new Cognition Proof work through the legacy
+  `defenseProof` wire alias/profile and emits both `defense-proof.json` and
+  `cognition-proof.json` artifact entries. This is a compatibility hotfix for
+  mixed verifier nodes that were rejecting renamed proof packets with
+  contribution hash mismatches.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally

@@ -19,7 +19,7 @@ exports a professional markdown report bundle. This is online peer coordination
 and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
 
-v0.15.1 hardens the Autonomous Guardian Loop for the current verifier testnet:
+v0.15.2 hardens the Autonomous Guardian Loop for the current verifier testnet:
 verifier duty runs by default, while Auto Worker and Quest Seeder stay off on
 boot until the operator presses Run for the current session. Guardian Index v2
 provides 165 structured public coverage targets; CYPHES watches target commits,
