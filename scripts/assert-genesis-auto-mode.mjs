@@ -21,19 +21,19 @@ const checks = [
     pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoVerifier:\s*true/,
   },
   {
-    label: "boot read keeps local model work off until Run",
-    pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoWorker:\s*false/,
+    label: "boot read only resumes worker mode after stored Run intent",
+    pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoWorker:\s*Boolean\(stored\.autoWorker\)/,
   },
   {
-    label: "persisted settings cannot auto-resume quest seeding",
-    pattern: /writeGenesisAutoModeSettings\([\s\S]*questSeeder:\s*false/,
+    label: "persisted settings preserve explicit quest seeding intent",
+    pattern: /writeGenesisAutoModeSettings\([\s\S]*questSeeder:\s*Boolean\(settings\.questSeeder\)/,
   },
 ];
 
 const appChecks = [
   {
     label: "campaign seed cap supports sustained testnet load",
-    pattern: /MAX_AUTO_CAMPAIGNS_PER_DAY\s*=\s*2400/,
+    pattern: /MAX_AUTO_CAMPAIGNS_PER_DAY\s*=\s*9600/,
   },
   {
     label: "worker self-pending cap allows verifier catch-up without minting ATP",

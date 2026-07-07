@@ -20,6 +20,40 @@ const MAX_SELECTED_FILES: usize = 16;
 const MAX_FILE_BYTES: usize = 28_000;
 const MAX_CONTEXT_BYTES: usize = 180_000;
 const MAX_MODEL_OUTPUT_TOKENS: u32 = 6_500;
+const STRUCTURED_OUTPUT_SYSTEM_PROMPT: &str = "You are CYPHES Audit Skill. Return exactly one valid JSON object that matches the CYPHES Cognition Proof schema. Do not include prose, markdown fences, or commentary outside JSON.";
+const STRUCTURED_OUTPUT_CONTRACT: &str = r#"
+# Required Cognition Proof Output
+Return exactly one JSON object with these fields:
+
+{
+  "summaryMarkdown": "short evidence-backed audit summary",
+  "findings": [
+    {
+      "id": "CYPHES-LOCAL-001",
+      "title": "finding or security lead title",
+      "severity": "critical|high|medium|low|informational",
+      "status": "candidate|non_reportable|duplicate|invalid|needs_review",
+      "impact": "impact statement or null",
+      "evidence": ["file/function/line or artifact hash reviewed"],
+      "reportable": false
+    }
+  ],
+  "coverage": [
+    {
+      "area": "files/functions/classes reviewed",
+      "status": "completed|partial|blocked|inconclusive",
+      "evidence": ["specific files, functions, invariants, commands, or reasoning checked"]
+    }
+  ],
+  "commands": ["read-only actions or reasoning steps performed"]
+}
+
+Rules:
+- Use an empty findings array when no vulnerability is found.
+- Coverage must be non-empty and evidence-backed.
+- A no-issue result is valid only when coverage explains what was checked.
+- Do not invent line numbers, tools, commands, or findings.
+"#;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,7 +262,7 @@ pub async fn run_local_audit_skill(
 
     emit_progress(app, campaign, work_unit, "Running local model", 44, None);
     let started = Instant::now();
-    let model_output = match provider {
+    let mut model_output = match provider {
         "lmstudio" => {
             run_openai_compatible_chat(
                 app,
@@ -255,8 +289,8 @@ pub async fn run_local_audit_skill(
         }
         _ => return Err("unsupported local model provider".to_string()),
     };
-    let elapsed = started.elapsed();
-    let tokens_per_second = model_output
+    let mut elapsed = started.elapsed();
+    let mut tokens_per_second = model_output
         .tokens_per_second
         .or_else(|| {
             model_output.generated_tokens.and_then(|tokens| {
@@ -274,7 +308,66 @@ pub async fn run_local_audit_skill(
         tokens_per_second,
     );
 
-    let parsed = parse_model_output(&model_output.content);
+    let mut parsed = parse_model_output(&model_output.content);
+    let mut structured_repair_attempted = false;
+    let mut structured_repair_succeeded = false;
+    if parsed.parser_fallback {
+        structured_repair_attempted = true;
+        emit_progress(
+            app,
+            campaign,
+            work_unit,
+            "Repairing structured Cognition Proof JSON",
+            80,
+            tokens_per_second,
+        );
+        let repair_prompt = build_repair_prompt(&model_output.content);
+        let repair_started = Instant::now();
+        if let Ok(repair_output) = match provider {
+            "lmstudio" => {
+                run_openai_compatible_chat(
+                    app,
+                    campaign,
+                    work_unit,
+                    &client,
+                    lmstudio_endpoint(),
+                    model,
+                    &repair_prompt,
+                )
+                .await
+            }
+            "ollama" => {
+                run_ollama_chat(
+                    app,
+                    campaign,
+                    work_unit,
+                    &client,
+                    ollama_endpoint(),
+                    model,
+                    &repair_prompt,
+                )
+                .await
+            }
+            _ => Err("unsupported local model provider".to_string()),
+        } {
+            let repaired = parse_model_output(&repair_output.content);
+            if !repaired.parser_fallback {
+                elapsed = started.elapsed();
+                tokens_per_second = repair_output
+                    .tokens_per_second
+                    .or_else(|| {
+                        repair_output.generated_tokens.and_then(|tokens| {
+                            let seconds = repair_started.elapsed().as_secs_f64();
+                            (seconds > 0.0).then_some(tokens as f64 / seconds)
+                        })
+                    })
+                    .or_else(|| estimated_tokens_per_second(&repair_output.content, elapsed));
+                model_output = repair_output;
+                parsed = repaired;
+                structured_repair_succeeded = true;
+            }
+        }
+    }
     if parsed.parser_fallback {
         emit_progress(
             app,
@@ -296,6 +389,8 @@ pub async fn run_local_audit_skill(
         "outputHash": output_hash,
         "tokensPerSecond": tokens_per_second,
         "parserFallback": parsed.parser_fallback,
+        "structuredRepairAttempted": structured_repair_attempted,
+        "structuredRepairSucceeded": structured_repair_succeeded,
         "structuredFindingCount": parsed.findings.len(),
         "structuredReportableFindingCount": parsed.findings.iter().filter(|finding| finding.reportable).count(),
         "creditQualityMultiplier": if parsed.parser_fallback { 0.10 } else { 1.0 },
@@ -437,7 +532,7 @@ async fn run_openai_compatible_chat(
         .post(format!("{endpoint}/chat/completions"))
         .json(&json!({
             "model": model,
-            "temperature": 0.2,
+            "temperature": 0.0,
             "max_tokens": MAX_MODEL_OUTPUT_TOKENS,
             "stream": true,
             "stream_options": {
@@ -446,7 +541,7 @@ async fn run_openai_compatible_chat(
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are CYPHES Audit Skill. Return valid JSON only."
+                    "content": STRUCTURED_OUTPUT_SYSTEM_PROMPT
                 },
                 {
                     "role": "user",
@@ -540,14 +635,15 @@ async fn run_ollama_chat(
         .json(&json!({
             "model": model,
             "stream": true,
+            "format": "json",
             "options": {
-                "temperature": 0.2,
+                "temperature": 0.0,
                 "num_predict": MAX_MODEL_OUTPUT_TOKENS
             },
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are CYPHES Audit Skill. Return valid JSON only."
+                    "content": STRUCTURED_OUTPUT_SYSTEM_PROMPT
                 },
                 {
                     "role": "user",
@@ -1046,7 +1142,16 @@ fn build_prompt(
             file.path, file.content
         ));
     }
+    prompt.push_str(STRUCTURED_OUTPUT_CONTRACT);
     prompt
+}
+
+fn build_repair_prompt(previous_output: &str) -> String {
+    format!(
+        "{}\n\n# Previous Model Output To Repair\n```text\n{}\n```\n\nReturn only the repaired JSON object. Preserve true security meaning; do not invent findings.",
+        STRUCTURED_OUTPUT_CONTRACT,
+        truncate_bytes(previous_output, 24_000)
+    )
 }
 
 fn effective_skill_text(campaign: &ProtocolAuditCampaign) -> String {
@@ -1190,25 +1295,28 @@ fn parse_json_output(value: &Value) -> Result<ParsedModelOutput, String> {
     let findings = value
         .get("findings")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .enumerate()
-                .map(value_to_finding)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        .ok_or_else(|| "findings array is required".to_string())?
+        .iter()
+        .enumerate()
+        .map(value_to_finding)
+        .collect::<Vec<_>>();
     let coverage = value
         .get("coverage")
         .and_then(Value::as_array)
-        .map(|items| items.iter().map(value_to_coverage).collect::<Vec<_>>())
-        .unwrap_or_else(|| {
-            vec![CoverageItem {
-                area: "model review".to_string(),
-                status: "completed".to_string(),
-                evidence: vec!["Model returned summaryMarkdown.".to_string()],
-            }]
-        });
+        .ok_or_else(|| "coverage array is required".to_string())?
+        .iter()
+        .map(value_to_coverage)
+        .collect::<Vec<_>>();
+    if coverage.is_empty() {
+        return Err("coverage array must not be empty".to_string());
+    }
+    if coverage.iter().all(|item| {
+        item.evidence
+            .iter()
+            .all(|evidence| evidence.trim().is_empty())
+    }) {
+        return Err("coverage evidence is required".to_string());
+    }
     let commands = value
         .get("commands")
         .and_then(Value::as_array)
@@ -1216,11 +1324,13 @@ fn parse_json_output(value: &Value) -> Result<ParsedModelOutput, String> {
             items
                 .iter()
                 .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         })
         .filter(|items| !items.is_empty())
-        .unwrap_or_else(|| vec!["local model audit skill completed".to_string()]);
+        .ok_or_else(|| "commands array is required".to_string())?;
     Ok(ParsedModelOutput {
         notes_markdown,
         findings,
@@ -1396,6 +1506,21 @@ mod tests {
         assert!(output.findings.is_empty());
         assert_eq!(output.coverage[0].status, "needs_review");
         assert!(output.parser_fallback);
+    }
+
+    #[test]
+    fn summary_only_json_is_parser_fallback() {
+        let output = parse_model_output(r#"{"summaryMarkdown":"Looks fine."}"#);
+        assert!(output.parser_fallback);
+        assert_eq!(output.coverage[0].status, "needs_review");
+    }
+
+    #[test]
+    fn repair_prompt_contains_cognition_proof_contract() {
+        let prompt = build_repair_prompt("plain prose");
+        assert!(prompt.contains("Required Cognition Proof Output"));
+        assert!(prompt.contains("Return only the repaired JSON object"));
+        assert!(prompt.contains("coverage"));
     }
 
     #[test]

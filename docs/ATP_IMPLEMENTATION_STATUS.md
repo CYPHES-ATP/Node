@@ -19,19 +19,24 @@ exports a professional markdown report bundle. This is online peer coordination
 and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
 
-v0.15.2 hardens the Autonomous Guardian Loop for the current verifier testnet:
-verifier duty runs by default, while Auto Worker and Quest Seeder stay off on
-boot until the operator presses Run for the current session. Guardian Index v2
+v0.15.3 hardens the Autonomous Guardian Loop for the current active testnet:
+verifier duty runs by default, while Auto Worker and Quest Seeder stay off until
+the operator presses Run, then persist until Stop is pressed. Guardian Index v2
 provides 165 structured public coverage targets; CYPHES watches target commits,
 avoids duplicate unchanged target/path/commit campaigns, auto-claims remote
 work when work mode is enabled and a local model is selected, returns signed
 verification/ATP Credit receipts to workers after independent verification,
 uses dependency-complete verifier-pull bundles to repair stuck receipts, starts
 new Guardian epochs after completing target passes instead of on a fixed timer,
+answers labor inventory with missing-object IDs before sending full bundles,
+prioritizes globally reachable peer routes over stale private routes, requires
+the sparse-inventory capability before expensive labor-bundle ingest from peers,
 pauses visibly when GitHub rate limits the node, and supports a local GitHub
 token for higher API quota. New contributions also carry standardized Cognition
 Proof packets, and verifier acceptance signs an autonomous-finality packet that
-binds settlement to the contribution receipt and proof hash.
+binds settlement to the contribution receipt and proof hash. v0.15.3 also
+requires evidence-backed structured output or one successful repair pass before
+a model run counts as a full-quality proof.
 External disclosure, protocol contact, payout claims, and settlement remain
 human-gated and not implemented.
 

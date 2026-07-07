@@ -81,8 +81,8 @@ export function readGenesisAutoModeSettings() {
   return {
     ...stored,
     autoVerifier: true,
-    autoWorker: false,
-    questSeeder: false,
+    autoWorker: Boolean(stored.autoWorker),
+    questSeeder: Boolean(stored.questSeeder),
     maxDailyObservations: Math.max(
       DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
       stored.maxDailyObservations || DEFAULT_GENESIS_AUTO_MODE.maxDailyObservations,
@@ -101,8 +101,8 @@ export function writeGenesisAutoModeSettings(settings: GenesisAutoModeSettings) 
     JSON.stringify({
       ...settings,
       autoVerifier: true,
-      autoWorker: false,
-      questSeeder: false,
+      autoWorker: Boolean(settings.autoWorker),
+      questSeeder: Boolean(settings.questSeeder),
     }),
   );
 }

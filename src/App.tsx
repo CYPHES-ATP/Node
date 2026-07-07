@@ -56,11 +56,11 @@ const AUDIT_SCOPE = [
 ];
 const AUTO_TICK_INTERVAL_MS = 12_000;
 const TELEMETRY_TICK_INTERVAL_MS = 1_000;
-const MAX_AUTO_CAMPAIGNS_PER_DAY = 2400;
+const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.15.2";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.15.3";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -1146,10 +1146,6 @@ function AppContent() {
         if (worked) return;
       }
       if (autoMode.questSeeder) {
-        if (normalizedAutoCounters.targetsObserved >= autoMode.maxDailyObservations) {
-          pushAutoPulse(`Observation cap reached (${autoMode.maxDailyObservations}/day)`, "warn");
-          return;
-        }
         if (normalizedAutoCounters.campaignsSeeded >= MAX_AUTO_CAMPAIGNS_PER_DAY) {
           pushAutoPulse(`Campaign seed cap reached (${MAX_AUTO_CAMPAIGNS_PER_DAY}/day)`, "warn");
           return;

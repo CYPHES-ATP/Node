@@ -1,11 +1,11 @@
 <a id="cyphes"></a>
 <div align="center">
   <h1>CYPHES</h1>
-  <p><strong>An autonomous digital labor economy.</strong></p>
-  <p>Projects submit scoped work. Nodes produce signed artifacts. Verifiers arbitrate. Credits follow receipts.</p>
+  <p><strong>Proof of Cognition for agentic cyber workers.</strong></p>
+  <p>CYPHES coordinates local AI security agents, independent verifier finality, and ATP credits through signed Cognition Proof receipts.</p>
   <p>
-    <a href="ROADMAP.md"><img alt="Status: Developer Preview" src="https://img.shields.io/badge/status-developer_preview-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.2 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.2_testnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="Status: Active Testnet" src="https://img.shields.io/badge/status-active_testnet-00f6ff"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.3 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.3_testnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,18 +17,16 @@
 
 ## Download
 
-The current testnet seed is **CYPHES v0.15.2**. It moves CYPHES from a desktop
-developer preview toward an autonomous digital labor network whose first use
-case is audit. Nodes use the CYPHES-operated `source.cyphes.com` gateway first
-and fall back to their own GitHub token/direct reads if it is unavailable.
-v0.15.2 keeps the current `cyphes-dev-v0.7.7` testnet state and the
-`/cyphes/atp/0.15.1` labor wire so existing testnet nodes can resync. It keeps
-the Cognition Proof product language while restoring the legacy signed
-`defenseProof` wire alias/profile for contribution hash compatibility. A
-Cognition Proof is CYPHES' receipt-native record of useful local AI work: the
-exact target, claim, method, evidence, quality tier, and settlement rule signed
-into the contribution. Independent verifier acceptance binds to that proof and
-settles immediately.
+The current testnet seed is **CYPHES v0.15.3**. CYPHES is the first
+application in a Proof of Cognition network for agentic cyber workers: local AI
+nodes perform scoped security labor, independent verifier nodes settle signed
+receipts, and ATP credits become the unit of account for verified defense.
+Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
+to their own GitHub token/direct reads if it is unavailable. v0.15.3 keeps the
+current `cyphes-dev-v0.7.7` testnet state and the `/cyphes/atp/0.15.1` labor
+wire so existing testnet nodes can resync. It opens target-completion Cognition
+Proof epochs automatically, quiets inventory sync, prioritizes reachable peer
+routes, and tightens structured proof output before ATP settlement.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -37,17 +35,17 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.15.2](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.2/CYPHES_0.15.2_aarch64.dmg)
-- [Download CYPHES v0.15.2 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.2/CYPHES_0.15.2_x64.dmg)
+- [Download CYPHES v0.15.3](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.3/CYPHES_0.15.3_aarch64.dmg)
+- [Download CYPHES v0.15.3 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.3/CYPHES_0.15.3_x64.dmg)
 
 Windows download:
 
-- Windows x64 v0.15.2 is pending a Windows-capable packaging host.
+- [Download CYPHES v0.15.3 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.3/CYPHES_0.15.3_x64-setup.exe)
 
-These developer builds are ad hoc signed but not Apple-notarized yet. After
+These testnet builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
-confirm **Open**. The Windows x64 setup build is pending a Windows-capable
-packaging host. Linux users should run from source for now.
+confirm **Open**. The Windows x64 setup build is unsigned and intended for
+testnet use. Linux users should run from source for now.
 
 Use **CYPHES** to join as a verifier by default. Select a local model and press
 **Run** only when you want that node to start local audit work; press **Stop**
@@ -63,7 +61,7 @@ still configure a local fallback token with `CYPHES_GITHUB_TOKEN`,
 `~/.cyphes/settings.json`, but CYPHES never ships a shared embedded GitHub
 token.
 
-The developer preview completes one ATP-L1 repository-audit transaction:
+The receipt runtime completes one ATP-L1 repository-audit transaction:
 
 ```text
 DISCOVER -> NEGOTIATE -> NEGOTIATE -> ROUTE -> SETTLE -> ATTEST
@@ -197,6 +195,15 @@ Artifact Two independently returns:
   `cognition-proof.json` artifact entries. This is a compatibility hotfix for
   mixed verifier nodes that were rejecting renamed proof packets with
   contribution hash mismatches.
+- v0.15.3 keeps the same testnet and ATP wire, persists explicit Run mode until
+  Stop is pressed, removes the observation cap as a work-stopper, raises the
+  autonomous campaign seed cap to 9600/day, opens new target-completion epochs
+  when the current target pass is accepted, answers labor inventory with
+  missing-object IDs before sending full bundles, prefers reachable public or
+  relayed peer routes over stale private routes, requires the v0.15.3
+  sparse-inventory capability before expensive labor-bundle ingest, and
+  requires evidence-backed structured Cognition Proof output with one automatic
+  JSON repair pass before parser-fallback ATP deductions apply.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
@@ -214,7 +221,7 @@ Artifact Two independently returns:
   validation, and final report synthesis.
 - Autonomous Guardian Loop for 24/7 participation: verifier duty is on by
   default, while Auto Worker and Quest Seeder stay off until the operator
-  presses Run for the current session. CYPHES watches Guardian Index v2,
+  presses Run. Run mode persists across restart until Stop is pressed. CYPHES watches Guardian Index v2,
   resolves GitHub commits, avoids duplicate target/commit campaigns within the
   current coverage epoch, starts the next epoch after a full target pass,
   auto-claims open remote work only while work mode is enabled, runs the
@@ -278,8 +285,8 @@ Artifact Two independently returns:
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
-- The macOS developer installer is downloadable but not Apple-notarized. The
-  Windows x64 installer is pending a Windows-capable packaging host. There is
+- The macOS testnet installer is downloadable but not Apple-notarized. The
+  Windows x64 setup build is unsigned and intended for testnet use. There is
   no Linux binary distribution or automatic updater yet.
 
 ## Run The Desktop Node

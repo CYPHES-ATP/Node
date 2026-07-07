@@ -45,6 +45,7 @@ const LABOR_AUTO_VERIFY_LIMIT: usize = 8;
 const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
 const LABOR_INVENTORY_LIMIT: usize = 512;
 const MAX_BROADCAST_PEERS_PER_TICK: usize = 32;
+const MAX_DISCOVERY_DIAL_CANDIDATES: usize = 2;
 const MAX_OUTBOUND_REQUESTS_PER_PEER: usize = 8;
 const PEER_FAILURE_BASE_COOLDOWN_MS: u64 = 30_000;
 const PEER_FAILURE_MAX_COOLDOWN_MS: u64 = 5 * 60_000;
@@ -55,6 +56,7 @@ const MAX_OUTBOUND_REPAIR_BACKLOG: usize = 32;
 const VERIFIER_LIVENESS_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
 const VERIFIER_LIVENESS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(30);
 const LABOR_CAPABILITY_INVENTORY_V2: &str = "audit_labor_inventory_v2";
+const LABOR_CAPABILITY_SPARSE_INVENTORY_V3: &str = "sparse_inventory_v3";
 const LABOR_CAPABILITY_HISTORICAL_CLAIMS: &str = "historical_claim_evidence_v1";
 const LABOR_CAPABILITY_VERIFY_AFTER_BUNDLE: &str = "verify_after_bundle_v1";
 const LABOR_CAPABILITY_TELEMETRY: &str = "audit_labor_telemetry_v1";
@@ -371,6 +373,7 @@ fn peer_send_allowed(
 fn labor_wire_capabilities() -> Vec<String> {
     [
         LABOR_CAPABILITY_INVENTORY_V2,
+        LABOR_CAPABILITY_SPARSE_INVENTORY_V3,
         LABOR_CAPABILITY_HISTORICAL_CLAIMS,
         LABOR_CAPABILITY_VERIFY_AFTER_BUNDLE,
         LABOR_CAPABILITY_TELEMETRY,
@@ -1516,7 +1519,7 @@ fn handle_swarm_event(
                         swarm.add_peer_address(peer_id, address.clone());
                     }
                     if !swarm.is_connected(&peer_id) {
-                        for address in dial_candidates {
+                        for address in preferred_dial_candidates(&dial_candidates) {
                             let _ = swarm.dial(address);
                         }
                     }
@@ -1975,7 +1978,7 @@ fn handle_labor_inventory_request(
     }
     if !has_labor_capability(
         &remote_inventory.capabilities,
-        LABOR_CAPABILITY_INVENTORY_V2,
+        LABOR_CAPABILITY_SPARSE_INVENTORY_V3,
     ) {
         return LaborInventoryResponse {
             accepted: false,
@@ -1983,7 +1986,7 @@ fn handle_labor_inventory_request(
             app_version: labor_wire_app_version(),
             capabilities: labor_wire_capabilities(),
             reason: Some(format!(
-                "peer lacks required labor capability {LABOR_CAPABILITY_INVENTORY_V2}"
+                "peer lacks required labor capability {LABOR_CAPABILITY_SPARSE_INVENTORY_V3}"
             )),
             ..Default::default()
         };
@@ -2014,17 +2017,6 @@ fn handle_labor_inventory_request(
     let peer_missing_verifications = missing_from_remote(
         &local_inventory.verifications,
         &remote_inventory.verifications,
-    );
-    push_labor_objects_to_peer(
-        swarm,
-        state,
-        store,
-        &peer_id,
-        &peer_missing_campaigns,
-        &peer_missing_claims,
-        &peer_missing_contributions,
-        &peer_missing_verifications,
-        outbound,
     );
 
     let missing_campaigns =
@@ -2184,7 +2176,7 @@ fn request_labor_objects_from_peer(
 fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> LaborObjectBundle {
     if request.testnet_id != ATP_STORE_TESTNET_ID
         || !is_labor_wire_compatible_app_version(&request.app_version)
-        || !has_labor_capability(&request.capabilities, LABOR_CAPABILITY_INVENTORY_V2)
+        || !has_labor_capability(&request.capabilities, LABOR_CAPABILITY_SPARSE_INVENTORY_V3)
     {
         return LaborObjectBundle {
             testnet_id: ATP_STORE_TESTNET_ID.to_string(),
@@ -2253,7 +2245,7 @@ fn ingest_labor_object_bundle(
 ) -> LaborObjectBundleResponse {
     if bundle.testnet_id != ATP_STORE_TESTNET_ID
         || !is_labor_wire_compatible_app_version(&bundle.app_version)
-        || !has_labor_capability(&bundle.capabilities, LABOR_CAPABILITY_INVENTORY_V2)
+        || !has_labor_capability(&bundle.capabilities, LABOR_CAPABILITY_SPARSE_INVENTORY_V3)
     {
         let reason = if bundle.testnet_id != ATP_STORE_TESTNET_ID {
             format!(
@@ -2271,7 +2263,7 @@ fn ingest_labor_object_bundle(
                 LABOR_WIRE_COMPAT_APP_VERSION
             )
         } else {
-            format!("peer lacks required labor capability {LABOR_CAPABILITY_INVENTORY_V2}")
+            format!("peer lacks required labor capability {LABOR_CAPABILITY_SPARSE_INVENTORY_V3}")
         };
         let _ = store.record_labor_event(
             "labor_object_bundle_rejected",
@@ -3278,14 +3270,86 @@ fn discovered_peer_dial_candidates(
     peer_id: PeerId,
     advertised_addresses: &[Multiaddr],
 ) -> Vec<Multiaddr> {
-    let mut candidates = advertised_addresses.to_vec();
+    let mut candidates = Vec::new();
+    for address in advertised_addresses {
+        if !candidates.contains(address) {
+            candidates.push(address.clone());
+        }
+    }
     if let Some(relay) = network.relay.as_ref() {
         let circuit_address = relay_circuit_address(relay, peer_id);
         if !candidates.contains(&circuit_address) {
             candidates.push(circuit_address);
         }
     }
+    candidates.sort_by(|left, right| {
+        route_score(left)
+            .cmp(&route_score(right))
+            .then_with(|| left.to_string().cmp(&right.to_string()))
+    });
     candidates
+}
+
+fn preferred_dial_candidates(candidates: &[Multiaddr]) -> Vec<Multiaddr> {
+    let best_score = candidates.iter().map(route_score).min().unwrap_or(u8::MAX);
+    candidates
+        .iter()
+        .filter(|address| route_score(address) == best_score)
+        .take(MAX_DISCOVERY_DIAL_CANDIDATES)
+        .cloned()
+        .collect()
+}
+
+fn route_score(address: &Multiaddr) -> u8 {
+    let mut has_circuit = false;
+    let mut has_public_direct = false;
+    let mut has_private_direct = false;
+    let mut has_loopback = false;
+    let mut has_dns = false;
+
+    for protocol in address.iter() {
+        match protocol {
+            libp2p::multiaddr::Protocol::P2pCircuit => has_circuit = true,
+            libp2p::multiaddr::Protocol::Dns(_)
+            | libp2p::multiaddr::Protocol::Dns4(_)
+            | libp2p::multiaddr::Protocol::Dns6(_) => has_dns = true,
+            libp2p::multiaddr::Protocol::Ip4(ip) => {
+                if ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.octets()[0] == 0
+                {
+                    has_loopback = true;
+                } else if ip.is_private() {
+                    has_private_direct = true;
+                } else {
+                    has_public_direct = true;
+                }
+            }
+            libp2p::multiaddr::Protocol::Ip6(ip) => {
+                if ip.is_loopback() || ip.is_unspecified() {
+                    has_loopback = true;
+                } else if ip.is_unique_local() || ip.is_unicast_link_local() {
+                    has_private_direct = true;
+                } else {
+                    has_public_direct = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !has_circuit && (has_public_direct || has_dns) {
+        0
+    } else if has_circuit {
+        1
+    } else if has_private_direct {
+        3
+    } else if has_loopback {
+        4
+    } else {
+        2
+    }
 }
 
 fn register_rendezvous(
@@ -3461,6 +3525,39 @@ mod tests {
         assert!(candidates.iter().any(|address| address
             .to_string()
             .ends_with(&format!("/p2p-circuit/p2p/{peer_id}"))));
+        assert!(candidates[0]
+            .to_string()
+            .ends_with(&format!("/p2p-circuit/p2p/{peer_id}")));
+        let preferred = preferred_dial_candidates(&candidates);
+        assert_eq!(preferred.len(), 1);
+        assert!(preferred[0]
+            .to_string()
+            .ends_with(&format!("/p2p-circuit/p2p/{peer_id}")));
+    }
+
+    #[test]
+    fn public_direct_route_is_preferred_before_relay_fallback() {
+        let relay_address = infrastructure_address();
+        let network =
+            build_network_bootstrap(Some(relay_address), None, None, Some("test".to_string()))
+                .expect("valid network");
+        let peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+        let public_address = format!("/ip4/198.51.100.8/tcp/47166/p2p/{peer_id}")
+            .parse::<Multiaddr>()
+            .unwrap();
+
+        let candidates =
+            discovered_peer_dial_candidates(&network, peer_id, &[public_address.clone()]);
+        let preferred = preferred_dial_candidates(&candidates);
+
+        assert_eq!(preferred, vec![public_address]);
+    }
+
+    #[test]
+    fn labor_wire_capabilities_advertise_sparse_inventory_gate() {
+        let capabilities = labor_wire_capabilities();
+        assert!(capabilities.contains(&LABOR_CAPABILITY_INVENTORY_V2.to_string()));
+        assert!(capabilities.contains(&LABOR_CAPABILITY_SPARSE_INVENTORY_V3.to_string()));
     }
 
     #[test]

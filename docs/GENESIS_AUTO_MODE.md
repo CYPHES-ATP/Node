@@ -1,8 +1,8 @@
 # Autonomous Guardian Loop
 
-Status: v0.15.2 verifier testnet
+Status: v0.15.3 active testnet
 
-The v0.15.2 main CYPHES app joins as a verifier by default. Users can select a
+The v0.15.3 main CYPHES app joins as a verifier by default. Users can select a
 local LM Studio or Ollama model and press Run when they want the node to create
 or execute local audit work. Pressing Stop returns the node to verifier-only
 participation while peer sync and receipt settlement continue.
@@ -44,9 +44,10 @@ model exceeds the limit, CYPHES does not create a signed contribution.
 
 The default autonomous caps support long-running testnet nodes:
 
-- **Observation cap**: 2880 Guardian target observations per day.
+- **Observation counter**: target observations are counted for telemetry, but
+  no longer stop target-completion epochs.
 - **Model audit cap**: 2880 local-model work-unit runs per day.
-- **Campaign seed cap**: 2400 new autonomous campaigns per UTC day.
+- **Campaign seed cap**: 9600 new autonomous campaigns per UTC day.
 - **Self-pending cap**: 25 provisional worker receipts awaiting independent
   verification. This does not mint ATP; it only prevents local work from
   stalling while independent verifiers catch up.
@@ -85,7 +86,7 @@ includes:
 - contract criticality and work priority score;
 - credit budget and cadence.
 
-The index is a deterministic seed for developer-preview work generation. It is
+The index is a deterministic seed for active testnet work generation. It is
 not a live bounty feed, not an affiliation claim, and not a payout guarantee.
 
 ## Anti-Spam Rule
