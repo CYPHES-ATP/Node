@@ -5,7 +5,7 @@
   <p>CYPHES coordinates local AI security agents, independent verifier finality, and ATP credits through signed Cognition Proof receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Active Testnet" src="https://img.shields.io/badge/status-active_testnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.3 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.3_testnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.4 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.4_testnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,16 +17,17 @@
 
 ## Download
 
-The current testnet seed is **CYPHES v0.15.3**. CYPHES is the first
+The current testnet seed is **CYPHES v0.15.4**. CYPHES is the first
 application in a Proof of Cognition network for agentic cyber workers: local AI
 nodes perform scoped security labor, independent verifier nodes settle signed
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
-to their own GitHub token/direct reads if it is unavailable. v0.15.3 keeps the
+to their own GitHub token/direct reads if it is unavailable. v0.15.4 keeps the
 current `cyphes-dev-v0.7.7` testnet state and the `/cyphes/atp/0.15.1` labor
 wire so existing testnet nodes can resync. It opens target-completion Cognition
 Proof epochs automatically, quiets inventory sync, prioritizes reachable peer
-routes, and tightens structured proof output before ATP settlement.
+routes, tightens structured proof output before ATP settlement, and skips
+duplicate or superseded labor objects before signature-heavy verification.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -35,12 +36,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.15.3](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.3/CYPHES_0.15.3_aarch64.dmg)
-- [Download CYPHES v0.15.3 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.3/CYPHES_0.15.3_x64.dmg)
+- [Download CYPHES v0.15.4](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.4/CYPHES_0.15.4_aarch64.dmg)
+- [Download CYPHES v0.15.4 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.4/CYPHES_0.15.4_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.15.3 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.3/CYPHES_0.15.3_x64-setup.exe)
+- [Download CYPHES v0.15.4 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.4/CYPHES_0.15.4_x64-setup.exe)
 
 These testnet builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -204,6 +205,17 @@ Artifact Two independently returns:
   sparse-inventory capability before expensive labor-bundle ingest, and
   requires evidence-backed structured Cognition Proof output with one automatic
   JSON repair pass before parser-fallback ATP deductions apply.
+- v0.15.4 keeps the same testnet and ATP wire, but adds a cheap duplicate and
+  superseded-object preflight before expensive labor-bundle ingest. Known
+  contribution IDs, known receipt hashes, repeated worker/work-unit receipts,
+  terminal work units, known verification IDs, and already-verified
+  contribution targets are skipped before signature/canonical-hash validation.
+  Skips are telemetered as `labor_object_bundle_duplicate_skipped` and do not
+  mutate credits, work status, or verification state. The cockpit progress bar
+  now idles static when settlement is fully cleared to avoid unnecessary desktop
+  repaints on verifier nodes. Live cockpit snapshots also skip trusted-credit
+  recomputation, while reports and credit summaries still use the full verified
+  credit path.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally

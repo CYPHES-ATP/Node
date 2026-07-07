@@ -316,6 +316,14 @@ pub async fn get_campaign_snapshot(
 }
 
 #[tauri::command]
+pub async fn get_campaign_live_snapshot(
+    store: State<'_, AtpStore>,
+    campaign_id: String,
+) -> Result<CampaignReportSnapshot, String> {
+    store.campaign_live_snapshot(&campaign_id)
+}
+
+#[tauri::command]
 pub async fn create_protocol_campaign(
     app: AppHandle,
     state: State<'_, P2pState>,

@@ -525,6 +525,9 @@ main {
   background: linear-gradient(90deg, var(--cyan), var(--green));
   box-shadow: 0 0 24px rgba(199, 255, 71, 0.62);
   transition: width 180ms linear;
+}
+
+.terminal-progress span.is-active {
   animation: progress-pulse 760ms ease-in-out infinite;
 }
 

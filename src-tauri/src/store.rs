@@ -157,6 +157,22 @@ pub struct AuditLaborInventory {
     pub needs_verifier_contribution_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaborObjectPreflight {
+    New,
+    Duplicate(&'static str),
+    Superseded(&'static str),
+}
+
+impl LaborObjectPreflight {
+    pub fn skip_reason(&self) -> Option<&'static str> {
+        match self {
+            Self::New => None,
+            Self::Duplicate(reason) | Self::Superseded(reason) => Some(reason),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StaleContributionRepair {
     pub campaign: ProtocolAuditCampaign,
@@ -607,6 +623,83 @@ impl AtpStore {
         self.record_contribution_with_policy(contribution, ContributionIngestPolicy::PeerSync)
     }
 
+    pub fn contribution_preflight_status(
+        &self,
+        contribution: &NodeContribution,
+    ) -> Result<LaborObjectPreflight, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let existing_by_id = connection
+            .query_row(
+                "SELECT receipt_hash FROM audit_contributions WHERE contribution_id = ?1",
+                params![contribution.contribution_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(existing_receipt_hash) = existing_by_id {
+            return Ok(if existing_receipt_hash == contribution.receipt_hash {
+                LaborObjectPreflight::Duplicate("contribution already known")
+            } else {
+                LaborObjectPreflight::Superseded(
+                    "contribution id already exists with different receipt hash",
+                )
+            });
+        }
+        let existing_by_receipt = connection
+            .query_row(
+                "SELECT contribution_id FROM audit_contributions WHERE receipt_hash = ?1",
+                params![contribution.receipt_hash],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if existing_by_receipt.is_some() {
+            return Ok(LaborObjectPreflight::Duplicate(
+                "contribution receipt hash already known",
+            ));
+        }
+        let existing_for_worker_unit = connection
+            .query_row(
+                "SELECT contribution_id FROM audit_contributions
+                 WHERE campaign_id = ?1
+                   AND work_unit_id = ?2
+                   AND worker_agent_id = ?3
+                 ORDER BY created_at, contribution_id
+                 LIMIT 1",
+                params![
+                    contribution.campaign_id,
+                    contribution.work_unit_id,
+                    contribution.worker_agent_id
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if existing_for_worker_unit.is_some() {
+            return Ok(LaborObjectPreflight::Superseded(
+                "worker already submitted a contribution for this work unit",
+            ));
+        }
+        let work_unit_status = connection
+            .query_row(
+                "SELECT status FROM audit_work_units
+                 WHERE campaign_id = ?1 AND work_unit_id = ?2",
+                params![contribution.campaign_id, contribution.work_unit_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if work_unit_status
+            .as_deref()
+            .is_some_and(is_reviewed_terminal_work_unit_status)
+        {
+            return Ok(LaborObjectPreflight::Superseded(
+                "work unit already has reviewed work",
+            ));
+        }
+        Ok(LaborObjectPreflight::New)
+    }
+
     fn record_contribution_with_policy(
         &self,
         contribution: &NodeContribution,
@@ -923,6 +1016,48 @@ impl AtpStore {
         }
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(allocations.to_vec())
+    }
+
+    pub fn verification_bundle_preflight_status(
+        &self,
+        verification: &VerificationResult,
+    ) -> Result<LaborObjectPreflight, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let existing_target_for_id = connection
+            .query_row(
+                "SELECT target_contribution_id FROM audit_verifications
+                 WHERE verification_id = ?1",
+                params![verification.verification_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(existing_target) = existing_target_for_id {
+            return Ok(if existing_target == verification.target_contribution_id {
+                LaborObjectPreflight::Duplicate("verification already known")
+            } else {
+                LaborObjectPreflight::Superseded(
+                    "verification id already exists for a different contribution",
+                )
+            });
+        }
+        let existing_verification_for_target = connection
+            .query_row(
+                "SELECT verification_id FROM audit_verifications
+                 WHERE target_contribution_id = ?1
+                 ORDER BY created_at, verification_id
+                 LIMIT 1",
+                params![verification.target_contribution_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if existing_verification_for_target.is_some() {
+            return Ok(LaborObjectPreflight::Superseded(
+                "contribution already has a verification bundle",
+            ));
+        }
+        Ok(LaborObjectPreflight::New)
     }
 
     pub fn get_contribution(&self, contribution_id: &str) -> Result<NodeContribution, String> {
@@ -1729,6 +1864,22 @@ impl AtpStore {
             contributions: contributions_in_connection(&connection, campaign_id)?,
             verifications: verifications_in_connection(&connection, campaign_id)?,
             credits: trusted_credits_in_connection(&connection, campaign_id)?,
+        })
+    }
+
+    pub fn campaign_live_snapshot(
+        &self,
+        campaign_id: &str,
+    ) -> Result<CampaignReportSnapshot, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let campaign = campaign_in_connection(&connection, campaign_id)?;
+        Ok(CampaignReportSnapshot {
+            campaign,
+            work_units: work_units_in_connection(&connection, campaign_id)?,
+            claims: claims_in_connection(&connection, campaign_id)?,
+            contributions: contributions_in_connection(&connection, campaign_id)?,
+            verifications: verifications_in_connection(&connection, campaign_id)?,
+            credits: Vec::new(),
         })
     }
 
@@ -5487,6 +5638,92 @@ mod tests {
             .unwrap();
         let duplicate_summary = store.credit_summary(&worker_agent).unwrap();
         assert_eq!(duplicate_summary.total, worker_total);
+    }
+
+    #[test]
+    fn labor_object_preflight_skips_known_contributions_and_verifications() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "dependency-config-review")
+            .unwrap();
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Reviewed dependency and configuration posture with bounded evidence.".to_string(),
+            vec![],
+            vec![labor_artifact("dependency-review.md")],
+            vec![CoverageItem {
+                area: "dependency and config review".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["No repository code execution.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_unit);
+        assert_eq!(
+            store.contribution_preflight_status(&contribution).unwrap(),
+            LaborObjectPreflight::New
+        );
+        store.record_contribution(&contribution).unwrap();
+        assert_eq!(
+            store.contribution_preflight_status(&contribution).unwrap(),
+            LaborObjectPreflight::Duplicate("contribution already known")
+        );
+        let mut same_receipt = contribution.clone();
+        same_receipt.contribution_id = "contribution_same_receipt_replay".to_string();
+        assert_eq!(
+            store.contribution_preflight_status(&same_receipt).unwrap(),
+            LaborObjectPreflight::Duplicate("contribution receipt hash already known")
+        );
+
+        let verification = signed_verification(
+            &requester,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Contribution is bounded, signed, and useful.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+        let allocations = allocate_credits(&contribution, &verification).unwrap();
+        assert_eq!(
+            store
+                .verification_bundle_preflight_status(&verification)
+                .unwrap(),
+            LaborObjectPreflight::New
+        );
+        store
+            .record_verification_bundle(&verification, &allocations)
+            .unwrap();
+        assert_eq!(
+            store
+                .verification_bundle_preflight_status(&verification)
+                .unwrap(),
+            LaborObjectPreflight::Duplicate("verification already known")
+        );
+        let mut second_verification = verification.clone();
+        second_verification.verification_id = "verification_duplicate_target".to_string();
+        assert_eq!(
+            store
+                .verification_bundle_preflight_status(&second_verification)
+                .unwrap(),
+            LaborObjectPreflight::Superseded("contribution already has a verification bundle")
+        );
     }
 
     #[test]

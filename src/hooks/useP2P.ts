@@ -106,7 +106,7 @@ export function useP2P() {
     if (!isTauriRuntime()) {
       throw new Error("Campaign snapshots require the native CYPHES app.");
     }
-    return invoke<CampaignReportSnapshot>("get_campaign_snapshot", { campaignId });
+    return invoke<CampaignReportSnapshot>("get_campaign_live_snapshot", { campaignId });
   }
 
   async function listLocalModelProviders() {

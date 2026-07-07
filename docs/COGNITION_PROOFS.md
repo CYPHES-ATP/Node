@@ -4,7 +4,7 @@ Cognition Proofs are the signed work packets CYPHES uses to turn local model
 labor into verifier-settled ATP Credits.
 
 Every new paid contribution carries a Cognition Proof packet. On the current
-`cyphes-dev-v0.7.7` testnet, v0.15.3 serializes that packet through the legacy
+`cyphes-dev-v0.7.7` testnet, v0.15.4 serializes that packet through the legacy
 `defenseProof` wire alias/profile so mixed verifier nodes can validate the same
 canonical contribution hash. The app, docs, schema, and UI still refer to the
 primitive as a Cognition Proof. The packet binds six things into the worker
@@ -33,7 +33,7 @@ Cognition Proofs make the work reproducible, accountable, penalizable, and
 settleable. Final reports and ATP balances still require accepted independent
 verification.
 
-v0.15.3 tightens proof quality before settlement. The local audit runtime now
+v0.15.4 keeps the v0.15.3 proof-quality gate before settlement. The local audit runtime now
 prompts for a required JSON Cognition Proof shape, requires non-empty
 evidence-backed coverage, allows empty findings for valid no-issue results, and
 tries one automatic repair pass when a model returns prose. Outputs that still

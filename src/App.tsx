@@ -60,7 +60,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.15.3";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.15.4";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -459,6 +459,7 @@ function AppContent() {
   const pendingVerificationCount = networkProgress.independentlyVerifiablePendingContributions;
   const selfPendingVerificationCount = networkProgress.selfPendingContributions;
   const visibleProgress = runtimeActive || runtimeRecentlyFinished ? currentProgress : networkProgress.settlementPercent;
+  const progressIsActive = runtimeActive || networkProgress.pendingContributions > 0;
   const projectedPendingCredits = Math.max(
     0,
     networkProgress.pendingGrossCredits + pendingReceiptMeter - networkProgress.pendingPenaltyCredits,
@@ -1288,7 +1289,7 @@ function AppContent() {
                 </div>
               </div>
               <div className="terminal-progress intelligence-progress" aria-label="Audit skill progress">
-                <span style={{ width: `${visibleProgress}%` } as CSSProperties} />
+                <span className={progressIsActive ? "is-active" : undefined} style={{ width: `${visibleProgress}%` } as CSSProperties} />
               </div>
               <div className="cockpit-events intelligence-events" aria-label="Live runtime event stream">
                 {githubAccessStatus?.paused ? (

@@ -25,7 +25,10 @@ use crate::{
     },
     bundle::export_receipt_bundle,
     state::{P2pState, PeerInfo},
-    store::{now_millis, rejection_ack, AtpStore, AuditEventBody, ATP_STORE_TESTNET_ID},
+    store::{
+        now_millis, rejection_ack, AtpStore, AuditEventBody, LaborObjectPreflight,
+        ATP_STORE_TESTNET_ID,
+    },
     worker::SignedExecutionResult,
 };
 
@@ -246,6 +249,8 @@ struct LaborObjectBundleResponse {
     contributions: usize,
     verifications: usize,
     queued: usize,
+    #[serde(default)]
+    skipped: usize,
     reason: Option<String>,
 }
 
@@ -910,10 +915,34 @@ fn handle_swarm_event(
                         let campaign_id = contribution.campaign_id.clone();
                         let contribution_id = contribution.contribution_id.clone();
                         let receipt_hash = contribution.receipt_hash.clone();
-                        let was_known = store.get_contribution(&contribution_id).is_ok();
-                        match store.record_network_contribution(&contribution) {
-                            Ok(_) => {
-                                if !was_known {
+                        if let Some(response) =
+                            match store.contribution_preflight_status(&contribution) {
+                                Ok(status) if status.skip_reason().is_some() => {
+                                    let reason = status
+                                        .skip_reason()
+                                        .unwrap_or("contribution duplicate skipped");
+                                    Some(WireResponse::Contribution {
+                                        accepted: true,
+                                        campaign_id: campaign_id.clone(),
+                                        contribution_id: contribution_id.clone(),
+                                        receipt_hash: receipt_hash.clone(),
+                                        reason: Some(format!("duplicate skipped: {reason}")),
+                                    })
+                                }
+                                Err(reason) => Some(WireResponse::Contribution {
+                                    accepted: false,
+                                    campaign_id: campaign_id.clone(),
+                                    contribution_id: contribution_id.clone(),
+                                    receipt_hash: receipt_hash.clone(),
+                                    reason: Some(reason),
+                                }),
+                                _ => None,
+                            }
+                        {
+                            response
+                        } else {
+                            match store.record_network_contribution(&contribution) {
+                                Ok(_) => {
                                     let _ = app.emit("audit:labor_changed", ());
                                     let _ = app.emit(
                                         "audit:contribution_received",
@@ -923,39 +952,41 @@ fn handle_swarm_event(
                                             "receiptHash": receipt_hash,
                                         }),
                                     );
+                                    retry_pending_labor_objects(app, store);
+                                    WireResponse::Contribution {
+                                        accepted: true,
+                                        campaign_id,
+                                        contribution_id,
+                                        receipt_hash,
+                                        reason: None,
+                                    }
                                 }
-                                retry_pending_labor_objects(app, store);
-                                WireResponse::Contribution {
-                                    accepted: true,
+                                Err(reason) if is_labor_dependency_error(&reason) => {
+                                    queue_pending_labor_object(
+                                        store,
+                                        "contribution",
+                                        &contribution_id,
+                                        &contribution,
+                                        &reason,
+                                    );
+                                    WireResponse::Contribution {
+                                        accepted: true,
+                                        campaign_id,
+                                        contribution_id,
+                                        receipt_hash,
+                                        reason: Some(format!(
+                                            "queued pending dependency: {reason}"
+                                        )),
+                                    }
+                                }
+                                Err(reason) => WireResponse::Contribution {
+                                    accepted: false,
                                     campaign_id,
                                     contribution_id,
                                     receipt_hash,
-                                    reason: None,
-                                }
+                                    reason: Some(reason),
+                                },
                             }
-                            Err(reason) if is_labor_dependency_error(&reason) => {
-                                queue_pending_labor_object(
-                                    store,
-                                    "contribution",
-                                    &contribution_id,
-                                    &contribution,
-                                    &reason,
-                                );
-                                WireResponse::Contribution {
-                                    accepted: true,
-                                    campaign_id,
-                                    contribution_id,
-                                    receipt_hash,
-                                    reason: Some(format!("queued pending dependency: {reason}")),
-                                }
-                            }
-                            Err(reason) => WireResponse::Contribution {
-                                accepted: false,
-                                campaign_id,
-                                contribution_id,
-                                receipt_hash,
-                                reason: Some(reason),
-                            },
                         }
                     }
                     WireRequest::VerificationResult {
@@ -964,20 +995,38 @@ fn handle_swarm_event(
                     } => {
                         let campaign_id = verification.campaign_id.clone();
                         let verification_id = verification.verification_id.clone();
-                        let was_known = store
-                            .verification_bundle_for_contribution(
-                                &verification.target_contribution_id,
-                            )
-                            .ok()
-                            .flatten()
-                            .is_some();
                         let credit_total = allocations
                             .iter()
                             .map(|allocation| allocation.total)
                             .sum::<u32>();
-                        match store.record_verification_bundle(&verification, &allocations) {
-                            Ok(_) => {
-                                if !was_known {
+                        if let Some(response) =
+                            match store.verification_bundle_preflight_status(&verification) {
+                                Ok(status) if status.skip_reason().is_some() => {
+                                    let reason = status
+                                        .skip_reason()
+                                        .unwrap_or("verification duplicate skipped");
+                                    Some(WireResponse::VerificationResult {
+                                        accepted: true,
+                                        campaign_id: campaign_id.clone(),
+                                        verification_id: verification_id.clone(),
+                                        credit_total,
+                                        reason: Some(format!("duplicate skipped: {reason}")),
+                                    })
+                                }
+                                Err(reason) => Some(WireResponse::VerificationResult {
+                                    accepted: false,
+                                    campaign_id: campaign_id.clone(),
+                                    verification_id: verification_id.clone(),
+                                    credit_total,
+                                    reason: Some(reason),
+                                }),
+                                _ => None,
+                            }
+                        {
+                            response
+                        } else {
+                            match store.record_verification_bundle(&verification, &allocations) {
+                                Ok(_) => {
                                     let _ = app.emit("audit:labor_changed", ());
                                     let _ = app.emit(
                                         "audit:verification_received",
@@ -987,43 +1036,45 @@ fn handle_swarm_event(
                                             "creditTotal": credit_total,
                                         }),
                                     );
+                                    retry_pending_labor_objects(app, store);
+                                    WireResponse::VerificationResult {
+                                        accepted: true,
+                                        campaign_id,
+                                        verification_id,
+                                        credit_total,
+                                        reason: None,
+                                    }
                                 }
-                                retry_pending_labor_objects(app, store);
-                                WireResponse::VerificationResult {
-                                    accepted: true,
+                                Err(reason) if is_labor_dependency_error(&reason) => {
+                                    let bundle = VerificationBundleWire {
+                                        verification: verification.clone(),
+                                        allocations: allocations.clone(),
+                                    };
+                                    queue_pending_labor_object(
+                                        store,
+                                        "verification",
+                                        &verification_id,
+                                        &bundle,
+                                        &reason,
+                                    );
+                                    WireResponse::VerificationResult {
+                                        accepted: true,
+                                        campaign_id,
+                                        verification_id,
+                                        credit_total,
+                                        reason: Some(format!(
+                                            "queued pending dependency: {reason}"
+                                        )),
+                                    }
+                                }
+                                Err(reason) => WireResponse::VerificationResult {
+                                    accepted: false,
                                     campaign_id,
                                     verification_id,
                                     credit_total,
-                                    reason: None,
-                                }
+                                    reason: Some(reason),
+                                },
                             }
-                            Err(reason) if is_labor_dependency_error(&reason) => {
-                                let bundle = VerificationBundleWire {
-                                    verification: verification.clone(),
-                                    allocations: allocations.clone(),
-                                };
-                                queue_pending_labor_object(
-                                    store,
-                                    "verification",
-                                    &verification_id,
-                                    &bundle,
-                                    &reason,
-                                );
-                                WireResponse::VerificationResult {
-                                    accepted: true,
-                                    campaign_id,
-                                    verification_id,
-                                    credit_total,
-                                    reason: Some(format!("queued pending dependency: {reason}")),
-                                }
-                            }
-                            Err(reason) => WireResponse::VerificationResult {
-                                accepted: false,
-                                campaign_id,
-                                verification_id,
-                                credit_total,
-                                reason: Some(reason),
-                            },
                         }
                     }
                     WireRequest::LaborInventory(inventory) => {
@@ -2295,6 +2346,8 @@ fn ingest_labor_object_bundle(
         capabilities: labor_wire_capabilities(),
         ..Default::default()
     };
+    let mut duplicate_skipped = 0usize;
+    let mut superseded_skipped = 0usize;
 
     for campaign in bundle.campaigns {
         match store.upsert_protocol_campaign(&campaign) {
@@ -2323,6 +2376,23 @@ fn ingest_labor_object_bundle(
         }
     }
     for contribution in bundle.contributions {
+        match store.contribution_preflight_status(&contribution) {
+            Ok(LaborObjectPreflight::New) => {}
+            Ok(LaborObjectPreflight::Duplicate(_reason)) => {
+                duplicate_skipped += 1;
+                response.skipped += 1;
+                continue;
+            }
+            Ok(LaborObjectPreflight::Superseded(_reason)) => {
+                superseded_skipped += 1;
+                response.skipped += 1;
+                continue;
+            }
+            Err(reason) => {
+                response.reason = Some(reason);
+                continue;
+            }
+        }
         match store.record_network_contribution(&contribution) {
             Ok(_) => response.contributions += 1,
             Err(reason) if is_labor_dependency_error(&reason) => {
@@ -2339,6 +2409,23 @@ fn ingest_labor_object_bundle(
         }
     }
     for verification_bundle in bundle.verifications {
+        match store.verification_bundle_preflight_status(&verification_bundle.verification) {
+            Ok(LaborObjectPreflight::New) => {}
+            Ok(LaborObjectPreflight::Duplicate(_reason)) => {
+                duplicate_skipped += 1;
+                response.skipped += 1;
+                continue;
+            }
+            Ok(LaborObjectPreflight::Superseded(_reason)) => {
+                superseded_skipped += 1;
+                response.skipped += 1;
+                continue;
+            }
+            Err(reason) => {
+                response.reason = Some(reason);
+                continue;
+            }
+        }
         match store.record_verification_bundle(
             &verification_bundle.verification,
             &verification_bundle.allocations,
@@ -2358,8 +2445,31 @@ fn ingest_labor_object_bundle(
         }
     }
 
-    retry_pending_labor_objects(app, store);
-    let _ = app.emit("audit:labor_changed", ());
+    if response.skipped > 0 {
+        let _ = store.record_labor_event(
+            "labor_object_bundle_duplicate_skipped",
+            peer_id,
+            Some("bundle"),
+            None,
+            true,
+            None,
+            &serde_json::json!({
+                "skipped": response.skipped,
+                "duplicates": duplicate_skipped,
+                "superseded": superseded_skipped,
+            }),
+        );
+    }
+    let changed = response.campaigns
+        + response.claims
+        + response.contributions
+        + response.verifications
+        + response.queued
+        > 0;
+    if changed {
+        retry_pending_labor_objects(app, store);
+        let _ = app.emit("audit:labor_changed", ());
+    }
     let _ = store.record_labor_event(
         "labor_object_bundle_ingested",
         peer_id,
@@ -2373,6 +2483,9 @@ fn ingest_labor_object_bundle(
             "contributions": response.contributions,
             "verifications": response.verifications,
             "queued": response.queued,
+            "skipped": response.skipped,
+            "duplicateSkipped": duplicate_skipped,
+            "supersededSkipped": superseded_skipped,
         }),
     );
     response
