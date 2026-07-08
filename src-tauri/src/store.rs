@@ -509,6 +509,15 @@ impl AtpStore {
         ) {
             return Err("work unit already has submitted or reviewed work".to_string());
         }
+        if work_unit_settled_status_in_connection(
+            &transaction,
+            &claim.campaign_id,
+            &claim.work_unit_id,
+        )?
+        .is_some()
+        {
+            return Err("work unit already has submitted or reviewed work".to_string());
+        }
         let existing = transaction
             .query_row(
                 "SELECT claim_json FROM audit_work_unit_claims
@@ -553,6 +562,54 @@ impl AtpStore {
         )?;
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(claim.clone())
+    }
+
+    /// Returns true when the work unit is already settled by the network
+    /// (reviewed-terminal status or an ingested verification targeting it).
+    /// When settled, the worker's active claim is expired and a stale
+    /// non-terminal status column is reconciled to the verification-derived
+    /// status, so the autonomous loop can skip the unit without spending
+    /// local model runtime on it.
+    pub fn release_claim_if_work_unit_settled(
+        &self,
+        campaign_id: &str,
+        work_unit_id: &str,
+        worker_agent_id: &str,
+    ) -> Result<bool, String> {
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let work_unit = work_unit_in_transaction(&transaction, campaign_id, work_unit_id)?;
+        let settled_status = if is_reviewed_terminal_work_unit_status(&work_unit.status) {
+            Some(work_unit.status.clone())
+        } else {
+            work_unit_settled_status_in_connection(&transaction, campaign_id, work_unit_id)?
+        };
+        let Some(status) = settled_status else {
+            return Ok(false);
+        };
+        if !is_reviewed_terminal_work_unit_status(&work_unit.status) {
+            update_work_unit_status(&transaction, campaign_id, work_unit_id, &status, None)?;
+        }
+        transaction
+            .execute(
+                "UPDATE audit_work_unit_claims
+                 SET status = 'expired', updated_at = ?4
+                 WHERE campaign_id = ?1
+                   AND work_unit_id = ?2
+                   AND worker_agent_id = ?3
+                   AND status = 'claimed'",
+                params![
+                    campaign_id,
+                    work_unit_id,
+                    worker_agent_id,
+                    now_millis() as i64
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(true)
     }
 
     pub fn record_historical_work_unit_claim(
@@ -853,13 +910,7 @@ impl AtpStore {
                 ],
             )
             .map_err(|error| error.to_string())?;
-        let contribution_status = match verification.decision.as_str() {
-            "accepted" | "reproduced" => "accepted",
-            "rejected" => "rejected",
-            "challenged" => "challenged",
-            "revision_requested" => "revision_requested",
-            _ => "reviewed",
-        };
+        let contribution_status = verification_decision_work_unit_status(&verification.decision);
         transaction
             .execute(
                 "UPDATE audit_contributions
@@ -970,13 +1021,7 @@ impl AtpStore {
             )
             .map_err(|error| error.to_string())?;
         expect_one_row(inserted, "verification insert")?;
-        let contribution_status = match verification.decision.as_str() {
-            "accepted" | "reproduced" => "accepted",
-            "rejected" => "rejected",
-            "challenged" => "challenged",
-            "revision_requested" => "revision_requested",
-            _ => "reviewed",
-        };
+        let contribution_status = verification_decision_work_unit_status(&verification.decision);
         let updated = transaction
             .execute(
                 "UPDATE audit_contributions
@@ -3271,6 +3316,37 @@ fn insert_work_unit(
     Ok(())
 }
 
+fn verification_decision_work_unit_status(decision: &str) -> &'static str {
+    match decision {
+        "accepted" | "reproduced" => "accepted",
+        "rejected" => "rejected",
+        "challenged" => "challenged",
+        "revision_requested" => "revision_requested",
+        _ => "reviewed",
+    }
+}
+
+fn work_unit_settled_status_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+) -> Result<Option<String>, String> {
+    let decision = connection
+        .query_row(
+            "SELECT v.decision
+             FROM audit_verifications v
+             JOIN audit_contributions c ON c.contribution_id = v.target_contribution_id
+             WHERE c.campaign_id = ?1 AND c.work_unit_id = ?2
+             ORDER BY v.created_at, v.verification_id
+             LIMIT 1",
+            params![campaign_id, work_unit_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(decision.map(|decision| verification_decision_work_unit_status(&decision).to_string()))
+}
+
 fn update_work_unit_status(
     connection: &Connection,
     campaign_id: &str,
@@ -4570,6 +4646,124 @@ mod tests {
         }
 
         panic!("expected pending contribution cap to be reached");
+    }
+
+    #[test]
+    fn settled_work_unit_releases_claim_and_blocks_new_claims_despite_stale_status() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let late_worker = libp2p::identity::Keypair::generate_ed25519();
+        let verifier = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        let work_unit = work_units[0].clone();
+
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Scope mapped with no code execution.".to_string(),
+            Vec::new(),
+            vec![labor_artifact("scope-notes.md")],
+            vec![CoverageItem {
+                area: "scope".to_string(),
+                status: "considered".to_string(),
+                evidence: vec!["Scope recorded.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_unit);
+        store.record_contribution(&contribution).unwrap();
+        let verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Coverage is useful and bounded.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+        store.record_verification(&verification).unwrap();
+
+        // Simulate a node whose work-unit status column lags network sync:
+        // the verification is known locally but the unit still reads "open".
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_work_units SET status = 'open'
+                     WHERE campaign_id = ?1 AND work_unit_id = ?2",
+                    params![campaign.campaign_id, work_unit.work_unit_id],
+                )
+                .unwrap();
+        }
+
+        // A new claim against the stale-open unit must still be rejected
+        // because an ingested verification already settles it.
+        let mut stale_open_unit = work_unit.clone();
+        stale_open_unit.status = "open".to_string();
+        let late_claim = signed_work_unit_claim(&late_worker, &campaign, &stale_open_unit).unwrap();
+        let error = store.record_work_unit_claim(&late_claim).unwrap_err();
+        assert_eq!(error, "work unit already has submitted or reviewed work");
+
+        // The settled check releases the original worker's still-active claim
+        // and reconciles the stale status column from the verification.
+        let settled = store
+            .release_claim_if_work_unit_settled(
+                &campaign.campaign_id,
+                &work_unit.work_unit_id,
+                &agent_id(&worker.public()),
+            )
+            .unwrap();
+        assert!(settled);
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert_eq!(
+            snapshot
+                .work_units
+                .iter()
+                .find(|unit| unit.work_unit_id == work_unit.work_unit_id)
+                .unwrap()
+                .status,
+            "accepted"
+        );
+        assert!(snapshot
+            .claims
+            .iter()
+            .filter(|claim| claim.work_unit_id == work_unit.work_unit_id)
+            .all(|claim| claim.status != "claimed"));
+
+        // An unsettled unit reports false and keeps its claim active.
+        let open_unit = work_units[1].clone();
+        claim_work_unit(&store, &worker, &campaign, &open_unit);
+        let settled = store
+            .release_claim_if_work_unit_settled(
+                &campaign.campaign_id,
+                &open_unit.work_unit_id,
+                &agent_id(&worker.public()),
+            )
+            .unwrap();
+        assert!(!settled);
+        let snapshot = store
+            .campaign_report_snapshot(&campaign.campaign_id)
+            .unwrap();
+        assert!(
+            snapshot
+                .claims
+                .iter()
+                .any(|claim| claim.work_unit_id == open_unit.work_unit_id
+                    && claim.status == "claimed")
+        );
     }
 
     #[test]

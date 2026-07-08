@@ -570,6 +570,12 @@ pub async fn run_claimed_work_unit(
         .into_iter()
         .find(|unit| unit.work_unit_id == claim.work_unit_id)
         .ok_or_else(|| "Campaign work unit not found".to_string())?;
+    if store.release_claim_if_work_unit_settled(&campaign_id, &work_unit_id, &worker_agent_id)? {
+        let _ = app.emit("audit:labor_changed", ());
+        return Err(
+            "Work unit was already settled by the network; local claim released.".to_string(),
+        );
+    }
     let run = run_local_audit_skill(
         &app,
         &campaign,

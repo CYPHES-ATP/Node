@@ -155,6 +155,13 @@ function parseGitHubInput(value: string): GitHubInputTarget | null {
   };
 }
 
+function isSettledWorkUnitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /already settled|already has submitted or reviewed work|already has reviewed work|already claimed by another node/i.test(
+    message,
+  );
+}
+
 function repositoryFocusScope(
   baseScope: string[],
   repository: RepositorySummary,
@@ -1070,6 +1077,13 @@ function AppContent() {
       pushAutoPulse("Auto worker submitted signed contribution", "success");
       setNotice(`CYPHES submitted ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... awaiting requester verification.`);
       return true;
+    } catch (error) {
+      if (isSettledWorkUnitError(error)) {
+        await refreshCampaignSnapshot(campaign.campaignId);
+        pushAutoPulse(`${campaign.protocolName} unit settled by network; claim released`, "info");
+        return false;
+      }
+      throw error;
     } finally {
       setRunningWorkUnitId(null);
       setActionJobId(null);
@@ -1100,9 +1114,21 @@ function AppContent() {
       });
       if (myClaim) {
         pushAutoPulse("Running claimed unit", "info");
-        return autoRunWorkUnit(campaign, myClaim.workUnitId);
+        const worked = await autoRunWorkUnit(campaign, myClaim.workUnitId);
+        if (worked) return true;
+        continue;
       }
-      const openUnit = snapshot.workUnits.find((unit) => unit.status === "open");
+      const contributionUnitById = new Map(
+        snapshot.contributions.map((item) => [item.contributionId, item.workUnitId]),
+      );
+      const settledUnitIds = new Set<string>();
+      for (const verification of snapshot.verifications) {
+        const unitId = contributionUnitById.get(verification.targetContributionId);
+        if (unitId) settledUnitIds.add(unitId);
+      }
+      const openUnit = snapshot.workUnits.find(
+        (unit) => unit.status === "open" && !settledUnitIds.has(unit.workUnitId),
+      );
       if (!openUnit) continue;
       const actionId = `${campaign.campaignId}:${openUnit.workUnitId}`;
       setActionJobId(actionId);
@@ -1110,11 +1136,19 @@ function AppContent() {
         pushAutoPulse(`Claiming ${openUnit.title}`, "info");
         await p2p.claimCampaignWorkUnit(campaign.campaignId, openUnit.workUnitId);
         await refreshCampaignSnapshot(campaign.campaignId);
+      } catch (error) {
+        if (isSettledWorkUnitError(error)) {
+          await refreshCampaignSnapshot(campaign.campaignId);
+          pushAutoPulse(`${openUnit.title} already settled or claimed; skipping`, "info");
+          continue;
+        }
+        throw error;
       } finally {
         setActionJobId(null);
       }
       pushAutoPulse(`Running ${openUnit.title}`, "info");
-      return autoRunWorkUnit(campaign, openUnit.workUnitId);
+      const worked = await autoRunWorkUnit(campaign, openUnit.workUnitId);
+      if (worked) return true;
     }
     pushAutoPulse("Scanning for open work", "info");
     return false;
