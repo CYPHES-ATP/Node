@@ -1,0 +1,76 @@
+name: Release
+
+# Build and publish CYPHES desktop binaries when a version tag is pushed.
+# Usage: bump the version, merge to main, then:
+#   git tag v0.15.5 && git push origin v0.15.5
+# The workflow builds macOS (Apple Silicon + Intel) and Windows x64 on native
+# runners and uploads them to a DRAFT GitHub Release for the same tag. Review
+# the draft and press Publish to make the download links live.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            rust_target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin --config src-tauri/tauri.worker.conf.json"
+          - platform: macos-latest
+            rust_target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin --config src-tauri/tauri.worker.conf.json"
+          - platform: windows-latest
+            rust_target: ""
+            args: "--config src-tauri/tauri.worker.conf.json"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build and upload release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "CYPHES ${{ github.ref_name }}"
+          releaseBody: |
+            CYPHES ${{ github.ref_name }} testnet build.
+
+            These builds are ad hoc signed but not Apple-notarized. On macOS, drag
+            the app to Applications, then Control-click it and choose Open. The
+            Windows x64 setup build is unsigned and intended for testnet use.
+
+            Wire protocol and testnet state are unchanged, so existing nodes
+            interoperate.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
