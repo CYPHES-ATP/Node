@@ -189,6 +189,16 @@ pub struct PendingLaborObject {
 
 pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.7";
 pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 25;
+// Correlated subquery (alias `c` = the contribution row) matching when the
+// contribution's work unit has already been settled by the network. Such an
+// unverified contribution is superseded and can never earn an independent
+// verification, so it must not count toward worker backpressure or a node that
+// forked off and rejoined pauses forever. Statuses mirror
+// is_reviewed_terminal_work_unit_status.
+const SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL: &str = "SELECT 1 FROM audit_work_units w
+     WHERE w.campaign_id = c.campaign_id
+       AND w.work_unit_id = c.work_unit_id
+       AND w.status IN ('accepted', 'rejected', 'challenged', 'revision_requested')";
 const STORE_META_TESTNET_ID_KEY: &str = "testnet_id";
 const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
@@ -828,12 +838,15 @@ impl AtpStore {
             }
             let worker_pending = transaction
                 .query_row(
-                    "SELECT COUNT(*) FROM audit_contributions c
-                     WHERE c.worker_agent_id = ?1
-                       AND NOT EXISTS (
-                        SELECT 1 FROM audit_verifications v
-                        WHERE v.target_contribution_id = c.contribution_id
-                     )",
+                    &format!(
+                        "SELECT COUNT(*) FROM audit_contributions c
+                         WHERE c.worker_agent_id = ?1
+                           AND NOT EXISTS (
+                            SELECT 1 FROM audit_verifications v
+                            WHERE v.target_contribution_id = c.contribution_id
+                         )
+                           AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})",
+                    ),
                     params![contribution.worker_agent_id],
                     |row| row.get::<_, i64>(0),
                 )
@@ -1401,12 +1414,15 @@ impl AtpStore {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let count = connection
             .query_row(
-                "SELECT COUNT(*) FROM audit_contributions c
-                 WHERE c.worker_agent_id = ?1
-                   AND NOT EXISTS (
-                    SELECT 1 FROM audit_verifications v
-                    WHERE v.target_contribution_id = c.contribution_id
-                 )",
+                &format!(
+                    "SELECT COUNT(*) FROM audit_contributions c
+                     WHERE c.worker_agent_id = ?1
+                       AND NOT EXISTS (
+                        SELECT 1 FROM audit_verifications v
+                        WHERE v.target_contribution_id = c.contribution_id
+                     )
+                       AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})",
+                ),
                 params![worker_agent_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -1421,12 +1437,15 @@ impl AtpStore {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let timestamp = connection
             .query_row(
-                "SELECT MIN(c.created_at) FROM audit_contributions c
-                 WHERE c.worker_agent_id = ?1
-                   AND NOT EXISTS (
-                    SELECT 1 FROM audit_verifications v
-                    WHERE v.target_contribution_id = c.contribution_id
-                 )",
+                &format!(
+                    "SELECT MIN(c.created_at) FROM audit_contributions c
+                     WHERE c.worker_agent_id = ?1
+                       AND NOT EXISTS (
+                        SELECT 1 FROM audit_verifications v
+                        WHERE v.target_contribution_id = c.contribution_id
+                     )
+                       AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})",
+                ),
                 params![worker_agent_id],
                 |row| row.get::<_, Option<i64>>(0),
             )
@@ -4646,6 +4665,71 @@ mod tests {
         }
 
         panic!("expected pending contribution cap to be reached");
+    }
+
+    #[test]
+    fn superseded_contributions_do_not_count_toward_worker_backpressure() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_units = store.list_work_units(&campaign.campaign_id).unwrap();
+        let unit = work_units[0].clone();
+
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Pending fixture contribution.".to_string(),
+            vec![],
+            vec![labor_artifact("notes.md")],
+            vec![CoverageItem {
+                area: "scope".to_string(),
+                status: "considered".to_string(),
+                evidence: vec!["Scope recorded.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &unit);
+        store.record_contribution(&contribution).unwrap();
+
+        // Genuinely awaiting verification: counts toward backpressure.
+        assert_eq!(
+            store
+                .pending_contribution_count_for_worker(&agent_id(&worker.public()))
+                .unwrap(),
+            1
+        );
+
+        // The network settles the unit with someone else's accepted work,
+        // superseding ours (which stays unverified).
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_work_units SET status = 'accepted'
+                     WHERE campaign_id = ?1 AND work_unit_id = ?2",
+                    params![campaign.campaign_id, unit.work_unit_id],
+                )
+                .unwrap();
+        }
+
+        // Superseded work must not hold the worker in backpressure forever.
+        assert_eq!(
+            store
+                .pending_contribution_count_for_worker(&agent_id(&worker.public()))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .oldest_pending_contribution_time_for_worker(&agent_id(&worker.public()))
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
