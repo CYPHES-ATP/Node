@@ -39,6 +39,15 @@ const DEFAULT_NETWORK_CONFIG_URL: &str =
     "https://raw.githubusercontent.com/CYPHES-ATP/Node/main/network/bootstrap.json";
 const EMBEDDED_NETWORK_CONFIG_JSON: &str = include_str!("../../network/bootstrap.json");
 const MAX_WIRE_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
+// Response codec read limit. Kept symmetric with the request limit so a node
+// that fell behind can pull a large catch-up bundle instead of truncating the
+// response at the old 2 MiB cap (which surfaced as JSON EOF at column 2097152).
+const MAX_WIRE_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
+// Soft budget for the contributions+verifications a single labor bundle SENDS,
+// so the serialized response stays readable by peers still on the 2 MiB read
+// limit. Dropped objects are re-requested on the next sparse-inventory round,
+// so this only paginates the sync.
+const MAX_LABOR_BUNDLE_BYTES: usize = 1_200_000;
 const INFRASTRUCTURE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -540,7 +549,7 @@ pub async fn spawn_swarm(
             let peer_id = key.public().to_peer_id();
             let codec = request_response::json::codec::Codec::default()
                 .set_request_size_maximum(MAX_WIRE_REQUEST_BYTES)
-                .set_response_size_maximum(2 * 1024 * 1024);
+                .set_response_size_maximum(MAX_WIRE_RESPONSE_BYTES);
             let request_response = request_response::Behaviour::with_codec(
                 codec,
                 [(StreamProtocol::new(ATP_PROTOCOL), ProtocolSupport::Full)],
@@ -2224,6 +2233,28 @@ fn request_labor_objects_from_peer(
     );
 }
 
+/// Retain items in order while their cumulative serialized size stays within
+/// `budget`. At least one item is always retained (so a single oversized object
+/// never stalls the sync forever), and the bytes actually consumed are returned
+/// so a caller can chain a second capped fill from the remaining budget.
+fn cap_serialized_items<T: serde::Serialize>(items: Vec<T>, budget: usize) -> (Vec<T>, usize) {
+    let mut used = 0usize;
+    let mut kept = Vec::new();
+    for item in items {
+        // +2 approximates the JSON array separator/overhead per element.
+        let size = serde_json::to_string(&item)
+            .map(|json| json.len())
+            .unwrap_or(0)
+            + 2;
+        if !kept.is_empty() && used + size > budget {
+            break;
+        }
+        used += size;
+        kept.push(item);
+    }
+    (kept, used)
+}
+
 fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> LaborObjectBundle {
     if request.testnet_id != ATP_STORE_TESTNET_ID
         || !is_labor_wire_compatible_app_version(&request.app_version)
@@ -2237,14 +2268,6 @@ fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> L
         };
     }
 
-    let mut campaign_ids = request.campaign_ids;
-    let mut claims = store
-        .work_unit_claims_by_ids(&request.claim_ids)
-        .unwrap_or_default();
-    for claim in &claims {
-        campaign_ids.push(claim.campaign_id.clone());
-    }
-
     let mut contributions = store
         .contributions_by_ids(&request.contribution_ids)
         .unwrap_or_default();
@@ -2253,6 +2276,31 @@ fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> L
         .unwrap_or_default();
     merge_contributions(&mut contributions, verification_contributions);
 
+    let verifications = store
+        .verification_bundles_by_ids(&request.verification_ids)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(verification, allocations)| VerificationBundleWire {
+            verification,
+            allocations,
+        })
+        .collect::<Vec<_>>();
+
+    // Bound the heavy payload so the serialized response stays under the wire
+    // budget. Claims and campaigns are derived from the retained set only, so
+    // the bundle is internally consistent, and any dropped object is requested
+    // again on the next sparse-inventory round.
+    let (contributions, used) = cap_serialized_items(contributions, MAX_LABOR_BUNDLE_BYTES);
+    let (verifications, _) =
+        cap_serialized_items(verifications, MAX_LABOR_BUNDLE_BYTES.saturating_sub(used));
+
+    let mut campaign_ids = request.campaign_ids;
+    let mut claims = store
+        .work_unit_claims_by_ids(&request.claim_ids)
+        .unwrap_or_default();
+    for claim in &claims {
+        campaign_ids.push(claim.campaign_id.clone());
+    }
     let contribution_claims = store
         .claims_for_contributions(&contributions)
         .unwrap_or_default();
@@ -2260,19 +2308,9 @@ fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> L
     for contribution in &contributions {
         campaign_ids.push(contribution.campaign_id.clone());
     }
-
-    let verifications = store
-        .verification_bundles_by_ids(&request.verification_ids)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(verification, allocations)| {
-            campaign_ids.push(verification.campaign_id.clone());
-            VerificationBundleWire {
-                verification,
-                allocations,
-            }
-        })
-        .collect::<Vec<_>>();
+    for verification in &verifications {
+        campaign_ids.push(verification.verification.campaign_id.clone());
+    }
 
     dedupe_strings(&mut campaign_ids);
     let campaigns = store.campaigns_by_ids(&campaign_ids).unwrap_or_default();
@@ -3568,6 +3606,25 @@ fn identity_path() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cap_serialized_items_bounds_total_size() {
+        // ~100-byte strings; budget of 1000 keeps only a handful.
+        let items: Vec<String> = (0..100).map(|_| "x".repeat(100)).collect();
+        let (kept, used) = cap_serialized_items(items, 1000);
+        assert!(!kept.is_empty() && kept.len() < 100);
+        // Never overshoot by more than a single element.
+        assert!(used <= 1000 + 100 + 4);
+
+        // A set that fits is returned intact.
+        let small = vec!["a".to_string(), "b".to_string()];
+        let (kept_small, _) = cap_serialized_items(small.clone(), 1_000_000);
+        assert_eq!(kept_small, small);
+
+        // A single oversized item is still retained so the sync cannot stall.
+        let (kept_big, _) = cap_serialized_items(vec!["z".repeat(5000)], 100);
+        assert_eq!(kept_big.len(), 1);
+    }
 
     fn infrastructure_address() -> String {
         let peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
