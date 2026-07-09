@@ -24,8 +24,9 @@ use crate::{
     p2p::{load_or_create_identity, spawn_swarm, SwarmCommand, ATP_PROTOCOL},
     state::{P2pState, PeerInfo},
     store::{
-        campaign_id_for_transaction, data_dir, now_millis, AtpStore, AuditEventBody, AuditJob,
-        AuditJobPayload, LegacyAuditJob, RepositorySummary, MAX_PENDING_CONTRIBUTIONS_PER_WORKER,
+        campaign_id_for_transaction, data_dir, millis_from_rfc3339, now_millis, AtpStore,
+        AuditEventBody, AuditJob, AuditJobPayload, LegacyAuditJob, RepositorySummary,
+        MAX_PENDING_CONTRIBUTIONS_PER_WORKER,
     },
     worker::{create_repository_leases, execute_pipeline_audit_result, execute_repository_audit},
 };
@@ -33,6 +34,38 @@ use crate::{
 const GITHUB_REPOSITORY_URL_ERROR: &str =
     "Use a public GitHub repository URL, file URL, or folder URL, for example https://github.com/owner/repo.";
 const MAX_SELF_PENDING_CONTRIBUTIONS: usize = MAX_PENDING_CONTRIBUTIONS_PER_WORKER;
+// Phase 1 fair-work policy. A work unit is not claimable until it has been open
+// for this long, giving peers time to sync it before anyone can claim, so the
+// seeder cannot win its own units in the broadcast gap. Combined with the
+// no-self-dealing rule, this removes the latency/self-seed advantage that let
+// one node take ~90% of the work. Client/command-layer policy for the honest
+// autonomous loop; real enforcement moves on-chain in the staking phase.
+pub const WORK_UNIT_CLAIMABLE_AFTER_MS: u64 = 60_000;
+
+/// Fair-work guard: a node may not work a campaign it seeded, and a unit is
+/// only claimable after its broadcast window elapses.
+fn ensure_fair_work_claim(
+    requester_agent_id: &str,
+    worker_agent_id: &str,
+    unit_created_at_ms: u64,
+    now_ms: u64,
+) -> Result<(), String> {
+    if requester_agent_id == worker_agent_id {
+        return Err(
+            "Fair-work policy: a node cannot claim or run work from a campaign it seeded."
+                .to_string(),
+        );
+    }
+    let claimable_at = unit_created_at_ms.saturating_add(WORK_UNIT_CLAIMABLE_AFTER_MS);
+    if now_ms < claimable_at {
+        let wait_secs = claimable_at.saturating_sub(now_ms).div_ceil(1000);
+        return Err(format!(
+            "Fair-work policy: work unit is in its {}s broadcast window; claimable in ~{wait_secs}s.",
+            WORK_UNIT_CLAIMABLE_AFTER_MS / 1000
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Serialize)]
 pub struct StartNodeResponse {
@@ -528,6 +561,12 @@ pub async fn claim_campaign_work_unit(
     if work_unit.status != "open" {
         return Err("Only open work units can be claimed.".to_string());
     }
+    ensure_fair_work_claim(
+        &snapshot.campaign.requester_agent_id,
+        &worker_agent_id,
+        millis_from_rfc3339(&work_unit.created_at)?.max(0) as u64,
+        now_millis(),
+    )?;
     let claim = signed_work_unit_claim(&keypair, &snapshot.campaign, &work_unit)?;
     let claim = store.record_work_unit_claim(&claim)?;
     sender
@@ -556,6 +595,12 @@ pub async fn run_claimed_work_unit(
     ensure_verification_pool_clear(&store, &worker_agent_id)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     let campaign = snapshot.campaign;
+    if campaign.requester_agent_id == worker_agent_id {
+        return Err(
+            "Fair-work policy: a node cannot claim or run work from a campaign it seeded."
+                .to_string(),
+        );
+    }
     let claim = snapshot
         .claims
         .iter()
@@ -1381,6 +1426,26 @@ pub async fn get_peers(state: State<'_, P2pState>) -> Result<Vec<PeerInfo>, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fair_work_claim_blocks_self_dealing_and_the_broadcast_window() {
+        let now = 10_000_000u64;
+        let aged = now - WORK_UNIT_CLAIMABLE_AFTER_MS - 1;
+        let fresh = now - 1;
+
+        // Seeder cannot work its own campaign, even for an aged unit.
+        assert!(ensure_fair_work_claim("agentA", "agentA", aged, now)
+            .unwrap_err()
+            .contains("campaign it seeded"));
+
+        // Different node, but the unit is still inside its broadcast window.
+        assert!(ensure_fair_work_claim("agentA", "agentB", fresh, now)
+            .unwrap_err()
+            .contains("broadcast window"));
+
+        // Different node and past the window: allowed.
+        assert!(ensure_fair_work_claim("agentA", "agentB", aged, now).is_ok());
+    }
 
     #[test]
     fn guardian_target_index_is_valid_and_honest() {

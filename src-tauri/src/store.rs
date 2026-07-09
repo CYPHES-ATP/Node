@@ -4102,7 +4102,7 @@ fn expect_one_row(rows: usize, context: &str) -> Result<(), String> {
     }
 }
 
-fn millis_from_rfc3339(value: &str) -> Result<i64, String> {
+pub fn millis_from_rfc3339(value: &str) -> Result<i64, String> {
     DateTime::parse_from_rfc3339(value)
         .map(|time| time.timestamp_millis())
         .map_err(|_| "timestamp must be RFC3339".to_string())
