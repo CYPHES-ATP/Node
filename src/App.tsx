@@ -416,8 +416,20 @@ function AppContent() {
       const independentlyVerifiablePendingContributions = pendingContributions.filter(
         (item) => item.workerAgentId !== agentId,
       );
+      // Work units the network already settled with someone else's accepted
+      // contribution. Our own unverified contribution for such a unit is
+      // superseded and can never get an independent verification, so it must
+      // not count as backpressure or the node pauses forever after forking off
+      // and rejoining. Mirrors is_reviewed_terminal_work_unit_status in store.rs.
+      const settledWorkUnitIds = new Set(
+        snapshot.workUnits
+          .filter((unit) =>
+            ["accepted", "rejected", "challenged", "revision_requested"].includes(unit.status),
+          )
+          .map((unit) => unit.workUnitId),
+      );
       const selfPendingContributions = pendingContributions.filter(
-        (item) => item.workerAgentId === agentId,
+        (item) => item.workerAgentId === agentId && !settledWorkUnitIds.has(item.workUnitId),
       );
       const pendingPenaltyCredits = pendingContributions.reduce(
         (sum, contribution) => sum + pendingPenaltyForContribution(contribution),
