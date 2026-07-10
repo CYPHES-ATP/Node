@@ -1,8 +1,8 @@
 # Autonomous Guardian Loop
 
-Status: v0.16.0 Final Testnet
+Status: v0.16.1 Final Testnet
 
-The v0.16.0 main CYPHES app joins as a verifier by default. Users can select a
+The v0.16.1 main CYPHES app joins as a verifier by default. Users can select a
 local LM Studio or Ollama model and press Contribute when they want the node to
 create or execute local audit work. Pressing Stop worker returns the node to
 verifier-only participation while peer sync and receipt settlement continue.

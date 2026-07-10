@@ -4,7 +4,7 @@ Cognition Proofs are the signed work packets CYPHES uses to turn local model
 labor into verifier-settled ATP Credits.
 
 Every new paid contribution carries a Cognition Proof packet. On the
-`cyphes-final-testnet-v0.16.0` Final Testnet, v0.16.0 serializes that packet through the legacy
+`cyphes-final-testnet-v0.16.0` Final Testnet, v0.16.1 serializes that packet through the legacy
 `defenseProof` wire alias/profile so mixed verifier nodes can validate the same
 canonical contribution hash. The app, docs, schema, and UI still refer to the
 primitive as a Cognition Proof. The packet binds six things into the worker
@@ -33,19 +33,24 @@ Cognition Proofs make the work reproducible, accountable, penalizable, and
 settleable. Final reports and ATP balances still require accepted independent
 verification.
 
-v0.16.0 keeps the v0.15.3 proof-quality gate before settlement. The local audit runtime now
+v0.16.1 keeps the proof-quality gate before settlement. The local audit runtime now
 prompts for a required JSON Cognition Proof shape, requires non-empty
 evidence-backed coverage, allows empty findings for valid no-issue results, and
 tries one automatic repair pass when a model returns prose. Outputs that still
 fail the schema remain parser-fallback coverage and keep the deterministic ATP
 quality deduction.
 
-v0.16.0 also preserves the v0.15.4 duplicate/superseded preflight, starts from a
-fresh Final Testnet database marker, and keeps the stable reconnect path:
+v0.16.1 also preserves the duplicate/superseded preflight, stays on the
+Final Testnet database marker, and keeps the stable reconnect path:
 stale local claims are released when signed independent verifier receipts prove
 a work unit is already settled, superseded self-pending receipts no longer count
 against worker backpressure, and catch-up sync can move larger verified
 response batches without changing ATP finality.
+
+Reportable bounty candidates now need concrete file/function/line evidence,
+exploit path, impact, and reproduction steps. Low-evidence structured coverage
+is still useful, but it earns the lower proof-quality tier instead of pretending
+to be bounty-grade output.
 
 The pre-rename proof field and profile are treated as the compatibility wire
 form for the live testnet. Future fresh-network capability-gated testnets can

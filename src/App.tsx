@@ -66,7 +66,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.0";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.1";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -415,14 +415,6 @@ function AppContent() {
   const networkProgress = useMemo<NetworkProgressStats>(() => {
     return Object.values(campaignSnapshots).reduce((stats, snapshot) => {
       const verified = new Set(snapshot.verifications.map((item) => item.targetContributionId));
-      const totalContributions = snapshot.contributions.length;
-      const verifiedContributions = snapshot.contributions.filter((item) => verified.has(item.contributionId)).length;
-      const pendingContributions = snapshot.contributions.filter(
-        (item) => !verified.has(item.contributionId),
-      );
-      const independentlyVerifiablePendingContributions = pendingContributions.filter(
-        (item) => item.workerAgentId !== agentId,
-      );
       // Work units the network already settled with someone else's accepted
       // contribution. Our own unverified contribution for such a unit is
       // superseded and can never get an independent verification, so it must
@@ -435,8 +427,18 @@ function AppContent() {
           )
           .map((unit) => unit.workUnitId),
       );
+      const totalContributions = snapshot.contributions.length;
+      const verifiedContributions = snapshot.contributions.filter((item) => verified.has(item.contributionId)).length;
+      const pendingContributions = snapshot.contributions.filter(
+        (item) =>
+          !verified.has(item.contributionId) &&
+          !settledWorkUnitIds.has(item.workUnitId),
+      );
+      const independentlyVerifiablePendingContributions = pendingContributions.filter(
+        (item) => item.workerAgentId !== agentId,
+      );
       const selfPendingContributions = pendingContributions.filter(
-        (item) => item.workerAgentId === agentId && !settledWorkUnitIds.has(item.workUnitId),
+        (item) => item.workerAgentId === agentId,
       );
       const pendingPenaltyCredits = pendingContributions.reduce(
         (sum, contribution) => sum + pendingPenaltyForContribution(contribution),
@@ -486,6 +488,14 @@ function AppContent() {
   const selfPendingVerificationCount = networkProgress.selfPendingContributions;
   const visibleProgress = runtimeActive || runtimeRecentlyFinished ? currentProgress : networkProgress.settlementPercent;
   const progressIsActive = runtimeActive || networkProgress.pendingContributions > 0;
+  const epochCompletedTargets = guardianTargets.length > 0
+    ? normalizedAutoCounters.targetCursor % guardianTargets.length
+    : 0;
+  const epochCompletionPercent = percentComplete(epochCompletedTargets, guardianTargets.length);
+  const guardianEpochLabel = guardianEpochKey(
+    normalizedAutoCounters.targetCursor,
+    guardianTargets.length,
+  );
   const projectedPendingCredits = Math.max(
     0,
     networkProgress.pendingGrossCredits + pendingReceiptMeter - networkProgress.pendingPenaltyCredits,
@@ -1383,7 +1393,7 @@ function AppContent() {
                 </div>
               </div>
               <div
-                aria-label={runtimeActive || runtimeRecentlyFinished ? "Audit skill progress" : "Network settlement progress"}
+                aria-label={runtimeActive || runtimeRecentlyFinished ? "Audit skill progress" : "Network activity progress"}
                 aria-valuemax={100}
                 aria-valuemin={0}
                 aria-valuenow={visibleProgress}
@@ -1430,42 +1440,6 @@ function AppContent() {
                   <small>{latestRuntimeProgress.tokensPerSecond ? `${latestRuntimeProgress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
                 </div>
               ) : null}
-              <div className="network-progress" aria-label="Network progress">
-                <div className="network-progress-row">
-                  <div>
-                    <span>Network settlement</span>
-                    <strong>{networkProgress.settlementPercent}%</strong>
-                  </div>
-                  <div
-                    aria-label="Receipt verification progress"
-                    aria-valuemax={100}
-                    aria-valuemin={0}
-                    aria-valuenow={networkProgress.settlementPercent}
-                    className="progress-track"
-                    role="progressbar"
-                  >
-                    <span style={{ width: `${networkProgress.settlementPercent}%` }} />
-                  </div>
-                  <small>{networkProgress.verifiedContributions}/{networkProgress.totalContributions} receipts verified</small>
-                </div>
-                <div className="network-progress-row">
-                  <div>
-                    <span>Work cleared</span>
-                    <strong>{networkProgress.workPercent}%</strong>
-                  </div>
-                  <div
-                    aria-label="Work unit completion progress"
-                    aria-valuemax={100}
-                    aria-valuemin={0}
-                    aria-valuenow={networkProgress.workPercent}
-                    className="progress-track"
-                    role="progressbar"
-                  >
-                    <span style={{ width: `${networkProgress.workPercent}%` }} />
-                  </div>
-                  <small>{networkProgress.clearedWorkUnits}/{networkProgress.totalWorkUnits} work units moved</small>
-                </div>
-              </div>
             </article>
           ) : (
             <div className="empty-state compact">
@@ -1564,8 +1538,11 @@ function AppContent() {
             <div>
               <Cpu size={14} />
               <small>Guardian Index</small>
-              <strong>{guardianTargets.length} targets</strong>
-              <span>Structured public DeFi coverage seed</span>
+              <strong className="target-progress-heading">
+                <span>{guardianTargets.length} targets</span>
+                <em>{epochCompletionPercent}% completed</em>
+              </strong>
+              <span>{guardianEpochLabel} · {epochCompletedTargets}/{guardianTargets.length || 0} covered</span>
             </div>
             <div>
               <Target size={14} />

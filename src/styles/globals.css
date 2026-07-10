@@ -441,7 +441,7 @@ main {
   font-family: var(--mono);
   font-size: clamp(16px, 1.9vw, 25px);
   font-weight: 760;
-  letter-spacing: -0.08em;
+  letter-spacing: 0;
   line-height: 0.95;
   text-transform: uppercase;
 }
@@ -513,7 +513,7 @@ main {
   color: var(--green);
   font-size: clamp(28px, 3.25vw, 50px);
   font-weight: 860;
-  letter-spacing: -0.1em;
+  letter-spacing: 0;
   line-height: 0.84;
   text-overflow: ellipsis;
   text-shadow: 0 0 28px rgba(199, 255, 71, 0.24);
@@ -944,7 +944,7 @@ form > label,
   font-family: var(--mono);
   font-size: clamp(30px, 5vw, 70px);
   font-weight: 860;
-  letter-spacing: -0.09em;
+  letter-spacing: 0;
   line-height: 0.86;
   text-transform: uppercase;
 }
@@ -990,7 +990,7 @@ form > label,
   color: var(--green);
   font-family: var(--mono);
   font-size: 25px;
-  letter-spacing: -0.08em;
+  letter-spacing: 0;
   line-height: 0.95;
 }
 
@@ -1229,7 +1229,7 @@ form > label,
   font-family: var(--mono);
   font-size: 23px;
   font-weight: 820;
-  letter-spacing: -0.08em;
+  letter-spacing: 0;
   line-height: 0.9;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -1253,7 +1253,7 @@ form > label,
   color: var(--green);
   font-size: clamp(31px, 3.5vw, 44px);
   font-weight: 900;
-  letter-spacing: -0.09em;
+  letter-spacing: 0;
   text-shadow: 0 0 16px rgba(199, 255, 71, 0.24);
 }
 
@@ -1333,6 +1333,34 @@ form > label,
   white-space: nowrap;
 }
 
+.watch-grid strong.target-progress-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.watch-grid strong.target-progress-heading span,
+.watch-grid strong.target-progress-heading em {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 19px;
+  font-style: normal;
+  letter-spacing: 0;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.watch-grid strong.target-progress-heading em {
+  flex: 0 0 auto;
+  color: var(--cyan-soft);
+  font-size: 11px;
+}
+
 .system-message-stack {
   display: grid;
   gap: 10px;
@@ -1373,7 +1401,7 @@ form > label,
   font-family: var(--mono);
   font-size: clamp(28px, 4vw, 48px);
   font-weight: 860;
-  letter-spacing: -0.075em;
+  letter-spacing: 0;
   line-height: 0.94;
   text-transform: uppercase;
 }
@@ -1573,7 +1601,7 @@ form > label,
   margin: 10px 0 0;
   font-family: var(--mono);
   font-size: clamp(24px, 3.4vw, 42px);
-  letter-spacing: -0.07em;
+  letter-spacing: 0;
   line-height: 0.95;
   text-transform: uppercase;
 }
@@ -1600,7 +1628,7 @@ form > label,
   color: var(--green);
   font-family: var(--mono);
   font-size: 22px;
-  letter-spacing: -0.08em;
+  letter-spacing: 0;
 }
 
 .proof-score span {
@@ -1820,7 +1848,7 @@ form > label,
   font-family: var(--mono);
   font-size: 23px;
   font-weight: 760;
-  letter-spacing: -0.06em;
+  letter-spacing: 0;
   line-height: 0.98;
   text-transform: uppercase;
 }
@@ -1920,50 +1948,6 @@ form > label,
   color: var(--faint);
   font-family: var(--mono);
   font-size: 10px;
-}
-
-.network-progress {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.network-progress-row {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid rgba(0, 246, 255, 0.14);
-  background: rgba(0, 0, 0, 0.22);
-}
-
-.network-progress-row > div:first-child {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.network-progress-row span {
-  overflow: hidden;
-  color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.network-progress-row strong {
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
-.network-progress-row small {
-  display: block;
-  margin-top: 7px;
-  overflow: hidden;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .work-unit-dropdown {
@@ -2252,7 +2236,7 @@ form > label,
   font-family: var(--mono);
   font-size: 24px;
   font-weight: 760;
-  letter-spacing: -0.06em;
+  letter-spacing: 0;
   line-height: 0.98;
   text-transform: uppercase;
 }
@@ -2388,7 +2372,7 @@ footer {
   margin: 10px 0 0;
   font-family: var(--mono);
   font-size: clamp(38px, 6vw, 86px);
-  letter-spacing: -0.08em;
+  letter-spacing: 0;
   line-height: 0.88;
   text-transform: uppercase;
 }
@@ -2433,7 +2417,7 @@ footer {
   color: var(--green);
   font-family: var(--mono);
   font-size: 22px;
-  letter-spacing: -0.06em;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -2709,10 +2693,6 @@ footer {
 
   .work-unit-row {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .network-progress {
-    grid-template-columns: 1fr;
   }
 
   .campaign-hero,

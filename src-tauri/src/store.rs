@@ -189,6 +189,8 @@ pub struct PendingLaborObject {
 
 pub const ATP_STORE_TESTNET_ID: &str = "cyphes-final-testnet-v0.16.0";
 pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 25;
+const CONTRIBUTION_STATUS_SUBMITTED: &str = "submitted";
+const CONTRIBUTION_STATUS_SUPERSEDED: &str = "superseded";
 // Correlated subquery (alias `c` = the contribution row) matching when the
 // contribution's work unit has already been settled by the network. Such an
 // unverified contribution is superseded and can never earn an independent
@@ -255,6 +257,7 @@ impl AtpStore {
             connection: Arc::new(Mutex::new(connection)),
         };
         store.initialize()?;
+        store.reconcile_superseded_contributions()?;
         Ok(store)
     }
 
@@ -602,6 +605,12 @@ impl AtpStore {
         if !is_reviewed_terminal_work_unit_status(&work_unit.status) {
             update_work_unit_status(&transaction, campaign_id, work_unit_id, &status, None)?;
         }
+        mark_superseded_contributions_for_settled_work_unit(
+            &transaction,
+            campaign_id,
+            work_unit_id,
+            None,
+        )?;
         transaction
             .execute(
                 "UPDATE audit_work_unit_claims
@@ -620,6 +629,11 @@ impl AtpStore {
             .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(true)
+    }
+
+    pub fn reconcile_superseded_contributions(&self) -> Result<usize, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        mark_all_superseded_contributions_in_connection(&connection)
     }
 
     pub fn record_historical_work_unit_claim(
@@ -841,6 +855,7 @@ impl AtpStore {
                     &format!(
                         "SELECT COUNT(*) FROM audit_contributions c
                          WHERE c.worker_agent_id = ?1
+                           AND c.status = '{CONTRIBUTION_STATUS_SUBMITTED}'
                            AND NOT EXISTS (
                             SELECT 1 FROM audit_verifications v
                             WHERE v.target_contribution_id = c.contribution_id
@@ -938,6 +953,12 @@ impl AtpStore {
             &contribution.work_unit_id,
             contribution_status,
             None,
+        )?;
+        mark_superseded_contributions_for_settled_work_unit(
+            &transaction,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            Some(&verification.target_contribution_id),
         )?;
         for allocation in &allocations {
             transaction
@@ -1050,6 +1071,12 @@ impl AtpStore {
             &contribution.work_unit_id,
             contribution_status,
             None,
+        )?;
+        mark_superseded_contributions_for_settled_work_unit(
+            &transaction,
+            &contribution.campaign_id,
+            &contribution.work_unit_id,
+            Some(&verification.target_contribution_id),
         )?;
         for allocation in allocations {
             let inserted = transaction
@@ -1337,18 +1364,23 @@ impl AtpStore {
     ) -> Result<Vec<NodeContribution>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let mut statement = connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT c.contribution_json FROM audit_contributions c
-                 WHERE NOT EXISTS (
+                 WHERE c.status = ?1
+                   AND NOT EXISTS (
                     SELECT 1 FROM audit_verifications v
                     WHERE v.target_contribution_id = c.contribution_id
                  )
+                   AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
                  ORDER BY c.created_at DESC, c.contribution_id DESC
-                 LIMIT ?1",
-            )
+                 LIMIT ?2",
+            ))
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .query_map(
+                params![CONTRIBUTION_STATUS_SUBMITTED, limit as i64],
+                |row| row.get::<_, String>(0),
+            )
             .map_err(|error| error.to_string())?;
         rows.map(|row| {
             let json = row.map_err(|error| error.to_string())?;
@@ -1364,21 +1396,28 @@ impl AtpStore {
     ) -> Result<Vec<NodeContribution>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let mut statement = connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT c.contribution_json FROM audit_contributions c
                  WHERE c.worker_agent_id != ?1
+                   AND c.status = ?2
                    AND NOT EXISTS (
                     SELECT 1 FROM audit_verifications v
                     WHERE v.target_contribution_id = c.contribution_id
                    )
+                   AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
                  ORDER BY c.created_at, c.contribution_id
-                 LIMIT ?2",
-            )
+                 LIMIT ?3",
+            ))
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map(params![verifier_agent_id, limit as i64], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_map(
+                params![
+                    verifier_agent_id,
+                    CONTRIBUTION_STATUS_SUBMITTED,
+                    limit as i64
+                ],
+                |row| row.get::<_, String>(0),
+            )
             .map_err(|error| error.to_string())?;
         rows.map(|row| {
             let json = row.map_err(|error| error.to_string())?;
@@ -1394,13 +1433,17 @@ impl AtpStore {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let count = connection
             .query_row(
-                "SELECT COUNT(*) FROM audit_contributions c
+                &format!(
+                    "SELECT COUNT(*) FROM audit_contributions c
                  WHERE c.worker_agent_id != ?1
+                   AND c.status = ?2
                    AND NOT EXISTS (
                     SELECT 1 FROM audit_verifications v
                     WHERE v.target_contribution_id = c.contribution_id
-                 )",
-                params![verifier_agent_id],
+                 )
+                   AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})",
+                ),
+                params![verifier_agent_id, CONTRIBUTION_STATUS_SUBMITTED],
                 |row| row.get::<_, i64>(0),
             )
             .map_err(|error| error.to_string())?;
@@ -1417,6 +1460,7 @@ impl AtpStore {
                 &format!(
                     "SELECT COUNT(*) FROM audit_contributions c
                      WHERE c.worker_agent_id = ?1
+                       AND c.status = '{CONTRIBUTION_STATUS_SUBMITTED}'
                        AND NOT EXISTS (
                         SELECT 1 FROM audit_verifications v
                         WHERE v.target_contribution_id = c.contribution_id
@@ -1440,6 +1484,7 @@ impl AtpStore {
                 &format!(
                     "SELECT MIN(c.created_at) FROM audit_contributions c
                      WHERE c.worker_agent_id = ?1
+                       AND c.status = '{CONTRIBUTION_STATUS_SUBMITTED}'
                        AND NOT EXISTS (
                         SELECT 1 FROM audit_verifications v
                         WHERE v.target_contribution_id = c.contribution_id
@@ -1509,18 +1554,23 @@ impl AtpStore {
         drop(claim_statement);
 
         let mut contribution_statement = connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT c.contribution_id FROM audit_contributions c
-                 WHERE NOT EXISTS (
+                 WHERE c.status = ?1
+                   AND NOT EXISTS (
                     SELECT 1 FROM audit_verifications v
                     WHERE v.target_contribution_id = c.contribution_id
                  )
+                   AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
                  ORDER BY c.created_at DESC, c.contribution_id DESC
-                 LIMIT ?1",
-            )
+                 LIMIT ?2",
+            ))
             .map_err(|error| error.to_string())?;
         let contribution_ids = contribution_statement
-            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .query_map(
+                params![CONTRIBUTION_STATUS_SUBMITTED, limit as i64],
+                |row| row.get::<_, String>(0),
+            )
             .map_err(|error| error.to_string())?
             .map(|row| row.map_err(|error| error.to_string()))
             .collect::<Result<Vec<_>, _>>()?;
@@ -1541,21 +1591,24 @@ impl AtpStore {
         drop(verification_statement);
 
         let mut needs_statement = connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT c.contribution_id FROM audit_contributions c
                  WHERE c.worker_agent_id = ?1
+                   AND c.status = ?2
                    AND NOT EXISTS (
                     SELECT 1 FROM audit_verifications v
                     WHERE v.target_contribution_id = c.contribution_id
                    )
+                   AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
                  ORDER BY c.created_at, c.contribution_id
-                 LIMIT ?2",
-            )
+                 LIMIT ?3",
+            ))
             .map_err(|error| error.to_string())?;
         let needs_verifier_contribution_ids = needs_statement
-            .query_map(params![local_agent_id, limit as i64], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_map(
+                params![local_agent_id, CONTRIBUTION_STATUS_SUBMITTED, limit as i64],
+                |row| row.get::<_, String>(0),
+            )
             .map_err(|error| error.to_string())?
             .map(|row| row.map_err(|error| error.to_string()))
             .collect::<Result<Vec<_>, _>>()?;
@@ -2426,6 +2479,8 @@ impl AtpStore {
                     ON audit_contributions(worker_agent_id, created_at, contribution_id);
                  CREATE INDEX IF NOT EXISTS audit_contributions_work_unit
                     ON audit_contributions(campaign_id, work_unit_id, created_at, contribution_id);
+                 CREATE INDEX IF NOT EXISTS audit_contributions_status_work_unit
+                    ON audit_contributions(status, campaign_id, work_unit_id, created_at, contribution_id);
 
                  CREATE TABLE IF NOT EXISTS audit_verifications (
                     verification_id TEXT PRIMARY KEY,
@@ -3364,6 +3419,78 @@ fn work_unit_settled_status_in_connection(
         .optional()
         .map_err(|error| error.to_string())?;
     Ok(decision.map(|decision| verification_decision_work_unit_status(&decision).to_string()))
+}
+
+fn mark_superseded_contributions_for_settled_work_unit(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+    winning_contribution_id: Option<&str>,
+) -> Result<usize, String> {
+    let status = connection
+        .query_row(
+            "SELECT status FROM audit_work_units
+             WHERE campaign_id = ?1 AND work_unit_id = ?2",
+            params![campaign_id, work_unit_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if !status
+        .as_deref()
+        .is_some_and(is_reviewed_terminal_work_unit_status)
+    {
+        return Ok(0);
+    }
+    let rows = connection
+        .execute(
+            "UPDATE audit_contributions
+             SET status = ?4
+             WHERE campaign_id = ?1
+               AND work_unit_id = ?2
+               AND status = ?5
+               AND (?3 IS NULL OR contribution_id != ?3)
+               AND NOT EXISTS (
+                SELECT 1 FROM audit_verifications v
+                WHERE v.target_contribution_id = audit_contributions.contribution_id
+               )",
+            params![
+                campaign_id,
+                work_unit_id,
+                winning_contribution_id,
+                CONTRIBUTION_STATUS_SUPERSEDED,
+                CONTRIBUTION_STATUS_SUBMITTED,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(rows)
+}
+
+fn mark_all_superseded_contributions_in_connection(
+    connection: &Connection,
+) -> Result<usize, String> {
+    let rows = connection
+        .execute(
+            "UPDATE audit_contributions
+             SET status = ?2
+             WHERE status = ?1
+               AND NOT EXISTS (
+                SELECT 1 FROM audit_verifications v
+                WHERE v.target_contribution_id = audit_contributions.contribution_id
+               )
+               AND EXISTS (
+                SELECT 1 FROM audit_work_units w
+                WHERE w.campaign_id = audit_contributions.campaign_id
+                  AND w.work_unit_id = audit_contributions.work_unit_id
+                  AND w.status IN ('accepted', 'rejected', 'challenged', 'revision_requested')
+               )",
+            params![
+                CONTRIBUTION_STATUS_SUBMITTED,
+                CONTRIBUTION_STATUS_SUPERSEDED
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(rows)
 }
 
 fn update_work_unit_status(
@@ -5242,6 +5369,101 @@ mod tests {
             .campaign_report_snapshot(&campaign.campaign_id)
             .unwrap();
         assert_eq!(snapshot.contributions.len(), 2);
+    }
+
+    #[test]
+    fn finalized_work_unit_supersedes_unverified_parallel_receipts() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker_a = libp2p::identity::Keypair::generate_ed25519();
+        let worker_b = libp2p::identity::Keypair::generate_ed25519();
+        let verifier = libp2p::identity::Keypair::generate_ed25519();
+        let verifier_agent = agent_id(&verifier.public());
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+
+        let claim_a = signed_work_unit_claim(&worker_a, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim_a).unwrap();
+        let contribution_a = signed_contribution(
+            &worker_a,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Worker A submitted the receipt that settles the work unit.".to_string(),
+            vec![],
+            vec![labor_artifact("worker-a.md")],
+            vec![CoverageItem {
+                area: "parallel receipt finality".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Worker A produced accepted work.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution_a).unwrap();
+
+        let claim_b = signed_work_unit_claim(&worker_b, &campaign, &work_unit).unwrap();
+        store.record_historical_work_unit_claim(&claim_b).unwrap();
+        let contribution_b = signed_contribution(
+            &worker_b,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Worker B submitted a late parallel receipt.".to_string(),
+            vec![],
+            vec![labor_artifact("worker-b.md")],
+            vec![CoverageItem {
+                area: "parallel receipt finality".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Worker B produced competing work.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        store.record_network_contribution(&contribution_b).unwrap();
+
+        let verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            contribution_a.contribution_id.clone(),
+            "accepted".to_string(),
+            "NETWORK_SIGNED_RECEIPT_ACCEPTED".to_string(),
+            "Independent verifier accepted Worker A receipt.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution_a.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("network-verification.md")],
+        )
+        .unwrap();
+        store.record_verification(&verification).unwrap();
+
+        let connection = store.connection.lock().unwrap();
+        let superseded_status = connection
+            .query_row(
+                "SELECT status FROM audit_contributions WHERE contribution_id = ?1",
+                params![contribution_b.contribution_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        drop(connection);
+        assert_eq!(superseded_status, CONTRIBUTION_STATUS_SUPERSEDED);
+        assert!(store
+            .network_verification_candidates(&verifier_agent, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .pending_network_verification_count_for_verifier(&verifier_agent)
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

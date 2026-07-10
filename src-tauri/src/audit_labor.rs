@@ -35,6 +35,7 @@ pub const WORK_UNIT_CLAIM_TTL_MS: u64 = 15 * 60 * 1000;
 const DEFAULT_AUDIT_SKILL_TEXT: &str =
     include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
 const PARSER_FALLBACK_CREDIT_MULTIPLIER: f64 = 0.10;
+const LOW_EVIDENCE_CREDIT_MULTIPLIER: f64 = 0.20;
 const STANDARD_OUTPUT_MODEL_MULTIPLIER_CAP: f64 = 1.0;
 const EXCELLENT_OUTPUT_COVERAGE_THRESHOLD: u32 = 3;
 
@@ -777,6 +778,8 @@ fn build_cognition_proof_packet(
     commands: &[String],
 ) -> Result<CognitionProofPacket, String> {
     let parser_fallback = parser_fallback_signal(notes_markdown, coverage, commands);
+    let low_evidence = !parser_fallback
+        && low_evidence_structured_signal(notes_markdown, findings, coverage, commands);
     let reportable_finding_count = findings
         .iter()
         .filter(|finding| finding.reportable && finding.status == "candidate")
@@ -787,11 +790,15 @@ fn build_cognition_proof_packet(
         .sum::<u32>();
     let quality_multiplier = if parser_fallback {
         PARSER_FALLBACK_CREDIT_MULTIPLIER
+    } else if low_evidence {
+        LOW_EVIDENCE_CREDIT_MULTIPLIER
     } else {
         1.0
     };
     let quality_tier = if parser_fallback {
         "parser_fallback"
+    } else if low_evidence {
+        "structured_low_evidence"
     } else if reportable_finding_count > 0 {
         "structured_candidate_finding"
     } else if coverage_evidence_count >= EXCELLENT_OUTPUT_COVERAGE_THRESHOLD {
@@ -896,7 +903,7 @@ fn build_cognition_proof_packet(
             required_independent_verifiers: 1,
             settlement_status: "pending_independent_verification".to_string(),
             credit_profile: CREDIT_PROFILE.to_string(),
-            penalty_policy: "parser fallback receives 0.10x quality multiplier; malformed proofs are rejected before credit allocation".to_string(),
+            penalty_policy: "parser fallback receives 0.10x quality multiplier; placeholder or low-evidence structured proofs receive 0.20x; malformed proofs are rejected before credit allocation".to_string(),
         },
         proof_hash: String::new(),
     };
@@ -1247,9 +1254,11 @@ fn allocate_credits_with_policy(
     })?;
     let coverage =
         scaled_credit_bucket(high_quality_coverage.saturating_mul(15), quality_multiplier);
-    let finding = scaled_credit_bucket(reportable_findings.saturating_mul(75), quality_multiplier);
+    let finding = scaled_credit_bucket(reportable_findings.saturating_mul(200), quality_multiplier);
     let formula = if is_parser_fallback_contribution(contribution) {
         "base * difficulty * verification * model * requesterApproval * quality(0.10 parser fallback) - penalties"
+    } else if quality_multiplier < 1.0 {
+        "base * difficulty * verification * model * requesterApproval * quality(0.20 low-evidence structured output) - penalties"
     } else if qualifies_for_large_model_bonus(reportable_findings, high_quality_coverage) {
         "base * difficulty * verification * model(excellent-output bonus) * requesterApproval - penalties"
     } else {
@@ -1316,7 +1325,7 @@ fn effective_model_multiplier(
     high_quality_coverage: u32,
 ) -> f64 {
     let model_multiplier = contribution.runtime.model_multiplier;
-    if is_parser_fallback_contribution(contribution) {
+    if quality_multiplier < 1.0 {
         model_multiplier * quality_multiplier
     } else if qualifies_for_large_model_bonus(reportable_findings, high_quality_coverage) {
         model_multiplier
@@ -1337,6 +1346,13 @@ fn contribution_quality_multiplier(contribution: &NodeContribution) -> f64 {
         .unwrap_or_else(|| {
             if is_parser_fallback_contribution(contribution) {
                 PARSER_FALLBACK_CREDIT_MULTIPLIER
+            } else if low_evidence_structured_signal(
+                &contribution.notes_markdown,
+                &contribution.findings,
+                &contribution.coverage,
+                &contribution.commands,
+            ) {
+                LOW_EVIDENCE_CREDIT_MULTIPLIER
             } else {
                 1.0
             }
@@ -1372,6 +1388,53 @@ fn parser_fallback_signal(
             coverage.area.eq_ignore_ascii_case("local model output")
                 && coverage.status.eq_ignore_ascii_case("needs_review")
         })
+}
+
+fn low_evidence_structured_signal(
+    notes_markdown: &str,
+    findings: &[AuditFinding],
+    coverage: &[CoverageItem],
+    commands: &[String],
+) -> bool {
+    let notes = notes_markdown.trim().to_ascii_lowercase();
+    if notes == "audit summary"
+        || notes == "short evidence-backed audit summary"
+        || notes.contains("finding or security lead title")
+    {
+        return true;
+    }
+    if findings.iter().any(|finding| {
+        placeholder_text(&finding.title)
+            || finding
+                .evidence
+                .iter()
+                .any(|evidence| placeholder_text(evidence))
+    }) {
+        return true;
+    }
+    let coverage_evidence = coverage
+        .iter()
+        .flat_map(|item| item.evidence.iter())
+        .filter(|evidence| !evidence.trim().is_empty())
+        .count();
+    let only_no_execution_commands = !commands.is_empty()
+        && commands
+            .iter()
+            .all(|command| command.to_ascii_lowercase().contains("no code execution"));
+    coverage_evidence <= 1 && findings.is_empty() && only_no_execution_commands
+}
+
+fn placeholder_text(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    normalized.is_empty()
+        || normalized == "vulnerability title"
+        || normalized == "finding or security lead title"
+        || normalized == "impact statement or null"
+        || normalized == "potential security impact"
+        || normalized.contains("file/function/line")
+        || normalized.contains("line 123")
+        || normalized.contains("contract.sol")
+        || normalized.contains("artifact hash: 0x")
 }
 
 fn scaled_credit_bucket(points: u32, multiplier: f64) -> u32 {
@@ -1945,6 +2008,13 @@ fn validate_cognition_proof_for_contribution(
         &contribution.coverage,
         &contribution.commands,
     );
+    let low_evidence = !parser_fallback
+        && low_evidence_structured_signal(
+            &contribution.notes_markdown,
+            &contribution.findings,
+            &contribution.coverage,
+            &contribution.commands,
+        );
     if proof.quality.parser_fallback != parser_fallback
         || proof.quality.structured_output == parser_fallback
     {
@@ -1952,6 +2022,8 @@ fn validate_cognition_proof_for_contribution(
     }
     let expected_multiplier = if parser_fallback {
         PARSER_FALLBACK_CREDIT_MULTIPLIER
+    } else if low_evidence {
+        LOW_EVIDENCE_CREDIT_MULTIPLIER
     } else {
         1.0
     };

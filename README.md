@@ -5,34 +5,34 @@
   <p>CYPHES coordinates local AI security agents, independent verifier finality, and ATP credits through signed Cognition Proof receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Active Testnet" src="https://img.shields.io/badge/status-active_testnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.16.0 final testnet" src="https://img.shields.io/badge/CYPHES-v0.16.0_final_testnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.16.1 final testnet" src="https://img.shields.io/badge/CYPHES-v0.16.1_final_testnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.15.1-app-final-clean-lean.png" width="100%">
+  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.16.1-final-testnet.png" width="100%">
 </p>
 
 ## Download
 
-The current active release is **CYPHES v0.16.0 Final Testnet**. CYPHES is a
+The current active release is **CYPHES v0.16.1 Final Testnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
 
-v0.16.0 starts a fresh final-testnet database at
-`cyphes-final-testnet-v0.16.0.sqlite3` while preserving older v0.15.x data on
-disk. It keeps the compatible `/cyphes/atp/0.15.1` labor wire, opens
-target-completion Cognition Proof epochs automatically, skips duplicate or
-superseded labor objects before signature-heavy verification, releases stale
-local claims when signed verifier receipts prove the work is already settled,
-excludes superseded receipts from local worker backpressure, and includes the
-new Receipt Inspector cockpit for reviewing verified, pending, and penalized
-proof packets.
+v0.16.1 is an in-place rolling upgrade over the Final Testnet database marker
+`cyphes-final-testnet-v0.16.0.sqlite3`. It keeps the compatible
+`/cyphes/atp/0.15.1` labor wire, opens target-completion Cognition Proof epochs
+automatically, reconciles stale pending receipts into an honest superseded
+lifecycle when the work unit already finalized, excludes those receipts from
+worker backpressure and verifier-pending counts, gates bounty candidates on
+concrete location, exploit path, impact, and reproduction evidence, splits ATP
+quality rewards by proof quality, and keeps the Receipt Inspector cockpit for
+reviewing verified, pending, and penalized proof packets.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -41,12 +41,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.16.0 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_aarch64.dmg)
-- [Download CYPHES v0.16.0 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_x64.dmg)
+- [Download CYPHES v0.16.1 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.1/CYPHES_0.16.1_aarch64.dmg)
+- [Download CYPHES v0.16.1 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.1/CYPHES_0.16.1_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.16.0 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_x64-setup.exe)
+- [Download CYPHES v0.16.1 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.1/CYPHES_0.16.1_x64-setup.exe)
 
 These testnet builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -235,6 +235,11 @@ Artifact Two independently returns:
   Inspector for verified, pending, and penalized proof packets, and disables
   automatic tag-push release builds so public assets match the locally
   checksummed release folder.
+- v0.16.1 keeps the same Final Testnet marker as v0.16.0 and adds honest
+  superseded receipt accounting for finalized work units, bounty-candidate
+  gating for reportable findings, quality-weighted ATP tiers for low-evidence
+  versus bounty-grade proofs, a cleaner cockpit without the old settlement row,
+  and Guardian epoch completion percentage beside the 165 target count.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally

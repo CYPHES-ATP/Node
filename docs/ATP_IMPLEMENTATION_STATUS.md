@@ -1,6 +1,6 @@
 # ATP Implementation Status
 
-Last reviewed: July 9, 2026
+Last reviewed: July 10, 2026
 
 ## Conformance Position
 
@@ -19,7 +19,7 @@ exports a professional markdown report bundle. This is online peer coordination
 and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
 
-v0.16.0 starts the Final Testnet with the fresh
+v0.16.1 runs on the Final Testnet
 `cyphes-final-testnet-v0.16.0` SQLite store marker and carries forward the
 stable Autonomous Guardian Loop:
 verifier duty runs by default, while Auto Worker and Quest Seeder stay off until
@@ -36,9 +36,9 @@ the sparse-inventory capability before expensive labor-bundle ingest from peers,
 pauses visibly when GitHub rate limits the node, and supports a local GitHub
 token for higher API quota. New contributions also carry standardized Cognition
 Proof packets, and verifier acceptance signs an autonomous-finality packet that
-binds settlement to the contribution receipt and proof hash. v0.16.0 also
+binds settlement to the contribution receipt and proof hash. v0.16.1 also
 requires evidence-backed structured output or one successful repair pass before
-a model run counts as a full-quality proof. v0.16.0 keeps the cheap duplicate and
+a model run counts as a full-quality proof. v0.16.1 keeps the cheap duplicate and
 superseded-object preflight before labor-bundle signature verification, so
 known or already-settled contribution/verification objects are telemetered and
 skipped without mutating credits, work status, or verification state. It also
@@ -46,6 +46,10 @@ releases stale local claims when signed independent verifier receipts prove a
 work unit already settled, excludes superseded self-authored receipts from
 worker backpressure, and raises the libp2p response read cap with byte-capped
 labor bundles so reconnecting nodes can catch up without flooding peers.
+Stale unverified receipts whose work unit finalized through a different
+accepted contribution are reconciled into a superseded lifecycle, and
+reportable bounty candidates now require concrete location, exploit path,
+impact, and reproduction evidence.
 The main cockpit also includes a Receipt Inspector for reviewing verified,
 pending, and penalized Cognition Proof packets without trusting raw SQLite rows.
 External disclosure, protocol contact, payout claims, and settlement remain

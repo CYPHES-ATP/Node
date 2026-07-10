@@ -1292,13 +1292,27 @@ fn parse_json_output(value: &Value) -> Result<ParsedModelOutput, String> {
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "summaryMarkdown is required".to_string())?
         .to_string();
+    let commands = value
+        .get("commands")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
+        .ok_or_else(|| "commands array is required".to_string())?;
     let findings = value
         .get("findings")
         .and_then(Value::as_array)
         .ok_or_else(|| "findings array is required".to_string())?
         .iter()
         .enumerate()
-        .map(value_to_finding)
+        .map(|item| value_to_finding(item, &commands))
         .collect::<Vec<_>>();
     let coverage = value
         .get("coverage")
@@ -1317,20 +1331,6 @@ fn parse_json_output(value: &Value) -> Result<ParsedModelOutput, String> {
     }) {
         return Err("coverage evidence is required".to_string());
     }
-    let commands = value
-        .get("commands")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
-        .filter(|items| !items.is_empty())
-        .ok_or_else(|| "commands array is required".to_string())?;
     Ok(ParsedModelOutput {
         notes_markdown,
         findings,
@@ -1340,17 +1340,17 @@ fn parse_json_output(value: &Value) -> Result<ParsedModelOutput, String> {
     })
 }
 
-fn value_to_finding((index, value): (usize, &Value)) -> AuditFinding {
-    let reportable = value
+fn value_to_finding((index, value): (usize, &Value), commands: &[String]) -> AuditFinding {
+    let requested_reportable = value
         .get("reportable")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    AuditFinding {
+    let mut finding = AuditFinding {
         id: string_field(value, "id").unwrap_or_else(|| format!("CYPHES-LOCAL-{:03}", index + 1)),
         title: string_field(value, "title").unwrap_or_else(|| "Untitled model lead".to_string()),
         severity: string_field(value, "severity").unwrap_or_else(|| "informational".to_string()),
         status: string_field(value, "status").unwrap_or_else(|| {
-            if reportable {
+            if requested_reportable {
                 "candidate".to_string()
             } else {
                 "non_reportable".to_string()
@@ -1361,8 +1361,127 @@ fn value_to_finding((index, value): (usize, &Value)) -> AuditFinding {
             .and_then(Value::as_str)
             .map(ToString::to_string),
         evidence: string_array(value, "evidence"),
-        reportable,
+        reportable: requested_reportable,
+    };
+    if requested_reportable && !finding_has_bounty_grade_evidence(&finding, commands) {
+        finding.reportable = false;
+        if finding.status == "candidate" {
+            finding.status = "needs_reproduction".to_string();
+        }
     }
+    finding
+}
+
+fn finding_has_bounty_grade_evidence(finding: &AuditFinding, commands: &[String]) -> bool {
+    if is_placeholder_text(&finding.title) {
+        return false;
+    }
+    let Some(impact) = finding.impact.as_deref() else {
+        return false;
+    };
+    if is_placeholder_text(impact) {
+        return false;
+    }
+    if finding.evidence.is_empty()
+        || finding
+            .evidence
+            .iter()
+            .any(|evidence| is_placeholder_text(evidence))
+    {
+        return false;
+    }
+    let evidence_text = finding.evidence.join("\n");
+    let combined = format!(
+        "{}\n{}\n{}\n{}",
+        finding.title, finding.status, impact, evidence_text
+    )
+    .to_ascii_lowercase();
+    has_code_location_signal(&combined)
+        && has_exploit_path_signal(&combined)
+        && has_reproduction_signal(&combined, commands)
+}
+
+fn is_placeholder_text(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    normalized.is_empty()
+        || normalized == "vulnerability title"
+        || normalized == "finding or security lead title"
+        || normalized == "impact statement or null"
+        || normalized == "potential security impact"
+        || normalized == "short evidence-backed audit summary"
+        || normalized.contains("file/function/line")
+        || normalized.contains("line 123")
+        || normalized.contains("contract.sol")
+        || normalized.contains("artifact hash: 0x")
+}
+
+fn has_code_location_signal(value: &str) -> bool {
+    let has_file = [
+        ".sol", ".vy", ".rs", ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".yml", ".yaml", ".json",
+    ]
+    .iter()
+    .any(|marker| value.contains(marker));
+    let has_function = value.contains("function")
+        || value.contains(" fn ")
+        || value.contains("contract ")
+        || value.contains("::")
+        || value.contains("()");
+    has_file && (has_function || contains_line_marker(value))
+}
+
+fn contains_line_marker(value: &str) -> bool {
+    value.contains("line ")
+        || value
+            .as_bytes()
+            .windows(2)
+            .any(|window| window[0] == b':' && window[1].is_ascii_digit())
+}
+
+fn has_exploit_path_signal(value: &str) -> bool {
+    [
+        "exploit",
+        "attack",
+        "drain",
+        "steal",
+        "loss of funds",
+        "unauthorized",
+        "bypass",
+        "reentr",
+        "overflow",
+        "underflow",
+        "dos",
+        "denial",
+        "manipulat",
+        "replay",
+        "double-spend",
+        "incorrect accounting",
+    ]
+    .iter()
+    .any(|marker| value.contains(marker))
+}
+
+fn has_reproduction_signal(value: &str, commands: &[String]) -> bool {
+    let command_text = commands.join("\n").to_ascii_lowercase();
+    let combined = format!("{value}\n{command_text}");
+    [
+        "reproduce",
+        "reproduction",
+        "steps",
+        "poc",
+        "proof of concept",
+        "forge test",
+        "hardhat test",
+        "npm test",
+        "yarn test",
+        "cargo test",
+        "slither",
+        "echidna",
+        "foundry",
+        "run ",
+    ]
+    .iter()
+    .any(|marker| combined.contains(marker))
+        && !command_text.contains("no repository code execution")
 }
 
 fn value_to_coverage(value: &Value) -> CoverageItem {
@@ -1498,6 +1617,52 @@ mod tests {
         assert_eq!(output.findings.len(), 1);
         assert_eq!(output.coverage[0].area, "scope");
         assert!(output.notes_markdown.contains("Reviewed"));
+    }
+
+    #[test]
+    fn bounty_gate_downgrades_placeholder_reportable_findings() {
+        let output = parse_model_output(
+            r#"{
+              "summaryMarkdown": "Audit Summary",
+              "findings": [{
+                "id":"X",
+                "title":"Vulnerability Title",
+                "severity":"critical",
+                "status":"candidate",
+                "impact":"Potential Security Impact",
+                "evidence":["File: contract.sol, Line: 123, Artifact Hash: 0x..."],
+                "reportable":true
+              }],
+              "coverage": [{"area":"scope","status":"completed","evidence":["README.md reviewed"]}],
+              "commands": ["no repository code execution"]
+            }"#,
+        );
+        assert_eq!(output.findings.len(), 1);
+        assert!(!output.findings[0].reportable);
+        assert_eq!(output.findings[0].status, "needs_reproduction");
+    }
+
+    #[test]
+    fn bounty_gate_preserves_reproducible_concrete_findings() {
+        let output = parse_model_output(
+            r#"{
+              "summaryMarkdown": "Reproduced a concrete withdrawal ordering issue.",
+              "findings": [{
+                "id":"X",
+                "title":"Reentrant withdrawal before accounting update",
+                "severity":"high",
+                "status":"candidate",
+                "impact":"An attacker can reenter withdraw and cause loss of funds before balance accounting is reduced.",
+                "evidence":["contracts/Vault.sol:128 function withdraw() transfers before balance update; exploit path: callback reenters withdraw; reproduction: forge test --match-test testReentrantWithdraw"],
+                "reportable":true
+              }],
+              "coverage": [{"area":"withdraw accounting","status":"completed","evidence":["contracts/Vault.sol:128"]}],
+              "commands": ["forge test --match-test testReentrantWithdraw"]
+            }"#,
+        );
+        assert_eq!(output.findings.len(), 1);
+        assert!(output.findings[0].reportable);
+        assert_eq!(output.findings[0].status, "candidate");
     }
 
     #[test]
