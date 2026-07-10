@@ -35,7 +35,7 @@ export interface GuardianObservationLedger {
   targets: Record<string, GuardianTargetObservation>;
 }
 
-export const GENESIS_AUTO_MODE_TESTNET_ID = "cyphes-dev-v0.7.7";
+export const GENESIS_AUTO_MODE_TESTNET_ID = "cyphes-final-testnet-v0.16.0";
 
 const SETTINGS_KEY = `cyphes.${GENESIS_AUTO_MODE_TESTNET_ID}.genesis-auto-mode.settings.v1`;
 const COUNTERS_KEY = `cyphes.${GENESIS_AUTO_MODE_TESTNET_ID}.genesis-auto-mode.counters.v1`;

@@ -6,14 +6,14 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 const checks = [
   {
     label: "frontend auto-mode state is scoped to the current testnet",
-    pattern: /GENESIS_AUTO_MODE_TESTNET_ID\s*=\s*"cyphes-dev-v0\.7\.7"/,
+    pattern: /GENESIS_AUTO_MODE_TESTNET_ID\s*=\s*"cyphes-final-testnet-v0\.16\.0"/,
   },
   {
     label: "settings key isolates current boot settings from prior testnets",
     pattern: /SETTINGS_KEY\s*=\s*`cyphes\.\$\{GENESIS_AUTO_MODE_TESTNET_ID\}\.genesis-auto-mode\.settings\.v1`/,
   },
   {
-    label: "default boot remains verifier-only until Run",
+    label: "default boot remains verifier-only until Contribute",
     pattern: /DEFAULT_GENESIS_AUTO_MODE[\s\S]*autoWorker:\s*false[\s\S]*autoVerifier:\s*true[\s\S]*questSeeder:\s*false/,
   },
   {
@@ -21,7 +21,7 @@ const checks = [
     pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoVerifier:\s*true/,
   },
   {
-    label: "boot read only resumes worker mode after stored Run intent",
+    label: "boot read only resumes worker mode after stored Contribute intent",
     pattern: /readGenesisAutoModeSettings\(\)[\s\S]*autoWorker:\s*Boolean\(stored\.autoWorker\)/,
   },
   {
