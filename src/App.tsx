@@ -58,9 +58,6 @@ const AUTO_TICK_INTERVAL_MS = 12_000;
 const TELEMETRY_TICK_INTERVAL_MS = 1_000;
 const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
-// Phase 1 fair-work policy (must match WORK_UNIT_CLAIMABLE_AFTER_MS in commands.rs):
-// a unit is not claimable until it has been broadcast to peers for this long.
-const WORK_UNIT_CLAIMABLE_AFTER_MS = 60_000;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.15.6";
@@ -1116,8 +1113,6 @@ function AppContent() {
     }
 
     for (const campaign of campaigns) {
-      // Fair-work policy: never work a campaign this node seeded.
-      if (campaign.requesterAgentId === agentId) continue;
       const snapshot =
         campaignSnapshots[campaign.campaignId] ||
         (await refreshCampaignSnapshot(campaign.campaignId));
@@ -1143,13 +1138,8 @@ function AppContent() {
         const unitId = contributionUnitById.get(verification.targetContributionId);
         if (unitId) settledUnitIds.add(unitId);
       }
-      const claimableCutoff = Date.now() - WORK_UNIT_CLAIMABLE_AFTER_MS;
       const openUnit = snapshot.workUnits.find(
-        (unit) =>
-          unit.status === "open" &&
-          !settledUnitIds.has(unit.workUnitId) &&
-          // Fair-work policy: respect the broadcast window so peers get a fair shot.
-          Date.parse(unit.createdAt) <= claimableCutoff,
+        (unit) => unit.status === "open" && !settledUnitIds.has(unit.workUnitId),
       );
       if (!openUnit) continue;
       const actionId = `${campaign.campaignId}:${openUnit.workUnitId}`;
