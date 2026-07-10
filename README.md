@@ -5,7 +5,7 @@
   <p>CYPHES coordinates local AI security agents, independent verifier finality, and ATP credits through signed Cognition Proof receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Active Testnet" src="https://img.shields.io/badge/status-active_testnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.6 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.6_testnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.7 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.7_testnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,18 +17,19 @@
 
 ## Download
 
-The current testnet seed is **CYPHES v0.15.6**. CYPHES is the first
+The current active testnet release is **CYPHES v0.15.7**. CYPHES is the first
 application in a Proof of Cognition network for agentic cyber workers: local AI
 nodes perform scoped security labor, independent verifier nodes settle signed
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
-to their own GitHub token/direct reads if it is unavailable. v0.15.6 keeps the
+to their own GitHub token/direct reads if it is unavailable. v0.15.7 keeps the
 current `cyphes-dev-v0.7.7` testnet state and the `/cyphes/atp/0.15.1` labor
-wire so existing testnet nodes can resync. It stops the autonomous worker from
-spending local model runtime on work units the network has already settled,
-releases stale claims before inference, reconciles a lagging local work-unit
-status from signed verifications, and lets the quest seeder open new coverage
-epochs when the current pool is fully cleared.
+wire so existing testnet nodes can resync. It opens target-completion Cognition
+Proof epochs automatically, skips duplicate or superseded labor objects before
+signature-heavy verification, releases stale local claims when signed verifier
+receipts prove the work is already settled, excludes superseded receipts from
+local worker backpressure, and increases libp2p response capacity for catch-up
+sync without changing settlement rules.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -37,12 +38,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.15.6](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.6/CYPHES_0.15.6_aarch64.dmg)
-- [Download CYPHES v0.15.6 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.6/CYPHES_0.15.6_x64.dmg)
+- [Download CYPHES v0.15.7](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_aarch64.dmg)
+- [Download CYPHES v0.15.7 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.15.6 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.6/CYPHES_0.15.6_x64-setup.exe)
+- [Download CYPHES v0.15.7 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_x64-setup.exe)
 
 These testnet builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -217,30 +218,13 @@ Artifact Two independently returns:
   repaints on verifier nodes. Live cockpit snapshots also skip trusted-credit
   recomputation, while reports and credit summaries still use the full verified
   credit path.
-- v0.15.5 keeps the same testnet and ATP wire, and stops the autonomous worker
-  from wasting local model runtime on already-settled work units. The store
-  derives "settled" from the signed verifications table rather than a trusted
-  status column, releases a stale local claim and reconciles a lagging
-  work-unit status before any inference runs, and rejects new claims when a
-  verification already settles the unit. The auto-worker skips
-  snapshot-settled units, treats settled/already-claimed responses as
-  skip-and-continue, and falls through when no runnable work remains so the
-  quest seeder can open new coverage epochs instead of grinding a drained
-  pool. Adds a tag-triggered GitHub Actions release workflow that builds the
-  macOS Apple Silicon, macOS Intel, and Windows x64 artifacts on native
-  runners.
-- v0.15.6 keeps the same testnet and ATP wire, and rolls up network
-  robustness and the first fair-launch step. It raises the libp2p response
-  read limit to 32 MiB and byte-caps outbound labor bundles so a node that
-  fell behind can complete a large catch-up sync instead of truncating at
-  2 MiB. It excludes network-superseded contributions from worker
-  backpressure so a node that forked off and rejoined resumes instead of
-  pausing forever. It adds the Phase 1 fair-work policy: a node cannot claim
-  or run work from a campaign it seeded, and a work unit is not claimable
-  until a 60-second broadcast window elapses, so the seeder can no longer win
-  its own units in the sync gap. All changes are wire-compatible with v0.15.5
-  nodes; command-layer fair-work enforcement is for the honest autonomous
-  loop, with stake-weighted on-chain assignment planned for the staking phase.
+- v0.15.7 is the stable rolling upgrade from v0.15.4. It preserves the same
+  testnet and ATP wire, keeps the duplicate/superseded preflight, releases
+  stale local claims when signed independent verifier receipts prove a work
+  unit already settled, excludes superseded self-authored receipts from pending
+  backpressure, raises the libp2p response read cap for real catch-up sync, and
+  byte-caps labor bundles so large reconnects converge without flooding peers.
+  It intentionally does not add experimental fair-work or no-self-dealing rules.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
