@@ -1,20 +1,20 @@
 # Autonomous Guardian Loop
 
-Status: v0.15.7 active testnet
+Status: v0.16.0 Final Testnet
 
-The v0.15.7 main CYPHES app joins as a verifier by default. Users can select a
-local LM Studio or Ollama model and press Run when they want the node to create
-or execute local audit work. Pressing Stop returns the node to verifier-only
-participation while peer sync and receipt settlement continue.
+The v0.16.0 main CYPHES app joins as a verifier by default. Users can select a
+local LM Studio or Ollama model and press Contribute when they want the node to
+create or execute local audit work. Pressing Stop worker returns the node to
+verifier-only participation while peer sync and receipt settlement continue.
 
 ## Runtime Loop
 
 ```text
 Guardian Index v2
 -> resolve GitHub target to pinned commit
--> Run mode creates work only if target/path/commit is not already active
--> discovered worker auto-claims open work while Run mode is enabled
--> local model runs bounded audit skill while Run mode is enabled
+-> Contribute mode creates work only if target/path/commit is not already active
+-> discovered worker auto-claims open work while Contribute mode is enabled
+-> local model runs bounded audit skill while Contribute mode is enabled
 -> worker signs contribution receipt
 -> requester or verifier accepts independent worker contributions
 -> signed verification/credit receipt returns to worker

@@ -187,7 +187,7 @@ pub struct PendingLaborObject {
     pub object_json: String,
 }
 
-pub const ATP_STORE_TESTNET_ID: &str = "cyphes-dev-v0.7.7";
+pub const ATP_STORE_TESTNET_ID: &str = "cyphes-final-testnet-v0.16.0";
 pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 25;
 // Correlated subquery (alias `c` = the contribution row) matching when the
 // contribution's work unit has already been settled by the network. Such an

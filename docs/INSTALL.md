@@ -2,26 +2,26 @@
 
 ## Download The Testnet Build
 
-macOS users can download the current packaged v0.15.7 testnet DMGs from:
+macOS users can download the current packaged v0.16.0 Final Testnet DMGs from:
 
-- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_aarch64.dmg
-- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_x64.dmg
+- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_aarch64.dmg
+- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_x64.dmg
 
-- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_x64-setup.exe
+- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_x64-setup.exe
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. The Windows setup build is unsigned and intended for
 testnet use. Linux binary distributions are not available yet.
 
-The current source tree is v0.15.7. Run from source to test Verified ATP
-independent-verifier enforcement, the isolated testnet hotfixes, the separate
-`campaign.html` admin console, and the local pinned-source GitHub cache.
+The current source tree is v0.16.0. It uses the fresh
+`cyphes-final-testnet-v0.16.0.sqlite3` database marker, so older v0.15.x local
+testnet data is preserved and not reused by the final testnet.
 
 - **CYPHES** opens into the autonomous guardian cockpit as a verifier. Select
-  a local LM Studio or Ollama model and press Run to create non-duplicate work,
+  a local LM Studio or Ollama model and press Contribute to create non-duplicate work,
   auto-claim remote work, run bounded audit skill passes, and receive
-  receipt-backed ATP Credits after verifier acceptance. Press Stop to return
+  receipt-backed ATP Credits after verifier acceptance. Press Stop worker to return
   to verifier-only participation.
 - The separate `campaign.html` admin/protocol console is available from source
   for manual campaign creation, verification inspection, ATP proof logs, and

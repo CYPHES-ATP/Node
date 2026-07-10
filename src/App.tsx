@@ -20,6 +20,10 @@ import {
   Trophy,
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
+import {
+  ReceiptInspector,
+  type ReceiptInspectorMode,
+} from "@/components/proof/ReceiptInspector";
 import { P2PProvider } from "@/components/providers/P2PProvider";
 import { useP2P } from "@/hooks/useP2P";
 import {
@@ -56,11 +60,13 @@ const AUDIT_SCOPE = [
 ];
 const AUTO_TICK_INTERVAL_MS = 12_000;
 const TELEMETRY_TICK_INTERVAL_MS = 1_000;
+const RECENT_TELEMETRY_TICK_INTERVAL_MS = 5_000;
+const CAMPAIGN_SNAPSHOT_CONCURRENCY = 8;
 const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.15.7";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.0";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -348,7 +354,7 @@ function AppContent() {
   const [runtimeProvider, setRuntimeProvider] = useState("lmstudio");
   const [runtimeModels, setRuntimeModels] = useState<string[]>([]);
   const [runtimeModel, setRuntimeModel] = useState("");
-  const [, setRuntimeStatus] = useState<LocalModelList | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<LocalModelList | null>(null);
   const [githubAccessStatus, setGitHubAccessStatus] = useState<GitHubAccessStatus | null>(null);
   const [, setRuntimeProgress] = useState<Record<string, AuditRuntimeProgress>>({});
   const [latestRuntimeProgress, setLatestRuntimeProgress] = useState<AuditRuntimeProgress | null>(null);
@@ -389,6 +395,7 @@ function AppContent() {
   const notice = useCyphesStore((state) => state.notice);
   const setNotice = useCyphesStore((state) => state.setNotice);
   const [campaignSnapshots, setCampaignSnapshots] = useState<Record<string, CampaignReportSnapshot>>({});
+  const [receiptInspectorMode, setReceiptInspectorMode] = useState<ReceiptInspectorMode | null>(null);
 
   const runtimeProviderLabel = runtimeProvider === "ollama" ? "Ollama" : "LM Studio";
   const runtimeActive = Boolean(
@@ -492,14 +499,14 @@ function AppContent() {
     [campaigns],
   );
   const liveCampaign = useMemo(() => {
-    if (latestRuntimeProgress) {
+    if ((runtimeActive || runtimeRecentlyFinished) && latestRuntimeProgress) {
       const active = campaigns.find(
         (campaign) => campaign.campaignId === latestRuntimeProgress.campaignId,
       );
       if (active) return active;
     }
     return sortedCampaigns[0] || null;
-  }, [campaigns, latestRuntimeProgress, sortedCampaigns]);
+  }, [campaigns, latestRuntimeProgress, runtimeActive, runtimeRecentlyFinished, sortedCampaigns]);
   const liveTarget = liveCampaign
     ? guardianTargets.find((target) => campaignIncludesGuardianTarget(liveCampaign, target))
     : null;
@@ -657,7 +664,10 @@ function AppContent() {
 
   useEffect(() => {
     if (!runtimeActive && !runtimeRecentlyFinished) return;
-    const timer = window.setInterval(() => setTelemetryTick(Date.now()), TELEMETRY_TICK_INTERVAL_MS);
+    const timer = window.setInterval(
+      () => setTelemetryTick(Date.now()),
+      runtimeActive ? TELEMETRY_TICK_INTERVAL_MS : RECENT_TELEMETRY_TICK_INTERVAL_MS,
+    );
     return () => window.clearInterval(timer);
   }, [runtimeActive, runtimeRecentlyFinished]);
 
@@ -731,19 +741,32 @@ function AppContent() {
     if (!isTauriRuntime() || campaigns.length === 0) return;
     let disposed = false;
     async function refreshSnapshots() {
-      const entries = await Promise.all(
-        campaigns.map(async (campaign) => {
+      const entries: Array<[string, CampaignReportSnapshot]> = [];
+      let cursor = 0;
+      async function loadNextSnapshot() {
+        while (!disposed) {
+          const campaign = campaigns[cursor];
+          cursor += 1;
+          if (!campaign) return;
           try {
-            return [campaign.campaignId, await p2p.getCampaignSnapshot(campaign.campaignId)] as const;
+            entries.push([
+              campaign.campaignId,
+              await p2p.getCampaignSnapshot(campaign.campaignId),
+            ]);
           } catch {
-            return null;
+            // A campaign can be announced before all dependent objects arrive.
+            // Leave it out of the local aggregate until the next refresh.
           }
-        }),
+        }
+      }
+      await Promise.all(
+        Array.from(
+          { length: Math.min(CAMPAIGN_SNAPSHOT_CONCURRENCY, campaigns.length) },
+          () => loadNextSnapshot(),
+        ),
       );
       if (!disposed) {
-        setCampaignSnapshots(
-          Object.fromEntries(entries.filter((entry): entry is [string, CampaignReportSnapshot] => Boolean(entry))),
-        );
+        setCampaignSnapshots(Object.fromEntries(entries));
       }
     }
     void refreshSnapshots();
@@ -1229,6 +1252,7 @@ function AppContent() {
       <TitleBar />
 
       <main>
+        <h1 className="sr-only">CYPHES Proof of Cognition node</h1>
         <section className="panel intelligence-panel">
           {liveCampaign ? (
             <article className="intelligence-card">
@@ -1238,7 +1262,7 @@ function AppContent() {
               </div>
               <div className="intelligence-main">
                 <div>
-                  <h3>{liveCampaign.protocolName}</h3>
+                  <h2>{liveCampaign.protocolName}</h2>
                   <p className="audit-brief">{compactAuditBrief(liveTarget?.auditBrief)}</p>
                 </div>
                 <div className="runtime-radar">
@@ -1268,6 +1292,16 @@ function AppContent() {
                       )}
                     </select>
                   </label>
+                  {runtimeStatus ? (
+                    <p
+                      className={`runtime-readiness${runtimeStatus.connected ? " is-ready" : " is-unavailable"}`}
+                      title={runtimeStatus.message}
+                    >
+                      {runtimeStatus.connected
+                        ? `${runtimeStatus.providerLabel} ready · ${runtimeStatus.models.length} model${runtimeStatus.models.length === 1 ? "" : "s"}`
+                        : runtimeStatus.message}
+                    </p>
+                  ) : null}
                   <button
                     aria-label={workModeEnabled ? "Worker mode running" : "Run worker mode"}
                     className="runtime-run-button"
@@ -1278,7 +1312,7 @@ function AppContent() {
                     type="button"
                   >
                     <Play size={14} aria-hidden="true" />
-                    <span>{workModeEnabled ? "Running" : "Run"}</span>
+                    <span>{workModeEnabled ? "Running" : "Contribute"}</span>
                   </button>
                   <button
                     aria-label="Stop worker mode"
@@ -1288,7 +1322,7 @@ function AppContent() {
                     type="button"
                   >
                     <Square size={13} aria-hidden="true" />
-                    <span>Stop</span>
+                    <span>Stop worker</span>
                   </button>
                 </div>
               </div>
@@ -1304,13 +1338,26 @@ function AppContent() {
                   <strong>{currentTokensPerSecond.toFixed(1)}</strong>
                   <span>{runtimeActive ? "streaming local model" : measuredTokensPerSecond ? "last streamed run" : "waiting for model"}</span>
                 </div>
-                <div>
+                <button
+                  aria-controls="receipt-inspector"
+                  aria-expanded={receiptInspectorMode === "verified"}
+                  className="telemetry-action"
+                  onClick={() => setReceiptInspectorMode((current) => current === "verified" ? null : "verified")}
+                  type="button"
+                >
                   <Trophy size={16} />
                   <small>Verified ATP</small>
                   <strong>{creditSummary.total}</strong>
                   <span>{provisionalCreditTotal > 0 ? `${provisionalCreditTotal} provisional` : "independent receipts"}</span>
-                </div>
-                <div>
+                  <em>Inspect receipts</em>
+                </button>
+                <button
+                  aria-controls="receipt-inspector"
+                  aria-expanded={receiptInspectorMode === "pending"}
+                  className="telemetry-action"
+                  onClick={() => setReceiptInspectorMode((current) => current === "pending" ? null : "pending")}
+                  type="button"
+                >
                   <Clock3 size={16} />
                   <small>Pending</small>
                   <strong className={networkProgress.pendingPenaltyCredits > 0 ? "pending-credit has-penalty" : "pending-credit"}>
@@ -1326,7 +1373,8 @@ function AppContent() {
                         ? `${currentProgress}% active`
                         : "awaiting receipts"}
                   </span>
-                </div>
+                  <em>Inspect queue</em>
+                </button>
                 <div>
                   <Activity size={16} />
                   <small>Active nodes</small>
@@ -1334,10 +1382,22 @@ function AppContent() {
                   <span>{networkInfo?.relay_connected ? "relay linked" : "network standby"}</span>
                 </div>
               </div>
-              <div className="terminal-progress intelligence-progress" aria-label="Audit skill progress">
+              <div
+                aria-label={runtimeActive || runtimeRecentlyFinished ? "Audit skill progress" : "Network settlement progress"}
+                aria-valuemax={100}
+                aria-valuemin={0}
+                aria-valuenow={visibleProgress}
+                className="terminal-progress intelligence-progress"
+                role="progressbar"
+              >
                 <span className={progressIsActive ? "is-active" : undefined} style={{ width: `${visibleProgress}%` } as CSSProperties} />
               </div>
-              <div className="cockpit-events intelligence-events" aria-label="Live runtime event stream">
+              <div
+                aria-label="Live runtime event stream"
+                aria-live="polite"
+                aria-relevant="additions text"
+                className="cockpit-events intelligence-events"
+              >
                 {githubAccessStatus?.paused ? (
                   <div className="cockpit-event danger pinned" key="github-paused">
                     <time>HOLD</time>
@@ -1357,7 +1417,14 @@ function AppContent() {
                     <span>{latestRuntimeProgress.phase}</span>
                     <strong>{latestRuntimeProgress.progress}%</strong>
                   </div>
-                  <div className="progress-track">
+                  <div
+                    aria-label="Campaign progress"
+                    aria-valuemax={100}
+                    aria-valuemin={0}
+                    aria-valuenow={latestRuntimeProgress.progress}
+                    className="progress-track"
+                    role="progressbar"
+                  >
                     <span style={{ width: `${latestRuntimeProgress.progress}%` }} />
                   </div>
                   <small>{latestRuntimeProgress.tokensPerSecond ? `${latestRuntimeProgress.tokensPerSecond.toFixed(1)} tokens/sec` : "waiting for generation"}</small>
@@ -1369,7 +1436,14 @@ function AppContent() {
                     <span>Network settlement</span>
                     <strong>{networkProgress.settlementPercent}%</strong>
                   </div>
-                  <div className="progress-track">
+                  <div
+                    aria-label="Receipt verification progress"
+                    aria-valuemax={100}
+                    aria-valuemin={0}
+                    aria-valuenow={networkProgress.settlementPercent}
+                    className="progress-track"
+                    role="progressbar"
+                  >
                     <span style={{ width: `${networkProgress.settlementPercent}%` }} />
                   </div>
                   <small>{networkProgress.verifiedContributions}/{networkProgress.totalContributions} receipts verified</small>
@@ -1379,7 +1453,14 @@ function AppContent() {
                     <span>Work cleared</span>
                     <strong>{networkProgress.workPercent}%</strong>
                   </div>
-                  <div className="progress-track">
+                  <div
+                    aria-label="Work unit completion progress"
+                    aria-valuemax={100}
+                    aria-valuemin={0}
+                    aria-valuenow={networkProgress.workPercent}
+                    className="progress-track"
+                    role="progressbar"
+                  >
                     <span style={{ width: `${networkProgress.workPercent}%` }} />
                   </div>
                   <small>{networkProgress.clearedWorkUnits}/{networkProgress.totalWorkUnits} work units moved</small>
@@ -1393,8 +1474,17 @@ function AppContent() {
               <span>
                 {workModeEnabled
                   ? "CYPHES will resolve the next indexed target, pin the commit, and create work if it has not been covered yet."
-                  : "This node is syncing receipts and available for independent verification. Press Run to start local model work and campaign seeding."}
+                  : "This node is syncing signed receipts and can validate contributions from other node identities. Select a local model and choose Contribute to start worker mode."}
               </span>
+              <button
+                aria-controls="receipt-inspector"
+                aria-expanded={receiptInspectorMode === "pending"}
+                className="proof-explainer-button"
+                onClick={() => setReceiptInspectorMode((current) => current === "pending" ? null : "pending")}
+                type="button"
+              >
+                Explore proof pipeline
+              </button>
             </div>
           )}
 
@@ -1435,6 +1525,16 @@ function AppContent() {
                   )}
                 </select>
               </label>
+              {runtimeStatus ? (
+                <p
+                  className={`runtime-readiness${runtimeStatus.connected ? " is-ready" : " is-unavailable"}`}
+                  title={runtimeStatus.message}
+                >
+                  {runtimeStatus.connected
+                    ? `${runtimeStatus.providerLabel} ready · ${runtimeStatus.models.length} model${runtimeStatus.models.length === 1 ? "" : "s"}`
+                    : runtimeStatus.message}
+                </p>
+              ) : null}
               <button
                 aria-label={workModeEnabled ? "Worker mode running" : "Run worker mode"}
                 className="runtime-run-button"
@@ -1445,7 +1545,7 @@ function AppContent() {
                 type="button"
               >
                 <Play size={14} aria-hidden="true" />
-                <span>{workModeEnabled ? "Running" : "Run"}</span>
+                <span>{workModeEnabled ? "Running" : "Contribute"}</span>
               </button>
               <button
                 aria-label="Stop worker mode"
@@ -1455,7 +1555,7 @@ function AppContent() {
                 type="button"
               >
                 <Square size={13} aria-hidden="true" />
-                <span>Stop</span>
+                <span>Stop worker</span>
               </button>
             </div>
           ) : null}
@@ -1482,10 +1582,20 @@ function AppContent() {
           </div>
         </section>
 
+        {receiptInspectorMode ? (
+          <ReceiptInspector
+            campaigns={sortedCampaigns}
+            mode={receiptInspectorMode}
+            onClose={() => setReceiptInspectorMode(null)}
+            onModeChange={setReceiptInspectorMode}
+            snapshots={campaignSnapshots}
+          />
+        ) : null}
+
         <div className="system-message-stack">
-          {nodeError ? <div className="error-banner">Node error: {nodeError}</div> : null}
+          {nodeError ? <div className="error-banner" role="alert">Node error: {nodeError}</div> : null}
           {!isTauriRuntime() ? (
-            <div className="preview-banner">
+            <div className="preview-banner" role="note">
               Read-only browser preview. Signing, persistence, and networking require the native app.
             </div>
           ) : null}
@@ -1501,7 +1611,7 @@ function AppContent() {
         </footer>
       </main>
 
-      {notice ? <div className="notice">{notice}</div> : null}
+      {notice ? <div className="notice" role="status">{notice}</div> : null}
     </div>
   );
 }

@@ -5,7 +5,7 @@
   <p>CYPHES coordinates local AI security agents, independent verifier finality, and ATP credits through signed Cognition Proof receipts.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Active Testnet" src="https://img.shields.io/badge/status-active_testnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.15.7 testnet" src="https://img.shields.io/badge/CYPHES-v0.15.7_testnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.16.0 final testnet" src="https://img.shields.io/badge/CYPHES-v0.16.0_final_testnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,19 +17,22 @@
 
 ## Download
 
-The current active testnet release is **CYPHES v0.15.7**. CYPHES is the first
-application in a Proof of Cognition network for agentic cyber workers: local AI
-nodes perform scoped security labor, independent verifier nodes settle signed
+The current active release is **CYPHES v0.16.0 Final Testnet**. CYPHES is a
+coordination layer for agentic cyber workers: local AI nodes perform scoped
+security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
-to their own GitHub token/direct reads if it is unavailable. v0.15.7 keeps the
-current `cyphes-dev-v0.7.7` testnet state and the `/cyphes/atp/0.15.1` labor
-wire so existing testnet nodes can resync. It opens target-completion Cognition
-Proof epochs automatically, skips duplicate or superseded labor objects before
-signature-heavy verification, releases stale local claims when signed verifier
-receipts prove the work is already settled, excludes superseded receipts from
-local worker backpressure, and increases libp2p response capacity for catch-up
-sync without changing settlement rules.
+to their own GitHub token/direct reads if it is unavailable.
+
+v0.16.0 starts a fresh final-testnet database at
+`cyphes-final-testnet-v0.16.0.sqlite3` while preserving older v0.15.x data on
+disk. It keeps the compatible `/cyphes/atp/0.15.1` labor wire, opens
+target-completion Cognition Proof epochs automatically, skips duplicate or
+superseded labor objects before signature-heavy verification, releases stale
+local claims when signed verifier receipts prove the work is already settled,
+excludes superseded receipts from local worker backpressure, and includes the
+new Receipt Inspector cockpit for reviewing verified, pending, and penalized
+proof packets.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -38,12 +41,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.15.7](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_aarch64.dmg)
-- [Download CYPHES v0.15.7 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_x64.dmg)
+- [Download CYPHES v0.16.0 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_aarch64.dmg)
+- [Download CYPHES v0.16.0 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.15.7 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.15.7/CYPHES_0.15.7_x64-setup.exe)
+- [Download CYPHES v0.16.0 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.0/CYPHES_0.16.0_x64-setup.exe)
 
 These testnet builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -51,7 +54,7 @@ confirm **Open**. The Windows x64 setup build is unsigned and intended for
 testnet use. Linux users should run from source for now.
 
 Use **CYPHES** to join as a verifier by default. Select a local model and press
-**Run** only when you want that node to start local audit work; press **Stop**
+**Contribute** only when you want that node to start local audit work; press **Stop worker**
 to return to verifier-only participation. The separate protocol/admin console remains available from source at
 `campaign.html` for manual campaign creation, verification inspection, report
 export, and ATP proof logs.
@@ -225,6 +228,13 @@ Artifact Two independently returns:
   backpressure, raises the libp2p response read cap for real catch-up sync, and
   byte-caps labor bundles so large reconnects converge without flooding peers.
   It intentionally does not add experimental fair-work or no-self-dealing rules.
+- v0.16.0 starts the Final Testnet with a new SQLite store marker
+  `cyphes-final-testnet-v0.16.0`, preserving older v0.15.x data while giving
+  operators a clean network state. It carries forward the stable v0.15.7
+  settlement path, keeps verifier-first boot behavior, adds the cockpit Receipt
+  Inspector for verified, pending, and penalized proof packets, and disables
+  automatic tag-push release builds so public assets match the locally
+  checksummed release folder.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
@@ -242,7 +252,7 @@ Artifact Two independently returns:
   validation, and final report synthesis.
 - Autonomous Guardian Loop for 24/7 participation: verifier duty is on by
   default, while Auto Worker and Quest Seeder stay off until the operator
-  presses Run. Run mode persists across restart until Stop is pressed. CYPHES watches Guardian Index v2,
+  presses Contribute. Work mode persists across restart until Stop worker is pressed. CYPHES watches Guardian Index v2,
   resolves GitHub commits, avoids duplicate target/commit campaigns within the
   current coverage epoch, starts the next epoch after a full target pass,
   auto-claims open remote work only while work mode is enabled, runs the

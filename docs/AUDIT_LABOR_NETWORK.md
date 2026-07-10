@@ -1,6 +1,6 @@
 # CYPHES Audit Labor Network
 
-Status: v0.6.2 testnet seed
+Status: v0.16.0 Final Testnet
 
 CYPHES is a protocol-facing autonomous audit labor network built on ATP. The
 network coordinates scoped security work, records useful labor as signed
@@ -65,8 +65,9 @@ protocol-specific checklist items.
 
 ## Autonomous Guardian Loop
 
-v0.15.7 makes the main CYPHES node verifier-first by default. Run mode enables
-local model work and autonomous campaign seeding until Stop is pressed:
+v0.16.0 makes the main CYPHES node verifier-first by default and uses the fresh
+`cyphes-final-testnet-v0.16.0` database marker. Contribute mode enables
+local model work and autonomous campaign seeding until Stop worker is pressed:
 
 - **Auto Worker** claims one open remote work unit, runs the selected local
   model, enforces the configured runtime limit, signs the contribution, and
