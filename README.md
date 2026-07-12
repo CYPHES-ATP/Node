@@ -12,7 +12,7 @@
 </div>
 
 <p align="center">
-  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.16.1-final-testnet.png" width="100%">
+  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.16.1-final-testnet.png?v=20260712" width="100%">
 </p>
 
 ## Download
