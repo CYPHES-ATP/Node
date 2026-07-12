@@ -59,6 +59,10 @@ to return to verifier-only participation. The separate protocol/admin console re
 `campaign.html` for manual campaign creation, verification inspection, report
 export, and ATP proof logs.
 
+Self-hosted worker nodes should run on isolated hardware, a dedicated OS account,
+or a VM until the hardened headless worker sandbox ships. See
+[Self-hosting security](docs/SELF_HOSTING_SECURITY.md).
+
 For 24/7 operation, CYPHES reads public GitHub source through
 `source.cyphes.com`, where GitHub App credentials live server-side. CYPHES also
 caches immutable pinned GitHub source reads locally. Serious node operators can
@@ -300,6 +304,8 @@ Artifact Two independently returns:
   durable, searchable, replicated work-order index yet.
 - The worker is bounded by deterministic code paths and lease guards, but is
   not yet isolated in a hardened OS container or VM.
+- Self-hosted worker mode should use isolated hardware, a dedicated OS account,
+  or a VM until the hardened headless worker container is available.
 - No escrow, token transfer, release, refund, or dispute adapter. Verified ATP
   is off-chain receipt-derived accounting only, not a globally canonical
   token balance.
@@ -473,6 +479,7 @@ python3 ../Artifact-Two/tools/verify_atp_bundle.py \
 - [Proof of Protection](docs/PROOF_OF_PROTECTION.md)
 - [Source Gateway](docs/SOURCE_GATEWAY.md)
 - [Join the network](docs/JOIN_NETWORK.md)
+- [Self-hosting security](docs/SELF_HOSTING_SECURITY.md)
 - [Audit labor network](docs/AUDIT_LABOR_NETWORK.md)
 - [Autonomous Guardian Loop](docs/GENESIS_AUTO_MODE.md)
 - [Guardian Index](docs/GUARDIAN_INDEX.md)

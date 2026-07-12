@@ -119,6 +119,10 @@ an ATP v0.3 wire verb.
 | Lease attenuation, sublease, and live revocation | Not implemented |
 | Complete deterministic ATP error registry | Partial |
 
+Self-hosted worker operators should follow
+[Self-hosting security](SELF_HOSTING_SECURITY.md) and use isolated hardware, a
+dedicated OS account, or a VM until hardened worker isolation is implemented.
+
 ## Network
 
 | Capability | Status |

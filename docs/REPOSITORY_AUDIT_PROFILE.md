@@ -124,6 +124,8 @@ signature, hash, contract, lease, artifact, and event-chain integrity.
 ## Known Limits
 
 - No hardened process/container isolation.
+- Self-hosted worker mode should run on isolated hardware, a dedicated OS
+  account, or a VM until hardened worker isolation ships.
 - No private repository capabilities.
 - No live cancellation or lease revocation.
 - No real payment proof.

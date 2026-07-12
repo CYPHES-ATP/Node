@@ -31,6 +31,11 @@ instead of requiring a fresh database.
 - The Autonomous Guardian Loop does not submit external reports or claim
   payouts; ATP Credits become earned only after accepted verifier receipts.
 
+For self-hosted worker participation, use isolated hardware, a dedicated OS
+account, or a VM until the hardened headless worker sandbox ships. Verifier-only
+nodes do not need a local model and are the safest default for security teams.
+See [Self-hosting security](SELF_HOSTING_SECURITY.md).
+
 ## GitHub Access For 24/7 Runs
 
 CYPHES reads public GitHub repositories to resolve pinned commits and gather

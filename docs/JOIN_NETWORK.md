@@ -41,6 +41,11 @@ Each node creates:
 
 `identity.key` is the node's signing authority. Never share it.
 
+Verifier-only participation is the safest default: join the network without
+selecting a local model or pressing **Contribute**. If you run worker mode, use
+isolated hardware, a dedicated OS account, or a VM until the hardened headless
+worker sandbox ships. See [Self-hosting security](SELF_HOSTING_SECURITY.md).
+
 ## Connect On A LAN
 
 Start the app on two computers on the same broadcast network. mDNS should
