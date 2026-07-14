@@ -65,7 +65,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.3";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.4";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -160,10 +160,15 @@ function parseGitHubInput(value: string): GitHubInputTarget | null {
   };
 }
 
-function isSettledWorkUnitError(error: unknown) {
+function isStaleWorkUnitStateError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /already settled|already has submitted or reviewed work|already has reviewed work|already claimed by another node/i.test(
-    message,
+  return (
+    /already settled|already has submitted or reviewed work|already has reviewed work|already claimed by another node/i.test(
+      message,
+    ) ||
+    /only open work units can be claimed|claim the work unit before running it|work unit claim is missing locally/i.test(
+      message,
+    )
   );
 }
 
@@ -1179,9 +1184,9 @@ function AppContent() {
       setNotice(`CYPHES submitted ${campaign.protocolName}; receipt ${contribution.receiptHash.slice(0, 19)}... awaiting requester verification.`);
       return true;
     } catch (error) {
-      if (isSettledWorkUnitError(error)) {
+      if (isStaleWorkUnitStateError(error)) {
         await refreshCampaignSnapshot(campaign.campaignId);
-        pushAutoPulse(`${campaign.protocolName} unit settled by network; claim released`, "info");
+        pushAutoPulse(`${campaign.protocolName} claim state refreshed`, "info");
         return false;
       }
       throw error;
@@ -1205,7 +1210,7 @@ function AppContent() {
       const snapshot =
         campaignSnapshots[campaign.campaignId] ||
         (await refreshCampaignSnapshot(campaign.campaignId));
-      const myClaim = snapshot.claims.find((claim) => {
+      let myClaim = snapshot.claims.find((claim) => {
         const hasContribution = snapshot.contributions.some(
           (contribution) =>
             contribution.workUnitId === claim.workUnitId &&
@@ -1214,6 +1219,21 @@ function AppContent() {
         return claim.workerAgentId === agentId && claim.status === "claimed" && !hasContribution;
       });
       if (myClaim) {
+        if (campaignSnapshots[campaign.campaignId]) {
+          const freshSnapshot = await refreshCampaignSnapshot(campaign.campaignId);
+          myClaim = freshSnapshot.claims.find((claim) => {
+            const hasContribution = freshSnapshot.contributions.some(
+              (contribution) =>
+                contribution.workUnitId === claim.workUnitId &&
+                contribution.workerAgentId === agentId,
+            );
+            return claim.workerAgentId === agentId && claim.status === "claimed" && !hasContribution;
+          });
+          if (!myClaim) {
+            pushAutoPulse("Claim state refreshed", "info");
+            continue;
+          }
+        }
         pushAutoPulse("Running claimed unit", "info");
         const worked = await autoRunWorkUnit(campaign, myClaim.workUnitId);
         if (worked) return true;
@@ -1238,9 +1258,9 @@ function AppContent() {
         await p2p.claimCampaignWorkUnit(campaign.campaignId, openUnit.workUnitId);
         await refreshCampaignSnapshot(campaign.campaignId);
       } catch (error) {
-        if (isSettledWorkUnitError(error)) {
+        if (isStaleWorkUnitStateError(error)) {
           await refreshCampaignSnapshot(campaign.campaignId);
-          pushAutoPulse(`${openUnit.title} already settled or claimed; skipping`, "info");
+          pushAutoPulse(`${openUnit.title} state refreshed; skipping`, "info");
           continue;
         }
         throw error;

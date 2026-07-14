@@ -2,24 +2,26 @@
 
 ## Download The Mainnet Build
 
-macOS users can download the current packaged v0.16.3 Mainnet DMGs from:
+macOS users can download the current packaged v0.16.4 Mainnet DMGs from:
 
-- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.3/CYPHES_0.16.3_aarch64.dmg
-- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.3/CYPHES_0.16.3_x64.dmg
+- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.4/CYPHES_0.16.4_aarch64.dmg
+- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.4/CYPHES_0.16.4_x64.dmg
 
-- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.3/CYPHES_0.16.3_x64-setup.exe
+- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.4/CYPHES_0.16.4_x64-setup.exe
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. The Windows setup build is unsigned. Linux binary
 distributions are not available yet.
 
-The current source tree is v0.16.3. It keeps the
+The current source tree is v0.16.4. It keeps the
 `cyphes-final-testnet-v0.16.0.sqlite3` database marker as the mainnet genesis
 ledger identifier, so final-testnet data is preserved and continues forward.
-v0.16.3 does not require a fresh database; it is a non-mandatory performance
+v0.16.4 does not require a fresh database; it is a non-mandatory performance
 upgrade with aggregate dashboard summaries, cached credit refreshes, and
-coalesced network event reloads.
+coalesced network event reloads. It also refreshes stale local claim state
+before running cached work units so long-running workers do not repeat
+"Claim the work unit before running it" after a claim view goes stale.
 
 - **CYPHES** opens into the autonomous guardian cockpit as a verifier. Select
   a local LM Studio or Ollama model and press Contribute to create non-duplicate work,

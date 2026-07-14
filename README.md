@@ -5,33 +5,33 @@
   <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.16.3 mainnet" src="https://img.shields.io/badge/CYPHES-v0.16.3_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.16.4 mainnet" src="https://img.shields.io/badge/CYPHES-v0.16.4_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.16.3-mainnet.png?v=20260714" width="100%">
+  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.16.4-mainnet.png?v=20260714" width="100%">
 </p>
 
 ## Download
 
-The current active release is **CYPHES v0.16.3 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.16.4 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
 
-v0.16.3 is a non-mandatory performance upgrade over the existing
+v0.16.4 is a non-mandatory performance upgrade over the existing
 `cyphes-final-testnet-v0.16.0.sqlite3` ledger marker. That marker is preserved
 as the genesis ledger identifier so final-testnet work, findings, ATP
 allocations, receipts, peer history, and proof roots continue forward without a
 database reset. Old receipts keep their original economics; model scoring
 continues forward-only on new mainnet receipts.
 
-v0.16.3 keeps the compatible
+v0.16.4 keeps the compatible
 `/cyphes/atp/0.15.1` labor wire, opens target-completion Cognition Proof epochs
 automatically, reconciles stale pending receipts into an honest superseded
 lifecycle when the work unit already finalized, excludes those receipts from
@@ -39,7 +39,7 @@ worker backpressure and verifier-pending counts, gates bounty candidates on
 concrete file/function/line, exploit path, impact, and reproduction evidence,
 splits ATP quality rewards by proof quality, advertises model/runtime
 capability cards in new signed work, and keeps the Receipt Inspector cockpit for
-reviewing verified, pending, and penalized proof packets. The v0.16.3 cockpit
+reviewing verified, pending, and penalized proof packets. The v0.16.4 cockpit
 uses an aggregate backend dashboard summary, cached credit totals, and coalesced
 network refresh events so large ledgers do not require rebuilding every campaign
 snapshot during ordinary dashboard updates.
@@ -51,12 +51,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.16.3 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.3/CYPHES_0.16.3_aarch64.dmg)
-- [Download CYPHES v0.16.3 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.3/CYPHES_0.16.3_x64.dmg)
+- [Download CYPHES v0.16.4 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.4/CYPHES_0.16.4_aarch64.dmg)
+- [Download CYPHES v0.16.4 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.4/CYPHES_0.16.4_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.16.3 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.3/CYPHES_0.16.3_x64-setup.exe)
+- [Download CYPHES v0.16.4 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.4/CYPHES_0.16.4_x64-setup.exe)
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -90,7 +90,7 @@ reproduction evidence before earning the bounty-grade path.
 ## Model Scoring Registry
 
 Model economics are forward-only. The multiplier is signed into each new
-runtime receipt, so v0.16.3 does not rewrite or recompute older ATP allocations.
+runtime receipt, so v0.16.4 does not rewrite or recompute older ATP allocations.
 
 | Model or declared tier | New receipt multiplier |
 | --- | ---: |
@@ -308,12 +308,15 @@ Artifact Two independently returns:
   into new Cognition Proof receipts, and tightens the bounty gate so
   `reportable:true` requires concrete location, exploit path, impact, and
   reproduction evidence.
-- v0.16.3 is a non-mandatory Mainnet performance upgrade. It keeps the database
+- v0.16.4 is a non-mandatory Mainnet performance upgrade. It keeps the database
   marker, ATP wire, receipt format, and economics compatible while replacing
   ordinary cockpit refreshes with one aggregate backend dashboard summary,
   caching verified credit summaries by ledger head, coalescing duplicate network
   refresh events, and lazily loading full campaign snapshots only when detailed
-  receipt inspection or worker actions need them.
+  receipt inspection or worker actions need them. It also refreshes stale local
+  claim state before running a cached work unit, preventing repeated
+  "Claim the work unit before running it" cockpit flashes on long-running
+  worker nodes.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
