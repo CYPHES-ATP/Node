@@ -25,7 +25,8 @@ use crate::{
     state::{P2pState, PeerInfo},
     store::{
         campaign_id_for_transaction, data_dir, now_millis, AtpStore, AuditEventBody, AuditJob,
-        AuditJobPayload, LegacyAuditJob, RepositorySummary, MAX_PENDING_CONTRIBUTIONS_PER_WORKER,
+        AuditJobPayload, LegacyAuditJob, NetworkDashboardSummary, RepositorySummary,
+        MAX_PENDING_CONTRIBUTIONS_PER_WORKER,
     },
     worker::{create_repository_leases, execute_pipeline_audit_result, execute_repository_audit},
 };
@@ -305,6 +306,15 @@ pub async fn list_protocol_campaigns(
     store: State<'_, AtpStore>,
 ) -> Result<Vec<ProtocolAuditCampaign>, String> {
     store.list_protocol_campaigns()
+}
+
+#[tauri::command]
+pub async fn get_network_dashboard(
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+) -> Result<NetworkDashboardSummary, String> {
+    let (keypair, _) = node_runtime(&state)?;
+    store.network_dashboard_summary(&agent_id(&keypair.public()))
 }
 
 #[tauri::command]

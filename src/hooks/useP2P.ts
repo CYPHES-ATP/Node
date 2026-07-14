@@ -14,6 +14,7 @@ import type {
   InspectedRepository,
   LegacyAuditJob,
   LocalModelList,
+  NetworkDashboardSummary,
   NetworkInfo,
   NodeContribution,
   ProtocolAuditCampaign,
@@ -39,6 +40,7 @@ export function useP2P() {
   const setNetworkInfo = useCyphesStore((state) => state.setNetworkInfo);
   const replaceJobs = useCyphesStore((state) => state.replaceJobs);
   const replaceCampaigns = useCyphesStore((state) => state.replaceCampaigns);
+  const setNetworkSummary = useCyphesStore((state) => state.setNetworkSummary);
   const setCreditSummary = useCyphesStore((state) => state.setCreditSummary);
 
   async function startNode() {
@@ -95,11 +97,27 @@ export function useP2P() {
   async function loadProtocolCampaigns() {
     if (!isTauriRuntime()) {
       replaceCampaigns([]);
+      setNetworkSummary(null);
       return [];
     }
     const campaigns = await invoke<ProtocolAuditCampaign[]>("list_protocol_campaigns");
     replaceCampaigns(campaigns);
     return campaigns;
+  }
+
+  async function refreshNetworkDashboard() {
+    if (!isTauriRuntime()) {
+      replaceCampaigns([]);
+      setNetworkSummary(null);
+      const empty = { total: 0, allocations: [], provisionalTotal: 0, provisionalAllocations: [] };
+      setCreditSummary(empty);
+      return null;
+    }
+    const dashboard = await invoke<NetworkDashboardSummary>("get_network_dashboard");
+    replaceCampaigns(dashboard.campaigns);
+    setNetworkSummary(dashboard.progress);
+    setCreditSummary(dashboard.creditSummary);
+    return dashboard;
   }
 
   async function getCampaignSnapshot(campaignId: string) {
@@ -187,7 +205,7 @@ export function useP2P() {
       attachmentText,
       customSkillText,
     });
-    await Promise.all([loadAudits(), loadProtocolCampaigns()]);
+    await Promise.all([loadAudits(), refreshNetworkDashboard()]);
     return job;
   }
 
@@ -226,7 +244,7 @@ export function useP2P() {
         customSkillText,
       },
     });
-    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    await refreshNetworkDashboard();
     return campaign;
   }
 
@@ -235,7 +253,7 @@ export function useP2P() {
       campaignId,
       workUnitId,
     });
-    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    await refreshNetworkDashboard();
     return claim;
   }
 
@@ -253,7 +271,7 @@ export function useP2P() {
       model,
       maxRuntimeSeconds,
     });
-    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    await refreshNetworkDashboard();
     return contribution;
   }
 
@@ -267,7 +285,7 @@ export function useP2P() {
       workUnitId,
       notesMarkdown,
     });
-    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    await refreshNetworkDashboard();
     return contribution;
   }
 
@@ -283,7 +301,7 @@ export function useP2P() {
       provider,
       model,
     });
-    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    await refreshNetworkDashboard();
     return contribution;
   }
 
@@ -297,7 +315,7 @@ export function useP2P() {
       provider,
       model,
     });
-    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    await refreshNetworkDashboard();
     return contributions;
   }
 
@@ -311,7 +329,7 @@ export function useP2P() {
       provider,
       model,
     });
-    await Promise.all([loadAudits(), loadProtocolCampaigns(), refreshCreditSummary()]);
+    await Promise.all([loadAudits(), refreshNetworkDashboard()]);
     return contribution;
   }
 
@@ -325,7 +343,7 @@ export function useP2P() {
       provider,
       model,
     });
-    await Promise.all([loadAudits(), loadProtocolCampaigns(), refreshCreditSummary()]);
+    await Promise.all([loadAudits(), refreshNetworkDashboard()]);
     return contributions;
   }
 
@@ -341,7 +359,7 @@ export function useP2P() {
       reasonCode,
       reason,
     });
-    await Promise.all([loadProtocolCampaigns(), refreshCreditSummary()]);
+    await refreshNetworkDashboard();
     return credits;
   }
 
@@ -392,6 +410,7 @@ export function useP2P() {
     connectPeer,
     loadAudits,
     loadProtocolCampaigns,
+    refreshNetworkDashboard,
     getCampaignSnapshot,
     listGuardianTargets,
     getGitHubAccessStatus,

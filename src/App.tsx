@@ -61,12 +61,11 @@ const AUDIT_SCOPE = [
 const AUTO_TICK_INTERVAL_MS = 12_000;
 const TELEMETRY_TICK_INTERVAL_MS = 1_000;
 const RECENT_TELEMETRY_TICK_INTERVAL_MS = 5_000;
-const CAMPAIGN_SNAPSHOT_CONCURRENCY = 8;
 const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.2";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.3";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -391,6 +390,7 @@ function AppContent() {
   const peerCount = useCyphesStore((state) => state.peerCount);
   const networkInfo = useCyphesStore((state) => state.networkInfo);
   const campaigns = useCyphesStore((state) => state.campaigns);
+  const networkSummary = useCyphesStore((state) => state.networkSummary);
   const creditSummary = useCyphesStore((state) => state.creditSummary);
   const notice = useCyphesStore((state) => state.notice);
   const setNotice = useCyphesStore((state) => state.setNotice);
@@ -413,6 +413,23 @@ function AppContent() {
   const pendingReceiptMeter = hasPendingCredit ? Math.min(35, Math.max(1, Math.round(currentProgress * 0.35))) : 0;
   const normalizedAutoCounters = normalizeGenesisAutoCounters(autoCounters);
   const networkProgress = useMemo<NetworkProgressStats>(() => {
+    if (networkSummary) {
+      return {
+        totalWorkUnits: networkSummary.totalWorkUnits,
+        clearedWorkUnits: networkSummary.clearedWorkUnits,
+        totalContributions: networkSummary.totalContributions,
+        verifiedContributions: networkSummary.verifiedContributions,
+        pendingContributions: networkSummary.pendingContributions,
+        independentlyVerifiablePendingContributions:
+          networkSummary.independentlyVerifiablePendingContributions,
+        selfPendingContributions: networkSummary.selfPendingContributions,
+        pendingGrossCredits: networkSummary.pendingGrossCredits,
+        pendingPenaltyCredits: networkSummary.pendingPenaltyCredits,
+        parserFallbackPendingContributions: networkSummary.parserFallbackPendingContributions,
+        workPercent: networkSummary.workPercent,
+        settlementPercent: networkSummary.settlementPercent,
+      };
+    }
     return Object.values(campaignSnapshots).reduce((stats, snapshot) => {
       const verified = new Set(snapshot.verifications.map((item) => item.targetContributionId));
       // Work units the network already settled with someone else's accepted
@@ -483,7 +500,7 @@ function AppContent() {
       workPercent: 0,
       settlementPercent: 0,
     });
-  }, [agentId, campaignSnapshots]);
+  }, [agentId, campaignSnapshots, networkSummary]);
   const pendingVerificationCount = networkProgress.independentlyVerifiablePendingContributions;
   const selfPendingVerificationCount = networkProgress.selfPendingContributions;
   const visibleProgress = runtimeActive || runtimeRecentlyFinished ? currentProgress : networkProgress.settlementPercent;
@@ -508,6 +525,28 @@ function AppContent() {
     () => [...campaigns].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [campaigns],
   );
+  const campaignSummaryById = useMemo(
+    () => new Map(networkSummary?.campaigns.map((summary) => [summary.campaignId, summary]) || []),
+    [networkSummary],
+  );
+  const verifierCandidateCampaigns = useMemo(() => {
+    if (!networkSummary) return sortedCampaigns;
+    return sortedCampaigns.filter((campaign) => {
+      const summary = campaignSummaryById.get(campaign.campaignId);
+      return Boolean(
+        summary &&
+          (summary.independentlyVerifiablePendingContributions > 0 ||
+            summary.selfPendingContributions > 0),
+      );
+    });
+  }, [campaignSummaryById, networkSummary, sortedCampaigns]);
+  const workerCandidateCampaigns = useMemo(() => {
+    if (!networkSummary) return sortedCampaigns;
+    return sortedCampaigns.filter((campaign) => {
+      const summary = campaignSummaryById.get(campaign.campaignId);
+      return Boolean(summary && (summary.openWorkUnits > 0 || summary.claimedWorkUnits > 0));
+    });
+  }, [campaignSummaryById, networkSummary, sortedCampaigns]);
   const liveCampaign = useMemo(() => {
     if ((runtimeActive || runtimeRecentlyFinished) && latestRuntimeProgress) {
       const active = campaigns.find(
@@ -748,42 +787,58 @@ function AppContent() {
   }, [autoCounters]);
 
   useEffect(() => {
-    if (!isTauriRuntime() || campaigns.length === 0) return;
+    if (!isTauriRuntime() || !receiptInspectorMode || campaigns.length === 0) return;
     let disposed = false;
-    async function refreshSnapshots() {
-      const entries: Array<[string, CampaignReportSnapshot]> = [];
-      let cursor = 0;
-      async function loadNextSnapshot() {
-        while (!disposed) {
-          const campaign = campaigns[cursor];
-          cursor += 1;
-          if (!campaign) return;
+    async function refreshInspectorSnapshots() {
+      const summaryByCampaign = new Map(
+        networkSummary?.campaigns.map((summary) => [summary.campaignId, summary]) || [],
+      );
+      const candidates = campaigns
+        .map((campaign) => ({
+          campaign,
+          summary: summaryByCampaign.get(campaign.campaignId),
+        }))
+        .filter(({ summary }) => {
+          if (!summary) return true;
+          if (receiptInspectorMode === "pending") return summary.pendingContributions > 0;
+          if (receiptInspectorMode === "penalized") return summary.parserFallbackPendingContributions > 0;
+          return summary.totalContributions > 0;
+        })
+        .sort((a, b) => {
+          const latestA = a.summary?.latestActivityAt || Date.parse(a.campaign.updatedAt) || 0;
+          const latestB = b.summary?.latestActivityAt || Date.parse(b.campaign.updatedAt) || 0;
+          return latestB - latestA;
+        })
+        .slice(0, 14);
+      const loaded = await Promise.all(
+        candidates.map(async ({ campaign }) => {
           try {
-            entries.push([
+            return [
               campaign.campaignId,
               await p2p.getCampaignSnapshot(campaign.campaignId),
-            ]);
+            ] as [string, CampaignReportSnapshot];
           } catch {
-            // A campaign can be announced before all dependent objects arrive.
-            // Leave it out of the local aggregate until the next refresh.
+            return null;
           }
-        }
-      }
-      await Promise.all(
-        Array.from(
-          { length: Math.min(CAMPAIGN_SNAPSHOT_CONCURRENCY, campaigns.length) },
-          () => loadNextSnapshot(),
-        ),
+        }),
       );
       if (!disposed) {
-        setCampaignSnapshots(Object.fromEntries(entries));
+        const entries = loaded.filter(
+          (entry): entry is [string, CampaignReportSnapshot] => Boolean(entry),
+        );
+        if (entries.length > 0) {
+          setCampaignSnapshots((current) => ({
+            ...current,
+            ...Object.fromEntries(entries),
+          }));
+        }
       }
     }
-    void refreshSnapshots();
+    void refreshInspectorSnapshots();
     return () => {
       disposed = true;
     };
-  }, [campaigns]);
+  }, [campaigns, networkSummary?.ledgerHead, receiptInspectorMode]);
 
   useEffect(() => {
     if (!notice) return;
@@ -812,6 +867,7 @@ function AppContent() {
     campaignSnapshots,
     guardianLedger,
     guardianTargets,
+    networkSummary,
     normalizedAutoCounters,
     runtimeModel,
     runtimeProvider,
@@ -1056,7 +1112,7 @@ function AppContent() {
   }
 
   async function autoVerifyNextContribution() {
-    for (const campaign of campaigns) {
+    for (const campaign of verifierCandidateCampaigns) {
       const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
       const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
       const pending = snapshot.contributions.filter(
@@ -1145,7 +1201,7 @@ function AppContent() {
       return false;
     }
 
-    for (const campaign of campaigns) {
+    for (const campaign of workerCandidateCampaigns) {
       const snapshot =
         campaignSnapshots[campaign.campaignId] ||
         (await refreshCampaignSnapshot(campaign.campaignId));

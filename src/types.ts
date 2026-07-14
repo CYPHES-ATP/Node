@@ -277,6 +277,48 @@ export interface CampaignReportSnapshot {
   credits: CreditAllocation[];
 }
 
+export interface CampaignActivitySummary {
+  campaignId: string;
+  totalWorkUnits: number;
+  clearedWorkUnits: number;
+  openWorkUnits: number;
+  claimedWorkUnits: number;
+  totalContributions: number;
+  verifiedContributions: number;
+  pendingContributions: number;
+  independentlyVerifiablePendingContributions: number;
+  selfPendingContributions: number;
+  parserFallbackPendingContributions: number;
+  latestActivityAt: number;
+}
+
+export interface NetworkProgressSummary {
+  campaignCount: number;
+  totalWorkUnits: number;
+  clearedWorkUnits: number;
+  openWorkUnits: number;
+  claimedWorkUnits: number;
+  totalContributions: number;
+  verifiedContributions: number;
+  pendingContributions: number;
+  independentlyVerifiablePendingContributions: number;
+  selfPendingContributions: number;
+  pendingGrossCredits: number;
+  pendingPenaltyCredits: number;
+  parserFallbackPendingContributions: number;
+  workPercent: number;
+  settlementPercent: number;
+  latestActivityAt: number;
+  ledgerHead: string;
+  campaigns: CampaignActivitySummary[];
+}
+
+export interface NetworkDashboardSummary {
+  campaigns: ProtocolAuditCampaign[];
+  progress: NetworkProgressSummary;
+  creditSummary: CreditSummary;
+}
+
 export interface ExportedReportBundle {
   campaignId: string;
   bundlePath: string;

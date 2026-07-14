@@ -3,6 +3,7 @@ import type {
   AuditJob,
   CreditSummary,
   LegacyAuditJob,
+  NetworkProgressSummary,
   NetworkInfo,
   NodeStatus,
   ProtocolAuditCampaign,
@@ -32,6 +33,7 @@ interface CyphesState {
   networkInfo: NetworkInfo | null;
   jobs: AuditJob[];
   campaigns: ProtocolAuditCampaign[];
+  networkSummary: NetworkProgressSummary | null;
   creditSummary: CreditSummary;
   notice: string | null;
   setNodeOnline: (peerId: string, agentId: string) => void;
@@ -40,6 +42,7 @@ interface CyphesState {
   setNetworkInfo: (networkInfo: NetworkInfo) => void;
   replaceJobs: (jobs: AuditJob[]) => void;
   replaceCampaigns: (campaigns: ProtocolAuditCampaign[]) => void;
+  setNetworkSummary: (networkSummary: NetworkProgressSummary | null) => void;
   setCreditSummary: (creditSummary: CreditSummary) => void;
   setNotice: (notice: string | null) => void;
 }
@@ -53,6 +56,7 @@ export const useCyphesStore = create<CyphesState>((set) => ({
   networkInfo: null,
   jobs: [],
   campaigns: [],
+  networkSummary: null,
   creditSummary: { total: 0, allocations: [], provisionalTotal: 0, provisionalAllocations: [] },
   notice: null,
 
@@ -64,6 +68,7 @@ export const useCyphesStore = create<CyphesState>((set) => ({
     set({ networkInfo, peerCount: networkInfo.connected_peers }),
   replaceJobs: (jobs) => set({ jobs }),
   replaceCampaigns: (campaigns) => set({ campaigns }),
+  setNetworkSummary: (networkSummary) => set({ networkSummary }),
   setCreditSummary: (creditSummary) => set({ creditSummary }),
   setNotice: (notice) => set({ notice }),
 }));

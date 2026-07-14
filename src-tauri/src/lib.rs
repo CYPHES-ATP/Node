@@ -13,8 +13,8 @@ mod worker;
 use commands::{
     accept_offer, approve_result, claim_campaign_work_unit, connect_peer, create_audit,
     create_protocol_campaign, export_campaign_report, get_campaign_live_snapshot,
-    get_campaign_snapshot, get_credit_summary, get_github_access_status, get_network_info,
-    get_peers, inspect_github_repository, list_audits, list_guardian_targets,
+    get_campaign_snapshot, get_credit_summary, get_github_access_status, get_network_dashboard,
+    get_network_info, get_peers, inspect_github_repository, list_audits, list_guardian_targets,
     list_local_model_models, list_local_model_providers, list_protocol_campaigns,
     migrate_legacy_jobs, offer_audit, record_campaign_contribution, route_audit,
     run_accepted_audit_pipeline, run_accepted_audit_skill, run_audit, run_campaign_audit_pipeline,
@@ -97,6 +97,7 @@ pub fn run() {
             list_local_model_providers,
             list_local_model_models,
             list_protocol_campaigns,
+            get_network_dashboard,
             get_campaign_live_snapshot,
             get_campaign_snapshot,
             create_audit,

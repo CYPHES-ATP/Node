@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -145,6 +146,13 @@ pub struct TransactionContext {
 #[derive(Clone)]
 pub struct AtpStore {
     connection: Arc<Mutex<Connection>>,
+    credit_summary_cache: Arc<Mutex<HashMap<String, CachedCreditSummary>>>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedCreditSummary {
+    ledger_key: String,
+    summary: CreditSummary,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -187,10 +195,60 @@ pub struct PendingLaborObject {
     pub object_json: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampaignActivitySummary {
+    pub campaign_id: String,
+    pub total_work_units: usize,
+    pub cleared_work_units: usize,
+    pub open_work_units: usize,
+    pub claimed_work_units: usize,
+    pub total_contributions: usize,
+    pub verified_contributions: usize,
+    pub pending_contributions: usize,
+    pub independently_verifiable_pending_contributions: usize,
+    pub self_pending_contributions: usize,
+    pub parser_fallback_pending_contributions: usize,
+    pub latest_activity_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkProgressSummary {
+    pub campaign_count: usize,
+    pub total_work_units: usize,
+    pub cleared_work_units: usize,
+    pub open_work_units: usize,
+    pub claimed_work_units: usize,
+    pub total_contributions: usize,
+    pub verified_contributions: usize,
+    pub pending_contributions: usize,
+    pub independently_verifiable_pending_contributions: usize,
+    pub self_pending_contributions: usize,
+    pub pending_gross_credits: f64,
+    pub pending_penalty_credits: f64,
+    pub parser_fallback_pending_contributions: usize,
+    pub work_percent: u8,
+    pub settlement_percent: u8,
+    pub latest_activity_at: i64,
+    pub ledger_head: String,
+    pub campaigns: Vec<CampaignActivitySummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkDashboardSummary {
+    pub campaigns: Vec<ProtocolAuditCampaign>,
+    pub progress: NetworkProgressSummary,
+    pub credit_summary: CreditSummary,
+}
+
 pub const ATP_STORE_TESTNET_ID: &str = "cyphes-final-testnet-v0.16.0";
 pub const MAX_PENDING_CONTRIBUTIONS_PER_WORKER: usize = 25;
 const CONTRIBUTION_STATUS_SUBMITTED: &str = "submitted";
 const CONTRIBUTION_STATUS_SUPERSEDED: &str = "superseded";
+const PENDING_CONTRIBUTION_BASE_CREDIT: f64 = 35.0;
+const PARSER_FALLBACK_PENDING_MULTIPLIER: f64 = 0.10;
 // Correlated subquery (alias `c` = the contribution row) matching when the
 // contribution's work unit has already been settled by the network. Such an
 // unverified contribution is superseded and can never earn an independent
@@ -255,6 +313,7 @@ impl AtpStore {
 
         let store = Self {
             connection: Arc::new(Mutex::new(connection)),
+            credit_summary_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         store.initialize()?;
         store.reconcile_superseded_contributions()?;
@@ -488,6 +547,239 @@ impl AtpStore {
             serde_json::from_str(&json).map_err(|error| error.to_string())
         })
         .collect()
+    }
+
+    pub fn network_dashboard_summary(
+        &self,
+        local_agent_id: &str,
+    ) -> Result<NetworkDashboardSummary, String> {
+        let campaigns = self.list_protocol_campaigns()?;
+        let progress = self.network_progress_summary(local_agent_id)?;
+        let credit_summary = self.credit_summary(local_agent_id)?;
+        Ok(NetworkDashboardSummary {
+            campaigns,
+            progress,
+            credit_summary,
+        })
+    }
+
+    pub fn network_progress_summary(
+        &self,
+        local_agent_id: &str,
+    ) -> Result<NetworkProgressSummary, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut summaries: HashMap<String, CampaignActivitySummary> = HashMap::new();
+
+        {
+            let mut statement = connection
+                .prepare("SELECT campaign_id, updated_at FROM protocol_audit_campaigns")
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|error| error.to_string())?;
+            for row in rows {
+                let (campaign_id, updated_at) = row.map_err(|error| error.to_string())?;
+                let entry = campaign_summary_entry(&mut summaries, &campaign_id);
+                entry.latest_activity_at = entry.latest_activity_at.max(updated_at);
+            }
+        }
+
+        {
+            let mut statement = connection
+                .prepare(
+                    "SELECT campaign_id,
+                            COUNT(*) AS total_work_units,
+                            SUM(CASE WHEN status NOT IN ('open', 'claimed') THEN 1 ELSE 0 END) AS cleared_work_units,
+                            SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_work_units,
+                            SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed_work_units,
+                            COALESCE(MAX(updated_at), 0) AS latest_activity_at
+                     FROM audit_work_units
+                     GROUP BY campaign_id",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                })
+                .map_err(|error| error.to_string())?;
+            for row in rows {
+                let (
+                    campaign_id,
+                    total_work_units,
+                    cleared_work_units,
+                    open_work_units,
+                    claimed_work_units,
+                    latest_activity_at,
+                ) = row.map_err(|error| error.to_string())?;
+                let entry = campaign_summary_entry(&mut summaries, &campaign_id);
+                entry.total_work_units = total_work_units.max(0) as usize;
+                entry.cleared_work_units = cleared_work_units.max(0) as usize;
+                entry.open_work_units = open_work_units.max(0) as usize;
+                entry.claimed_work_units = claimed_work_units.max(0) as usize;
+                entry.latest_activity_at = entry.latest_activity_at.max(latest_activity_at);
+            }
+        }
+
+        {
+            let mut statement = connection
+                .prepare(
+                    "SELECT campaign_id, COUNT(*), COALESCE(MAX(created_at), 0)
+                     FROM audit_contributions
+                     GROUP BY campaign_id",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(|error| error.to_string())?;
+            for row in rows {
+                let (campaign_id, total_contributions, latest_activity_at) =
+                    row.map_err(|error| error.to_string())?;
+                let entry = campaign_summary_entry(&mut summaries, &campaign_id);
+                entry.total_contributions = total_contributions.max(0) as usize;
+                entry.latest_activity_at = entry.latest_activity_at.max(latest_activity_at);
+            }
+        }
+
+        {
+            let mut statement = connection
+                .prepare(
+                    "SELECT c.campaign_id, COUNT(*)
+                     FROM audit_contributions c
+                     WHERE EXISTS (
+                        SELECT 1 FROM audit_verifications v
+                        WHERE v.target_contribution_id = c.contribution_id
+                     )
+                     GROUP BY c.campaign_id",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|error| error.to_string())?;
+            for row in rows {
+                let (campaign_id, verified_contributions) =
+                    row.map_err(|error| error.to_string())?;
+                campaign_summary_entry(&mut summaries, &campaign_id).verified_contributions =
+                    verified_contributions.max(0) as usize;
+            }
+        }
+
+        {
+            let mut statement = connection
+                .prepare(
+                    "SELECT campaign_id, COALESCE(MAX(created_at), 0)
+                     FROM audit_verifications
+                     GROUP BY campaign_id",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|error| error.to_string())?;
+            for row in rows {
+                let (campaign_id, latest_activity_at) = row.map_err(|error| error.to_string())?;
+                let entry = campaign_summary_entry(&mut summaries, &campaign_id);
+                entry.latest_activity_at = entry.latest_activity_at.max(latest_activity_at);
+            }
+        }
+
+        {
+            let mut statement = connection
+                .prepare(&format!(
+                    "SELECT c.campaign_id, c.worker_agent_id, c.contribution_json, c.created_at
+                     FROM audit_contributions c
+                     WHERE c.status = ?1
+                       AND NOT EXISTS (
+                        SELECT 1 FROM audit_verifications v
+                        WHERE v.target_contribution_id = c.contribution_id
+                     )
+                       AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
+                     ORDER BY c.created_at DESC, c.contribution_id DESC",
+                ))
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(params![CONTRIBUTION_STATUS_SUBMITTED], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                })
+                .map_err(|error| error.to_string())?;
+            for row in rows {
+                let (campaign_id, worker_agent_id, contribution_json, created_at) =
+                    row.map_err(|error| error.to_string())?;
+                let entry = campaign_summary_entry(&mut summaries, &campaign_id);
+                entry.pending_contributions += 1;
+                if worker_agent_id == local_agent_id {
+                    entry.self_pending_contributions += 1;
+                } else {
+                    entry.independently_verifiable_pending_contributions += 1;
+                }
+                entry.latest_activity_at = entry.latest_activity_at.max(created_at);
+                let contribution = serde_json::from_str::<NodeContribution>(&contribution_json)
+                    .map_err(|error| error.to_string())?;
+                if contribution_is_parser_fallback(&contribution) {
+                    entry.parser_fallback_pending_contributions += 1;
+                }
+            }
+        }
+
+        let mut campaigns = summaries.into_values().collect::<Vec<_>>();
+        campaigns.sort_by(|a, b| {
+            b.latest_activity_at
+                .cmp(&a.latest_activity_at)
+                .then_with(|| a.campaign_id.cmp(&b.campaign_id))
+        });
+
+        let mut total = NetworkProgressSummary {
+            campaign_count: campaigns.len(),
+            campaigns,
+            ledger_head: network_ledger_head_in_connection(&connection)?,
+            ..NetworkProgressSummary::default()
+        };
+        for campaign in &total.campaigns {
+            total.total_work_units += campaign.total_work_units;
+            total.cleared_work_units += campaign.cleared_work_units;
+            total.open_work_units += campaign.open_work_units;
+            total.claimed_work_units += campaign.claimed_work_units;
+            total.total_contributions += campaign.total_contributions;
+            total.verified_contributions += campaign.verified_contributions;
+            total.pending_contributions += campaign.pending_contributions;
+            total.independently_verifiable_pending_contributions +=
+                campaign.independently_verifiable_pending_contributions;
+            total.self_pending_contributions += campaign.self_pending_contributions;
+            total.parser_fallback_pending_contributions +=
+                campaign.parser_fallback_pending_contributions;
+            total.latest_activity_at = total.latest_activity_at.max(campaign.latest_activity_at);
+        }
+        total.pending_gross_credits =
+            total.pending_contributions as f64 * PENDING_CONTRIBUTION_BASE_CREDIT;
+        total.pending_penalty_credits = total.parser_fallback_pending_contributions as f64
+            * PENDING_CONTRIBUTION_BASE_CREDIT
+            * (1.0 - PARSER_FALLBACK_PENDING_MULTIPLIER);
+        total.work_percent = percent_complete(total.cleared_work_units, total.total_work_units);
+        total.settlement_percent =
+            percent_complete(total.verified_contributions, total.total_contributions);
+        Ok(total)
     }
 
     #[cfg(test)]
@@ -1160,6 +1452,17 @@ impl AtpStore {
 
     pub fn credit_summary(&self, receiver_agent_id: &str) -> Result<CreditSummary, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let ledger_key = credit_summary_ledger_key_in_connection(&connection, receiver_agent_id)?;
+        if let Some(cached) = self
+            .credit_summary_cache
+            .lock()
+            .map_err(|error| error.to_string())?
+            .get(receiver_agent_id)
+            .filter(|cached| cached.ledger_key == ledger_key)
+            .cloned()
+        {
+            return Ok(cached.summary);
+        }
         let mut statement = connection
             .prepare(
                 "SELECT allocation_json FROM credit_allocations
@@ -1190,12 +1493,23 @@ impl AtpStore {
             .iter()
             .map(|allocation| allocation.total)
             .sum();
-        Ok(CreditSummary {
+        let summary = CreditSummary {
             total,
             allocations,
             provisional_total,
             provisional_allocations,
-        })
+        };
+        self.credit_summary_cache
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(
+                receiver_agent_id.to_string(),
+                CachedCreditSummary {
+                    ledger_key,
+                    summary: summary.clone(),
+                },
+            );
+        Ok(summary)
     }
 
     #[cfg(test)]
@@ -2525,6 +2839,8 @@ impl AtpStore {
                  );
                  CREATE INDEX IF NOT EXISTS credit_allocations_campaign_issued
                     ON credit_allocations(campaign_id, issued_at, allocation_id);
+                 CREATE INDEX IF NOT EXISTS credit_allocations_receiver_issued
+                    ON credit_allocations(receiver_agent_id, issued_at, allocation_id);
                  CREATE INDEX IF NOT EXISTS credit_allocations_verification_issued
                     ON credit_allocations(verification_id, issued_at, allocation_id);
                  CREATE INDEX IF NOT EXISTS credit_allocations_contribution
@@ -3747,6 +4063,126 @@ fn equivalent_campaign_in_transaction(
     Ok(None)
 }
 
+fn campaign_summary_entry<'a>(
+    summaries: &'a mut HashMap<String, CampaignActivitySummary>,
+    campaign_id: &str,
+) -> &'a mut CampaignActivitySummary {
+    summaries
+        .entry(campaign_id.to_string())
+        .or_insert_with(|| CampaignActivitySummary {
+            campaign_id: campaign_id.to_string(),
+            ..CampaignActivitySummary::default()
+        })
+}
+
+fn percent_complete(done: usize, total: usize) -> u8 {
+    if total == 0 {
+        return 0;
+    }
+    (((done as f64 / total as f64) * 100.0).round() as i64).clamp(0, 100) as u8
+}
+
+fn network_ledger_head_in_connection(connection: &Connection) -> Result<String, String> {
+    let campaign_count = count_table_rows(connection, "protocol_audit_campaigns")?;
+    let work_unit_count = count_table_rows(connection, "audit_work_units")?;
+    let contribution_count = count_table_rows(connection, "audit_contributions")?;
+    let verification_count = count_table_rows(connection, "audit_verifications")?;
+    let allocation_count = count_table_rows(connection, "credit_allocations")?;
+    let event_count = count_table_rows(connection, "audit_labor_events")?;
+    let latest_activity = [
+        max_i64_column(connection, "protocol_audit_campaigns", "updated_at")?,
+        max_i64_column(connection, "audit_work_units", "updated_at")?,
+        max_i64_column(connection, "audit_work_unit_claims", "updated_at")?,
+        max_i64_column(connection, "audit_contributions", "created_at")?,
+        max_i64_column(connection, "audit_verifications", "created_at")?,
+        max_i64_column(connection, "credit_allocations", "issued_at")?,
+        max_i64_column(connection, "audit_labor_events", "created_at")?,
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or_default();
+    Ok(format!(
+        "campaigns:{campaign_count}:work:{work_unit_count}:contributions:{contribution_count}:verifications:{verification_count}:allocations:{allocation_count}:events:{event_count}:latest:{latest_activity}"
+    ))
+}
+
+fn credit_summary_ledger_key_in_connection(
+    connection: &Connection,
+    receiver_agent_id: &str,
+) -> Result<String, String> {
+    let (count, total, json_bytes, latest_issued) = connection
+        .query_row(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(total), 0),
+                    COALESCE(SUM(length(allocation_json)), 0),
+                    COALESCE(MAX(issued_at), 0)
+             FROM credit_allocations
+             WHERE receiver_agent_id = ?1",
+            params![receiver_agent_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(format!(
+        "receiver:{receiver_agent_id}:count:{count}:total:{total}:bytes:{json_bytes}:latest:{latest_issued}"
+    ))
+}
+
+fn count_table_rows(connection: &Connection, table: &str) -> Result<i64, String> {
+    connection
+        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn max_i64_column(connection: &Connection, table: &str, column: &str) -> Result<i64, String> {
+    connection
+        .query_row(
+            &format!("SELECT COALESCE(MAX({column}), 0) FROM {table}"),
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn contribution_is_parser_fallback(contribution: &NodeContribution) -> bool {
+    if contribution
+        .cognition_proof
+        .as_ref()
+        .map(|proof| proof.quality.parser_fallback)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if !contribution.findings.is_empty() {
+        return false;
+    }
+    if contribution
+        .notes_markdown
+        .contains("CYPHES parser note: model output was not valid structured JSON")
+    {
+        return true;
+    }
+    if contribution
+        .commands
+        .iter()
+        .any(|command| command.to_lowercase().contains("structured parse failed"))
+    {
+        return true;
+    }
+    contribution.coverage.iter().any(|coverage| {
+        coverage.area.eq_ignore_ascii_case("local model output")
+            && coverage.status.eq_ignore_ascii_case("needs_review")
+    })
+}
+
 fn work_units_in_connection(
     connection: &Connection,
     campaign_id: &str,
@@ -4355,6 +4791,7 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         let store = AtpStore {
             connection: Arc::new(Mutex::new(connection)),
+            credit_summary_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         store.initialize().unwrap();
         store
@@ -5700,6 +6137,84 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.claims.len(), 1);
         assert_eq!(snapshot.claims[0].status, "expired");
+    }
+
+    #[test]
+    fn network_progress_summary_tracks_pending_and_verified_work() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let requester_agent = agent_id(&requester.public());
+        let worker_agent = agent_id(&worker.public());
+        let campaign = labor_campaign(requester_agent.clone());
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_unit);
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Mapped repository inventory for dashboard summary coverage.".to_string(),
+            vec![],
+            vec![labor_artifact("inventory.md")],
+            vec![CoverageItem {
+                area: "repository inventory".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["No repository code execution.".to_string()],
+            }],
+            vec!["no code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution).unwrap();
+
+        let worker_view = store.network_progress_summary(&worker_agent).unwrap();
+        assert_eq!(worker_view.campaign_count, 1);
+        assert_eq!(worker_view.total_contributions, 1);
+        assert_eq!(worker_view.pending_contributions, 1);
+        assert_eq!(worker_view.self_pending_contributions, 1);
+        assert_eq!(
+            worker_view.independently_verifiable_pending_contributions,
+            0
+        );
+        assert_eq!(
+            worker_view.pending_gross_credits,
+            PENDING_CONTRIBUTION_BASE_CREDIT
+        );
+
+        let verifier_view = store.network_progress_summary(&requester_agent).unwrap();
+        assert_eq!(verifier_view.pending_contributions, 1);
+        assert_eq!(verifier_view.self_pending_contributions, 0);
+        assert_eq!(
+            verifier_view.independently_verifiable_pending_contributions,
+            1
+        );
+
+        let verification = signed_verification(
+            &requester,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "COVERAGE_ACCEPTED".to_string(),
+            "Contribution is bounded, signed, and useful.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("verification.md")],
+        )
+        .unwrap();
+        store.record_verification(&verification).unwrap();
+
+        let settled_view = store.network_progress_summary(&worker_agent).unwrap();
+        assert_eq!(settled_view.pending_contributions, 0);
+        assert_eq!(settled_view.verified_contributions, 1);
+        assert_eq!(settled_view.settlement_percent, 100);
     }
 
     #[test]
