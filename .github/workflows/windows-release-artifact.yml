@@ -40,7 +40,7 @@ jobs:
         run: npm exec tauri -- build --config src-tauri/tauri.worker.conf.json --ci
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CYPHES-${{ inputs.tag }}-windows-x64
           path: src-tauri/target/release/bundle/nsis/CYPHES_*_x64-setup.exe
