@@ -34,7 +34,7 @@ Return exactly one JSON object with these fields:
       "severity": "critical|high|medium|low|informational",
       "status": "candidate|non_reportable|duplicate|invalid|needs_review",
       "impact": "impact statement or null",
-      "evidence": ["file/function/line or artifact hash reviewed"],
+      "evidence": ["concrete file, function, line, exploit path, and reproduction evidence"],
       "reportable": false
     }
   ],
@@ -51,6 +51,7 @@ Return exactly one JSON object with these fields:
 Rules:
 - Use an empty findings array when no vulnerability is found.
 - Coverage must be non-empty and evidence-backed.
+- reportable:true requires concrete file/function/line, exploit path, impact, and reproduction steps.
 - A no-issue result is valid only when coverage explains what was checked.
 - Do not invent line numbers, tools, commands, or findings.
 "#;
@@ -379,10 +380,18 @@ pub async fn run_local_audit_skill(
         );
     }
     let output_hash = sha256_ref(model_output.content.as_bytes());
+    let provider_class = provider_class(provider, model).to_string();
+    let declared_parameter_tier = declared_parameter_tier(model);
+    let context_window_tokens = declared_context_window_tokens(model);
     let runtime_json = serde_json::to_vec_pretty(&json!({
         "provider": provider,
         "providerLabel": provider_label(provider),
         "endpointClass": "local",
+        "providerClass": provider_class.clone(),
+        "declaredParameterTier": declared_parameter_tier.clone(),
+        "contextWindowTokens": context_window_tokens,
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "workerMode": "verifier-and-worker",
         "model": model,
         "skillHash": skill_hash,
         "inputHash": input_hash,
@@ -439,6 +448,11 @@ pub async fn run_local_audit_skill(
         ],
         connected: true,
         endpoint_class: Some("local".to_string()),
+        provider_class: Some(provider_class),
+        declared_parameter_tier: Some(declared_parameter_tier),
+        context_window_tokens,
+        app_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        worker_mode: Some("verifier-and-worker".to_string()),
         skill_hash: Some(skill_hash),
         input_hash: Some(input_hash),
         output_hash: Some(output_hash),
@@ -1379,7 +1393,7 @@ fn finding_has_bounty_grade_evidence(finding: &AuditFinding, commands: &[String]
     let Some(impact) = finding.impact.as_deref() else {
         return false;
     };
-    if is_placeholder_text(impact) {
+    if is_placeholder_text(impact) || !has_impact_signal(impact) {
         return false;
     }
     if finding.evidence.is_empty()
@@ -1426,7 +1440,7 @@ fn has_code_location_signal(value: &str) -> bool {
         || value.contains("contract ")
         || value.contains("::")
         || value.contains("()");
-    has_file && (has_function || contains_line_marker(value))
+    has_file && has_function && contains_line_marker(value)
 }
 
 fn contains_line_marker(value: &str) -> bool {
@@ -1460,24 +1474,49 @@ fn has_exploit_path_signal(value: &str) -> bool {
     .any(|marker| value.contains(marker))
 }
 
+fn has_impact_signal(value: &str) -> bool {
+    let normalized = value.to_ascii_lowercase();
+    normalized.len() >= 24
+        && [
+            "loss",
+            "fund",
+            "drain",
+            "steal",
+            "unauthorized",
+            "bypass",
+            "governance",
+            "liquidat",
+            "insolv",
+            "denial",
+            "dos",
+            "incorrect accounting",
+            "price",
+            "oracle",
+            "mint",
+            "burn",
+        ]
+        .iter()
+        .any(|marker| normalized.contains(marker))
+}
+
 fn has_reproduction_signal(value: &str, commands: &[String]) -> bool {
     let command_text = commands.join("\n").to_ascii_lowercase();
     let combined = format!("{value}\n{command_text}");
     [
         "reproduce",
         "reproduction",
-        "steps",
+        "repro steps",
+        "steps:",
         "poc",
         "proof of concept",
         "forge test",
         "hardhat test",
-        "npm test",
-        "yarn test",
-        "cargo test",
-        "slither",
+        "foundry test",
         "echidna",
         "foundry",
-        "run ",
+        "assert",
+        "transaction sequence",
+        "call sequence",
     ]
     .iter()
     .any(|marker| combined.contains(marker))
@@ -1555,9 +1594,80 @@ fn ollama_endpoint() -> &'static str {
     "http://localhost:11434"
 }
 
+fn provider_class(provider: &str, model: &str) -> &'static str {
+    let lower = model.to_ascii_lowercase();
+    if lower.contains(":cloud")
+        || lower.contains("cloud")
+        || lower.contains("api")
+        || lower.contains("proxy")
+        || lower.contains("qwen-max")
+        || lower.contains("minimax")
+        || lower.contains("kimi")
+    {
+        "cloud-proxy"
+    } else if provider == "ollama" {
+        "local"
+    } else {
+        "local-compatible"
+    }
+}
+
+fn declared_parameter_tier(model: &str) -> String {
+    let lower = model.to_ascii_lowercase();
+    for marker in [
+        "405b", "120b", "72b", "70b", "34b", "32b", "24b", "22b", "20b", "14b", "13b", "8b", "7b",
+        "3b", "1b",
+    ] {
+        if lower.contains(marker) {
+            return marker.to_string();
+        }
+    }
+    if lower.contains("minimax-m3") || lower.contains("qwen-max") || lower.contains("kimi") {
+        "frontier-cloud".to_string()
+    } else if lower.contains("frontier") {
+        "frontier".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn declared_context_window_tokens(model: &str) -> Option<u32> {
+    let lower = model.to_ascii_lowercase();
+    if lower.contains("1m") {
+        Some(1_000_000)
+    } else if lower.contains("256k") {
+        Some(256_000)
+    } else if lower.contains("128k") {
+        Some(128_000)
+    } else if lower.contains("64k") {
+        Some(64_000)
+    } else if lower.contains("32k") {
+        Some(32_000)
+    } else {
+        None
+    }
+}
+
 fn model_multiplier(model: &str) -> f64 {
     let lower = model.to_ascii_lowercase();
-    if lower.contains("70b") || lower.contains("72b") || lower.contains("405b") {
+    if lower.contains("minimax-m3")
+        || lower.contains("gpt-oss-120b")
+        || lower.contains("qwen-max")
+        || lower.contains("qwen3-max")
+        || lower.contains("kimi")
+        || lower.contains("frontier")
+        || lower.contains("claude")
+        || lower.contains("gpt-5")
+        || lower.contains("gpt-4")
+        || lower.contains("gemini")
+        || lower.contains("deepseek-r1")
+        || lower.contains("405b")
+        || lower.contains("120b")
+    {
+        10.0
+    } else if lower.contains("gpt-oss-20b") {
+        3.0
+    } else if lower.contains("70b") || lower.contains("72b") {
         3.0
     } else if lower.contains("32b") || lower.contains("34b") {
         2.5
@@ -1666,6 +1776,28 @@ mod tests {
     }
 
     #[test]
+    fn bounty_gate_requires_reproduction_not_generic_run_language() {
+        let output = parse_model_output(
+            r#"{
+              "summaryMarkdown": "Specific looking but unreproduced issue.",
+              "findings": [{
+                "id":"X",
+                "title":"Swap math can be bypassed",
+                "severity":"high",
+                "status":"candidate",
+                "impact":"An attacker can bypass accounting and cause loss of funds.",
+                "evidence":["contracts/Pool.sol:91 function swap() has unchecked accounting; exploit path: attacker bypasses invariant"],
+                "reportable":true
+              }],
+              "coverage": [{"area":"swap accounting","status":"completed","evidence":["contracts/Pool.sol:91"]}],
+              "commands": ["read repository context and run local reasoning"]
+            }"#,
+        );
+        assert!(!output.findings[0].reportable);
+        assert_eq!(output.findings[0].status, "needs_reproduction");
+    }
+
+    #[test]
     fn unstructured_model_output_does_not_create_findings() {
         let output = parse_model_output("I looked around and it seems okay.");
         assert!(output.findings.is_empty());
@@ -1739,6 +1871,11 @@ mod tests {
 
     #[test]
     fn model_multiplier_rewards_larger_local_models_without_maxing_unknowns() {
+        assert_eq!(model_multiplier("minimax-m3:cloud"), 10.0);
+        assert_eq!(model_multiplier("gpt-oss-120b"), 10.0);
+        assert_eq!(model_multiplier("kimi-k2"), 10.0);
+        assert_eq!(model_multiplier("qwen-max"), 10.0);
+        assert_eq!(model_multiplier("gpt-oss-20b"), 3.0);
         assert_eq!(model_multiplier("llama-3.3-70b"), 3.0);
         assert!(model_multiplier("qwen2.5-32b") > model_multiplier("qwen2.5-14b"));
         assert!(model_multiplier("oss-20b") > model_multiplier("qwen2.5-7b"));

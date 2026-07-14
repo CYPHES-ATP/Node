@@ -66,7 +66,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.1";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.2";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -1579,7 +1579,7 @@ function AppContent() {
         </div>
 
         <footer>
-          <span>CYPHES v{APP_VERSION} testnet</span>
+          <span>CYPHES v{APP_VERSION} mainnet</span>
           <span>ATP envelope v0.3</span>
           <span>Ed25519 identity proof</span>
           <span>SQLite event chain</span>

@@ -225,6 +225,16 @@ pub struct RuntimeDescriptor {
     pub connected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_parameter_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -249,6 +259,11 @@ impl RuntimeDescriptor {
             ],
             connected: true,
             endpoint_class: None,
+            provider_class: None,
+            declared_parameter_tier: None,
+            context_window_tokens: None,
+            app_version: None,
+            worker_mode: None,
             skill_hash: None,
             input_hash: None,
             output_hash: None,
@@ -310,6 +325,16 @@ pub struct CognitionProofMethod {
     pub runtime_adapter: String,
     pub runtime_model: String,
     pub model_multiplier: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_parameter_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_mode: Option<String>,
     pub tool_policy: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_hash: Option<String>,
@@ -872,6 +897,11 @@ fn build_cognition_proof_packet(
             runtime_adapter: runtime.adapter.clone(),
             runtime_model: runtime.model.clone(),
             model_multiplier: runtime.model_multiplier,
+            provider_class: runtime.provider_class.clone(),
+            declared_parameter_tier: runtime.declared_parameter_tier.clone(),
+            context_window_tokens: runtime.context_window_tokens,
+            app_version: runtime.app_version.clone(),
+            worker_mode: runtime.worker_mode.clone(),
             tool_policy: runtime.tool_policy.clone(),
             skill_hash: runtime.skill_hash.clone(),
             input_hash: runtime.input_hash.clone(),
@@ -1964,6 +1994,11 @@ fn validate_cognition_proof_for_contribution(
         || proof.method.runtime_model != contribution.runtime.model
         || (proof.method.model_multiplier - contribution.runtime.model_multiplier).abs()
             > f64::EPSILON
+        || proof.method.provider_class != contribution.runtime.provider_class
+        || proof.method.declared_parameter_tier != contribution.runtime.declared_parameter_tier
+        || proof.method.context_window_tokens != contribution.runtime.context_window_tokens
+        || proof.method.app_version != contribution.runtime.app_version
+        || proof.method.worker_mode != contribution.runtime.worker_mode
     {
         return Err("cognition proof method does not match contribution runtime".to_string());
     }

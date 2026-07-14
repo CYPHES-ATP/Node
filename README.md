@@ -1,38 +1,45 @@
 <a id="cyphes"></a>
 <div align="center">
   <h1>CYPHES</h1>
-  <p><strong>Proof of Cognition for agentic cyber workers.</strong></p>
-  <p>CYPHES coordinates local AI security agents, independent verifier finality, and ATP credits through signed Cognition Proof receipts.</p>
+  <p><strong>Autonomous cyber defense.</strong></p>
+  <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
-    <a href="ROADMAP.md"><img alt="Status: Active Testnet" src="https://img.shields.io/badge/status-active_testnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.16.1 final testnet" src="https://img.shields.io/badge/CYPHES-v0.16.1_final_testnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.16.2 mainnet" src="https://img.shields.io/badge/CYPHES-v0.16.2_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
 </div>
 
 <p align="center">
-  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.16.1-final-testnet.png?v=20260712" width="100%">
+  <img alt="CYPHES autonomous node cockpit" src="docs/images/cyphes-v0.16.2-mainnet.png?v=20260714" width="100%">
 </p>
 
 ## Download
 
-The current active release is **CYPHES v0.16.1 Final Testnet**. CYPHES is a
+The current active release is **CYPHES v0.16.2 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
 
-v0.16.1 is an in-place rolling upgrade over the Final Testnet database marker
-`cyphes-final-testnet-v0.16.0.sqlite3`. It keeps the compatible
+v0.16.2 is an in-place mainnet migration over the existing
+`cyphes-final-testnet-v0.16.0.sqlite3` ledger marker. That marker is preserved
+as the genesis ledger identifier so final-testnet work, findings, ATP
+allocations, receipts, peer history, and proof roots continue forward without a
+database reset. Old receipts keep their original economics; the v0.16.2 model
+scoring registry applies only to new mainnet receipts.
+
+v0.16.2 keeps the compatible
 `/cyphes/atp/0.15.1` labor wire, opens target-completion Cognition Proof epochs
 automatically, reconciles stale pending receipts into an honest superseded
 lifecycle when the work unit already finalized, excludes those receipts from
 worker backpressure and verifier-pending counts, gates bounty candidates on
-concrete location, exploit path, impact, and reproduction evidence, splits ATP
-quality rewards by proof quality, and keeps the Receipt Inspector cockpit for
-reviewing verified, pending, and penalized proof packets.
+concrete file/function/line, exploit path, impact, and reproduction evidence,
+splits ATP quality rewards by proof quality, advertises model/runtime
+capability cards in new signed work, and keeps the Receipt Inspector cockpit
+for reviewing verified, pending, and penalized proof packets.
 
 Verified ATP remains receipt-derived instead of SQLite-trusted: earned credits
 require a signed contribution, a signed acceptance from an independent verifier,
@@ -41,17 +48,64 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.16.1 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.1/CYPHES_0.16.1_aarch64.dmg)
-- [Download CYPHES v0.16.1 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.1/CYPHES_0.16.1_x64.dmg)
+- [Download CYPHES v0.16.2 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.2/CYPHES_0.16.2_aarch64.dmg)
+- [Download CYPHES v0.16.2 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.2/CYPHES_0.16.2_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.16.1 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.1/CYPHES_0.16.1_x64-setup.exe)
+- [Download CYPHES v0.16.2 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.16.2/CYPHES_0.16.2_x64-setup.exe)
 
-These testnet builds are ad hoc signed but not Apple-notarized yet. After
+These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
-confirm **Open**. The Windows x64 setup build is unsigned and intended for
-testnet use. Linux users should run from source for now.
+confirm **Open**. The Windows x64 setup build is unsigned. Linux users should
+run from source for now.
+
+## Mainnet Genesis Archive
+
+The v0.16.2 release preserves the final public CYPHES ledger as mainnet genesis
+state:
+
+- Contributions: `6,068`
+- Verifications: `6,015`
+- ATP allocation rows: `12,030`
+- ATP allocated: `636,044`
+- Active submitted-pending receipts: `0`
+- Signed Cognition Proof packets: `6,068`
+- Worker identities observed: `3`
+- Verifier identities observed: `5`
+- Contribution receipt root: `5f3534827753611d7abf13785d655d84eed8fb75a42498c960622f12cb0e5f06`
+- Verification receipt root: `0cefefcb7c5b45ef1855fec085db4f13f2e2614a4f801b9468f5a3e056058101`
+- Cognition Proof root: `7f53352bef6312190ad6b0367e71838f224955ca860501b42c8433b96552296f`
+
+Top lead clusters remain human-triage candidates, not automatic submissions:
+PancakeSwap V3 `IFarmBooster` input-validation repeats, Compound-style COMP
+accrual accounting repeats, swap/reentrancy repeats, and Rocket Pool access
+control repeats. v0.16.2 raises the reportable gate so future
+`reportable:true` findings need concrete location, exploit path, impact, and
+reproduction evidence before earning the bounty-grade path.
+
+## Model Scoring Registry
+
+Model economics are forward-only. The multiplier is signed into each new
+runtime receipt, so v0.16.2 does not rewrite or recompute older ATP allocations.
+
+| Model or declared tier | New receipt multiplier |
+| --- | ---: |
+| `minimax-m3` | `10.0x` |
+| `gpt-oss-120b` | `10.0x` |
+| `kimi`, `qwen-max`, frontier/cloud labels | `10.0x` |
+| `gpt-oss-20b` | `3.0x` |
+| `70b` / `72b` local models | `3.0x` |
+| `32b` / `34b` local models | `2.5x` |
+| `20b` / `22b` / `24b` local models | `2.0x` |
+| `13b` / `14b` local models | `1.6x` |
+| `7b` / `8b` local models | `1.0x` |
+| Unknown small/local models | `0.9x` |
+
+Parser fallback still earns the deterministic `0.10x` proof-quality tier, and
+low-evidence structured coverage earns the `0.20x` proof-quality tier. Strong
+model multipliers matter most when the output is structured, evidence-backed,
+and independently verified.
 
 Use **CYPHES** to join as a verifier by default. Select a local model and press
 **Contribute** only when you want that node to start local audit work; press **Stop worker**
@@ -244,6 +298,13 @@ Artifact Two independently returns:
   gating for reportable findings, quality-weighted ATP tiers for low-evidence
   versus bounty-grade proofs, a cleaner cockpit without the old settlement row,
   and Guardian epoch completion percentage beside the 165 target count.
+- v0.16.2 is the in-place Mainnet migration. It preserves the
+  `cyphes-final-testnet-v0.16.0` genesis ledger marker and all final-testnet
+  receipts, keeps old ATP economics intact, raises `minimax-m3` to `10.0x`,
+  adds explicit frontier/cloud scoring tiers, signs model/node capability cards
+  into new Cognition Proof receipts, and tightens the bounty gate so
+  `reportable:true` requires concrete location, exploit path, impact, and
+  reproduction evidence.
 - Main CYPHES UI is centered on the autonomous cockpit: tokens/sec, pending and
   Verified ATP, progress, peers, target metadata, live protocol coverage, and
   receipt-backed event telemetry. Manual work-order controls are intentionally
@@ -327,9 +388,9 @@ Artifact Two independently returns:
 - No private GitHub authorization.
 - No key rotation, recovery, block list, rate-limit UI, or multi-device owner
   identity.
-- The macOS testnet installer is downloadable but not Apple-notarized. The
-  Windows x64 setup build is unsigned and intended for testnet use. There is
-  no Linux binary distribution or automatic updater yet.
+- The macOS installer is downloadable but not Apple-notarized. The Windows x64
+  setup build is unsigned. There is no Linux binary distribution or automatic
+  updater yet.
 
 ## Run The Desktop Node
 

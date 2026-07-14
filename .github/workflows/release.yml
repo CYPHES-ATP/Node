@@ -67,11 +67,11 @@ jobs:
           tagName: ${{ inputs.tag }}
           releaseName: "CYPHES ${{ inputs.tag }}"
           releaseBody: |
-            CYPHES ${{ inputs.tag }} manual testnet build.
+            CYPHES ${{ inputs.tag }} manual release build.
 
             These builds are ad hoc signed but not Apple-notarized. On macOS, drag
             the app to Applications, then Control-click it and choose Open. The
-            Windows x64 setup build is unsigned and intended for testnet use.
+            Windows x64 setup build is unsigned.
 
             Verify published checksums before installation.
           releaseDraft: true
