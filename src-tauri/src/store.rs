@@ -264,6 +264,9 @@ const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
 const STORE_SCHEMA_VERSION: &str = "audit-labor-v1";
 const CLAIM_CONTRIBUTION_CLOCK_SKEW_MS: i64 = 60_000;
+const PENDING_LABOR_RETRY_BASE_MS: i64 = 1_000;
+const PENDING_LABOR_RETRY_MAX_BACKOFF_MS: i64 = 256_000;
+const PENDING_LABOR_RETRY_MAX_EXPONENT: i64 = 8;
 const LABOR_TELEMETRY_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const LABOR_TELEMETRY_MAX_ROWS: i64 = 50_000;
 
@@ -2135,19 +2138,24 @@ impl AtpStore {
         let cutoff = (now_millis() as i64).saturating_sub(ttl_ms_to_i64(age_ms));
         let contributions = {
             let mut statement = connection
-                .prepare(
+                .prepare(&format!(
                     "SELECT c.contribution_json FROM audit_contributions c
                      WHERE c.created_at <= ?1
+                       AND c.status = ?2
                        AND NOT EXISTS (
                         SELECT 1 FROM audit_verifications v
                         WHERE v.target_contribution_id = c.contribution_id
                        )
+                       AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
                      ORDER BY c.created_at, c.contribution_id
-                     LIMIT ?2",
-                )
+                     LIMIT ?3"
+                ))
                 .map_err(|error| error.to_string())?;
             let rows = statement
-                .query_map(params![cutoff, limit as i64], |row| row.get::<_, String>(0))
+                .query_map(
+                    params![cutoff, CONTRIBUTION_STATUS_SUBMITTED, limit as i64],
+                    |row| row.get::<_, String>(0),
+                )
                 .map_err(|error| error.to_string())?;
             rows.map(|row| {
                 let json = row.map_err(|error| error.to_string())?;
@@ -2193,32 +2201,61 @@ impl AtpStore {
                     object_json = excluded.object_json,
                     status = 'needs_dependency',
                     reason = excluded.reason,
-                    updated_at = excluded.updated_at",
+                    attempts = CASE
+                        WHEN audit_labor_pending_objects.status = 'needs_dependency'
+                        THEN audit_labor_pending_objects.attempts
+                        ELSE 0
+                    END,
+                    updated_at = CASE
+                        WHEN audit_labor_pending_objects.status = 'needs_dependency'
+                        THEN audit_labor_pending_objects.updated_at
+                        ELSE excluded.updated_at
+                    END",
                 params![object_kind, object_id, object_json, reason, now],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
     }
 
-    pub fn pending_labor_objects(&self, limit: usize) -> Result<Vec<PendingLaborObject>, String> {
+    pub fn pending_labor_objects_for_kind(
+        &self,
+        object_kind: &str,
+        retry_at_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<PendingLaborObject>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let mut statement = connection
             .prepare(
                 "SELECT object_kind, object_id, object_json
                  FROM audit_labor_pending_objects
                  WHERE status = 'needs_dependency'
-                 ORDER BY created_at, object_kind, object_id
-                 LIMIT ?1",
+                   AND object_kind = ?1
+                   AND updated_at <= ?2 - MIN(
+                    ?3,
+                    (1 << MIN(attempts, ?4)) * ?5
+                   )
+                 ORDER BY attempts, updated_at, object_id
+                 LIMIT ?6",
             )
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map(params![limit as i64], |row| {
-                Ok(PendingLaborObject {
-                    object_kind: row.get(0)?,
-                    object_id: row.get(1)?,
-                    object_json: row.get(2)?,
-                })
-            })
+            .query_map(
+                params![
+                    object_kind,
+                    ttl_ms_to_i64(retry_at_ms),
+                    PENDING_LABOR_RETRY_MAX_BACKOFF_MS,
+                    PENDING_LABOR_RETRY_MAX_EXPONENT,
+                    PENDING_LABOR_RETRY_BASE_MS,
+                    limit as i64
+                ],
+                |row| {
+                    Ok(PendingLaborObject {
+                        object_kind: row.get(0)?,
+                        object_id: row.get(1)?,
+                        object_json: row.get(2)?,
+                    })
+                },
+            )
             .map_err(|error| error.to_string())?;
         rows.map(|row| row.map_err(|error| error.to_string()))
             .collect()
@@ -6581,6 +6618,12 @@ mod tests {
         contribution.created_at = rfc3339_from_millis(contribution_created_at as u64);
         resign_contribution(&worker, &mut contribution);
 
+        let attached_claims = store
+            .claims_for_contributions(std::slice::from_ref(&contribution))
+            .unwrap();
+        assert_eq!(attached_claims.len(), 1);
+        assert_eq!(attached_claims[0].claim_id, claim.claim_id);
+
         store.record_contribution(&contribution).unwrap();
     }
 
@@ -6697,6 +6740,206 @@ mod tests {
             repairs[0].contribution.contribution_id,
             contribution.contribution_id
         );
+    }
+
+    #[test]
+    fn stale_receipt_repair_skips_superseded_rows_before_live_receipts() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+        let claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        store.record_work_unit_claim(&claim).unwrap();
+
+        let oldest = now_millis() as i64 - 120_000;
+        for index in 0..33 {
+            let contribution = signed_contribution(
+                &worker,
+                campaign.campaign_id.clone(),
+                work_unit.work_unit_id.clone(),
+                RuntimeDescriptor::deterministic_fixture(),
+                format!("Superseded repair-window fixture {index}."),
+                vec![],
+                vec![labor_artifact(&format!("superseded-{index}.md"))],
+                vec![CoverageItem {
+                    area: "stale repair filtering".to_string(),
+                    status: "superseded".to_string(),
+                    evidence: vec!["Fixture must never consume repair capacity.".to_string()],
+                }],
+                vec!["no repository code execution".to_string()],
+            )
+            .unwrap();
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO audit_contributions
+                        (contribution_id, campaign_id, work_unit_id, worker_agent_id,
+                         receipt_hash, contribution_json, status, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        contribution.contribution_id,
+                        contribution.campaign_id,
+                        contribution.work_unit_id,
+                        contribution.worker_agent_id,
+                        contribution.receipt_hash,
+                        serde_json::to_string(&contribution).unwrap(),
+                        CONTRIBUTION_STATUS_SUPERSEDED,
+                        oldest + index
+                    ],
+                )
+                .unwrap();
+        }
+
+        let pending = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Live receipt must not be starved by superseded history.".to_string(),
+            vec![],
+            vec![labor_artifact("live-repair.md")],
+            vec![CoverageItem {
+                area: "stale repair filtering".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Live submitted receipt remains repairable.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO audit_contributions
+                        (contribution_id, campaign_id, work_unit_id, worker_agent_id,
+                         receipt_hash, contribution_json, status, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        pending.contribution_id,
+                        pending.campaign_id,
+                        pending.work_unit_id,
+                        pending.worker_agent_id,
+                        pending.receipt_hash,
+                        serde_json::to_string(&pending).unwrap(),
+                        CONTRIBUTION_STATUS_SUBMITTED,
+                        oldest + 60_000
+                    ],
+                )
+                .unwrap();
+        }
+
+        let repairs = store
+            .stale_unverified_contributions_with_claims(1_000, 32)
+            .unwrap();
+        assert_eq!(repairs.len(), 1);
+        assert_eq!(
+            repairs[0].contribution.contribution_id,
+            pending.contribution_id
+        );
+        assert_eq!(
+            repairs[0]
+                .claim
+                .as_ref()
+                .map(|value| value.claim_id.as_str()),
+            Some(claim.claim_id.as_str())
+        );
+    }
+
+    #[test]
+    fn stale_receipt_repair_excludes_settled_work_units() {
+        let store = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        store.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = store
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+        claim_work_unit(&store, &worker, &campaign, &work_unit);
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Settled work must not be repair-rebroadcast.".to_string(),
+            vec![],
+            vec![labor_artifact("settled-repair.md")],
+            vec![CoverageItem {
+                area: "settlement exclusion".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Work unit is already terminal.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        store.record_contribution(&contribution).unwrap();
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_contributions SET created_at = ?1
+                     WHERE contribution_id = ?2",
+                    params![now_millis() as i64 - 60_000, contribution.contribution_id],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_work_units SET status = 'accepted'
+                     WHERE campaign_id = ?1 AND work_unit_id = ?2",
+                    params![campaign.campaign_id, work_unit.work_unit_id],
+                )
+                .unwrap();
+        }
+
+        assert!(store
+            .stale_unverified_contributions_with_claims(1_000, 32)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn pending_contributions_are_scheduled_independently_of_blocked_verifications() {
+        let store = test_store();
+        for index in 0..65 {
+            store
+                .queue_pending_labor_object(
+                    "verification",
+                    &format!("blocked-verification-{index}"),
+                    "{}",
+                    "Query returned no rows",
+                )
+                .unwrap();
+        }
+        store
+            .queue_pending_labor_object(
+                "contribution",
+                "repairable-contribution",
+                "{}",
+                "work unit must be claimed by this worker before submission",
+            )
+            .unwrap();
+
+        let retry_at = now_millis() + PENDING_LABOR_RETRY_MAX_BACKOFF_MS as u64 + 1_000;
+        let contributions = store
+            .pending_labor_objects_for_kind("contribution", retry_at, 64)
+            .unwrap();
+        let verifications = store
+            .pending_labor_objects_for_kind("verification", retry_at, 64)
+            .unwrap();
+
+        assert_eq!(contributions.len(), 1);
+        assert_eq!(contributions[0].object_id, "repairable-contribution");
+        assert_eq!(verifications.len(), 64);
     }
 
     #[test]

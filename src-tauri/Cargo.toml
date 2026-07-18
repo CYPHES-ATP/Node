@@ -1,6 +1,6 @@
 [package]
 name = "cyphes-desktop"
-version = "0.16.10"
+version = "0.16.11"
 description = "Native ATP node for verifiable repository audit work orders"
 authors = ["CYPHES-ATP"]
 edition = "2021"

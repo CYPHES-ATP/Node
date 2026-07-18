@@ -73,6 +73,9 @@ const STALE_RECEIPT_REPAIR_AFTER: Duration = Duration::from_secs(2 * 60);
 const STALE_RECEIPT_REPAIR_INTERVAL: Duration = Duration::from_secs(60);
 const STALE_RECEIPT_REPAIR_LIMIT: usize = 32;
 const MAX_OUTBOUND_REPAIR_BACKLOG: usize = 32;
+const PENDING_LABOR_RETRY_LIMIT_PER_KIND: usize = 64;
+const PENDING_LABOR_RETRY_PASSES: usize = 3;
+const PENDING_LABOR_RETRY_ORDER: [&str; 4] = ["campaign", "claim", "contribution", "verification"];
 const VERIFIER_LIVENESS_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
 const VERIFIER_LIVENESS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(30);
 const LABOR_CAPABILITY_INVENTORY_V2: &str = "audit_labor_inventory_v2";
@@ -2116,6 +2119,12 @@ fn sync_audit_labor_network(
         _ => {}
     }
 
+    // Retry dependency classes in causal order on every network tick. A
+    // missing verification target must not monopolize the global pending
+    // window and prevent a now-satisfiable claim or contribution from being
+    // admitted.
+    retry_pending_labor_objects(app, store);
+
     recover_verifier_liveness_if_stale(
         swarm,
         app,
@@ -2778,39 +2787,47 @@ fn record_work_unit_claim_for_sync(
 
 fn retry_pending_labor_objects(app: &AppHandle, store: &AtpStore) {
     let mut settled_total = 0usize;
-    for _ in 0..3 {
-        let Ok(objects) = store.pending_labor_objects(64) else {
-            return;
-        };
-        if objects.is_empty() {
-            break;
-        }
+    let retry_at_ms = now_millis();
+    for _ in 0..PENDING_LABOR_RETRY_PASSES {
         let mut settled_this_pass = 0usize;
-        for object in objects {
-            match retry_pending_labor_object(store, &object.object_kind, &object.object_json) {
-                Ok(()) => {
-                    let _ = store
-                        .mark_pending_labor_object_settled(&object.object_kind, &object.object_id);
-                    settled_this_pass += 1;
-                }
-                Err(reason) if is_labor_dependency_error(&reason) => {
-                    let _ = store.refresh_pending_labor_object(
-                        &object.object_kind,
-                        &object.object_id,
-                        &reason,
-                    );
-                }
-                Err(reason) => {
-                    let _ = store.mark_pending_labor_object_rejected(
-                        &object.object_kind,
-                        &object.object_id,
-                        &reason,
-                    );
+        let mut attempted_this_pass = 0usize;
+        for object_kind in PENDING_LABOR_RETRY_ORDER {
+            let Ok(objects) = store.pending_labor_objects_for_kind(
+                object_kind,
+                retry_at_ms,
+                PENDING_LABOR_RETRY_LIMIT_PER_KIND,
+            ) else {
+                return;
+            };
+            attempted_this_pass += objects.len();
+            for object in objects {
+                match retry_pending_labor_object(store, &object.object_kind, &object.object_json) {
+                    Ok(()) => {
+                        let _ = store.mark_pending_labor_object_settled(
+                            &object.object_kind,
+                            &object.object_id,
+                        );
+                        settled_this_pass += 1;
+                    }
+                    Err(reason) if is_labor_dependency_error(&reason) => {
+                        let _ = store.refresh_pending_labor_object(
+                            &object.object_kind,
+                            &object.object_id,
+                            &reason,
+                        );
+                    }
+                    Err(reason) => {
+                        let _ = store.mark_pending_labor_object_rejected(
+                            &object.object_kind,
+                            &object.object_id,
+                            &reason,
+                        );
+                    }
                 }
             }
         }
         settled_total += settled_this_pass;
-        if settled_this_pass == 0 {
+        if attempted_this_pass == 0 || settled_this_pass == 0 {
             break;
         }
     }
