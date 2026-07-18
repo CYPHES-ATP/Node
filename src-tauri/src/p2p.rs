@@ -59,6 +59,7 @@ const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
 const LABOR_INVENTORY_LIMIT: usize = 512;
 const MAX_BROADCAST_PEERS_PER_TICK: usize = 32;
 const MAX_DISCOVERY_DIAL_CANDIDATES: usize = 2;
+const MAX_DISCOVERY_PEER_DIALS_PER_TICK: usize = 3;
 const MAX_OUTBOUND_REQUESTS_PER_PEER: usize = 8;
 const PEER_FAILURE_BASE_COOLDOWN_MS: u64 = 30_000;
 const PEER_FAILURE_MAX_COOLDOWN_MS: u64 = 5 * 60_000;
@@ -364,8 +365,19 @@ fn peer_send_allowed(
     outbound: &HashMap<OutboundRequestId, PendingOutbound>,
     peer_id: &PeerId,
 ) -> bool {
+    if !peer_dial_allowed(state, *peer_id) {
+        return false;
+    }
+    outbound
+        .values()
+        .filter(|pending| pending.peer_id() == peer_id)
+        .count()
+        < MAX_OUTBOUND_REQUESTS_PER_PEER
+}
+
+fn peer_dial_allowed(state: &P2pState, peer_id: PeerId) -> bool {
     let now = now_millis();
-    let cooled_down = state
+    state
         .inner
         .lock()
         .map(|inner| {
@@ -374,15 +386,7 @@ fn peer_send_allowed(
                 .get(&peer_id.to_string())
                 .is_none_or(|peer| peer.cooldown_until <= now)
         })
-        .unwrap_or(true);
-    if !cooled_down {
-        return false;
-    }
-    outbound
-        .values()
-        .filter(|pending| pending.peer_id() == peer_id)
-        .count()
-        < MAX_OUTBOUND_REQUESTS_PER_PEER
+        .unwrap_or(true)
 }
 
 fn labor_wire_capabilities() -> Vec<String> {
@@ -1593,6 +1597,7 @@ fn handle_swarm_event(
                 mark_infrastructure_activity(state, network, rendezvous_node);
                 *rendezvous_cookie = Some(cookie);
                 let mut discovered = 0usize;
+                let mut discovery_dials = 0usize;
                 for registration in registrations {
                     let peer_id = registration.record.peer_id();
                     if peer_id == local_peer_id || is_infrastructure_peer(network, peer_id) {
@@ -1604,17 +1609,25 @@ fn handle_swarm_event(
                     for address in &dial_candidates {
                         swarm.add_peer_address(peer_id, address.clone());
                     }
-                    if !swarm.is_connected(&peer_id) {
+                    if discovery_dials < MAX_DISCOVERY_PEER_DIALS_PER_TICK
+                        && !swarm.is_connected(&peer_id)
+                        && peer_dial_allowed(state, peer_id)
+                    {
                         for address in preferred_dial_candidates(&dial_candidates) {
-                            dial_with_telemetry(
+                            if !dial_with_telemetry(
                                 swarm,
                                 app,
                                 store,
                                 "peer_dial_failed",
                                 Some(peer_id),
                                 address,
-                            );
+                            ) {
+                                mark_peer_failure(state, peer_id);
+                            } else {
+                                mark_peer_dial_attempt(state, peer_id);
+                            }
                         }
+                        discovery_dials += 1;
                     }
                     discovered += 1;
                 }
@@ -3305,6 +3318,26 @@ fn mark_peer_success(state: &P2pState, peer_id: PeerId) {
     }
 }
 
+fn mark_peer_dial_attempt(state: &P2pState, peer_id: PeerId) {
+    if let Ok(mut inner) = state.inner.lock() {
+        let now = now_millis();
+        let cooldown_until = now.saturating_add(PEER_FAILURE_BASE_COOLDOWN_MS);
+        inner
+            .peers
+            .entry(peer_id.to_string())
+            .and_modify(|peer| {
+                peer.last_seen = now;
+                peer.cooldown_until = peer.cooldown_until.max(cooldown_until);
+            })
+            .or_insert_with(|| PeerInfo {
+                peer_id: peer_id.to_string(),
+                last_seen: now,
+                failure_streak: 0,
+                cooldown_until,
+            });
+    }
+}
+
 fn mark_peer_failure(state: &P2pState, peer_id: PeerId) {
     if let Ok(mut inner) = state.inner.lock() {
         let now = now_millis();
@@ -3948,6 +3981,34 @@ mod tests {
         let preferred = preferred_dial_candidates(&candidates);
 
         assert_eq!(preferred, vec![public_address]);
+    }
+
+    #[test]
+    fn peer_cooldown_blocks_discovery_dials_and_sends() {
+        let state = P2pState::default();
+        let peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+        let peer_key = peer_id.to_string();
+        {
+            let mut inner = state.inner.lock().expect("state lock");
+            inner.peers.insert(
+                peer_key.clone(),
+                PeerInfo {
+                    peer_id: peer_key,
+                    last_seen: now_millis(),
+                    failure_streak: 3,
+                    cooldown_until: now_millis() + 60_000,
+                },
+            );
+        }
+        let outbound = HashMap::<OutboundRequestId, PendingOutbound>::new();
+
+        assert!(!peer_dial_allowed(&state, peer_id));
+        assert!(!peer_send_allowed(&state, &outbound, &peer_id));
+
+        let fresh_peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+        assert!(peer_dial_allowed(&state, fresh_peer_id));
+        mark_peer_dial_attempt(&state, fresh_peer_id);
+        assert!(!peer_dial_allowed(&state, fresh_peer_id));
     }
 
     #[test]
