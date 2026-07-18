@@ -2,30 +2,28 @@
 
 ## Download The Mainnet Build
 
-macOS users can download the current packaged v0.16.7 Mainnet DMGs from:
+macOS users can download the current packaged v0.17.0 Mainnet DMGs from:
 
-- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.7/CYPHES_0.16.7_aarch64.dmg
-- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.7/CYPHES_0.16.7_x64.dmg
+- Apple Silicon: https://github.com/CYPHES-ATP/Node/releases/download/v0.17.0/CYPHES_0.17.0_aarch64.dmg
+- Intel: https://github.com/CYPHES-ATP/Node/releases/download/v0.17.0/CYPHES_0.17.0_x64.dmg
 
-- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.16.7/CYPHES_0.16.7_x64-setup.exe
+- Windows x64: https://github.com/CYPHES-ATP/Node/releases/download/v0.17.0/CYPHES_0.17.0_x64-setup.exe
 
 Drag the app to Applications. These builds are ad hoc signed but not
 Apple-notarized yet, so Control-click the app, select **Open**, then confirm
 **Open** the first time. The Windows setup build is unsigned. Linux binary
 distributions are not available yet.
 
-The current source tree is v0.16.7. It keeps the
+The current source tree is v0.17.0. It keeps the
 `cyphes-final-testnet-v0.16.0.sqlite3` database marker as the mainnet genesis
 ledger identifier, so final-testnet data is preserved and continues forward.
-v0.16.7 does not require a fresh database; it is a non-mandatory
-peer-discovery pressure hotfix with aggregate dashboard summaries, cached
-credit refreshes, and coalesced network event reloads. It refreshes stale local
-claim state before running cached work units, keeps verifier-first nodes on the
-durable SQLite verification queue, and adds a relay/rendezvous watchdog that
-recycles silent infrastructure links after 90 seconds. Rendezvous discovery
-dials now respect peer failure cooldowns, so stale peer records cannot repeatedly
-consume relay circuit budget. Dial failures are visible in telemetry, and the
-cockpit counts actual active peer links rather than remembered peers.
+v0.17.0 does not require a fresh database; it is a non-mandatory liveness
+release with direct settlement rescue for straggler receipts. Worker nodes with
+old submitted receipts advertise the exact receipt IDs to connected peers, and
+independent peers can verify those receipts, return known verification IDs,
+request the missing signed contribution, or identify a superseding finalized
+receipt for the same work unit. Live connected peers remain eligible for
+recovery traffic even when an old dial failure cooldown exists.
 
 - **CYPHES** opens into the autonomous guardian cockpit as a verifier. Select
   a local LM Studio or Ollama model and press Contribute to create non-duplicate work,

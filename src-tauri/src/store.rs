@@ -188,6 +188,31 @@ pub struct StaleContributionRepair {
     pub contribution: NodeContribution,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementRescueManifestItem {
+    pub contribution_id: String,
+    pub campaign_id: String,
+    pub work_unit_id: String,
+    pub worker_agent_id: String,
+    pub receipt_hash: String,
+    pub created_at: u64,
+    pub age_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementRescueReceiptStatus {
+    pub contribution_id: String,
+    pub campaign_id: String,
+    pub work_unit_id: String,
+    pub receipt_hash: String,
+    pub status: String,
+    pub can_verify: bool,
+    pub verification_ids: Vec<String>,
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PendingLaborObject {
     pub object_kind: String,
@@ -1836,6 +1861,277 @@ impl AtpStore {
             )
             .map_err(|error| error.to_string())?;
         Ok(timestamp.map(|value| value.max(0) as u64))
+    }
+
+    pub fn pending_settlement_rescue_manifest(
+        &self,
+        worker_agent_id: &str,
+        age_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<SettlementRescueManifestItem>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let now = now_millis();
+        let cutoff = (now as i64).saturating_sub(ttl_ms_to_i64(age_ms));
+        let mut statement = connection
+            .prepare(&format!(
+                "SELECT c.contribution_id, c.campaign_id, c.work_unit_id,
+                        c.worker_agent_id, c.receipt_hash, c.created_at
+                 FROM audit_contributions c
+                 WHERE c.worker_agent_id = ?1
+                   AND c.status = ?2
+                   AND c.created_at <= ?3
+                   AND NOT EXISTS (
+                    SELECT 1 FROM audit_verifications v
+                    WHERE v.target_contribution_id = c.contribution_id
+                   )
+                   AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
+                 ORDER BY c.created_at, c.contribution_id
+                 LIMIT ?4",
+            ))
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(
+                params![
+                    worker_agent_id,
+                    CONTRIBUTION_STATUS_SUBMITTED,
+                    cutoff,
+                    limit as i64
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .map_err(|error| error.to_string())?;
+
+        rows.map(|row| {
+            let (
+                contribution_id,
+                campaign_id,
+                work_unit_id,
+                worker_agent_id,
+                receipt_hash,
+                created_at,
+            ) = row.map_err(|error| error.to_string())?;
+            let created_at = created_at.max(0) as u64;
+            Ok(SettlementRescueManifestItem {
+                contribution_id,
+                campaign_id,
+                work_unit_id,
+                worker_agent_id,
+                receipt_hash,
+                created_at,
+                age_ms: now.saturating_sub(created_at),
+            })
+        })
+        .collect()
+    }
+
+    pub fn settlement_rescue_statuses(
+        &self,
+        local_agent_id: &str,
+        manifest: &[SettlementRescueManifestItem],
+    ) -> Result<Vec<SettlementRescueReceiptStatus>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statuses = Vec::new();
+        for item in manifest {
+            let verification_ids = verification_ids_for_contribution_in_connection(
+                &connection,
+                &item.contribution_id,
+            )?;
+            if !verification_ids.is_empty() {
+                statuses.push(SettlementRescueReceiptStatus {
+                    contribution_id: item.contribution_id.clone(),
+                    campaign_id: item.campaign_id.clone(),
+                    work_unit_id: item.work_unit_id.clone(),
+                    receipt_hash: item.receipt_hash.clone(),
+                    status: "already_verified".to_string(),
+                    can_verify: false,
+                    verification_ids,
+                    reason: None,
+                });
+                continue;
+            }
+
+            let row = connection
+                .query_row(
+                    "SELECT campaign_id, work_unit_id, worker_agent_id, receipt_hash, status
+                     FROM audit_contributions
+                     WHERE contribution_id = ?1",
+                    params![item.contribution_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+
+            let Some((campaign_id, work_unit_id, worker_agent_id, receipt_hash, status)) = row
+            else {
+                let verification_ids = verification_ids_for_work_unit_in_connection(
+                    &connection,
+                    &item.campaign_id,
+                    &item.work_unit_id,
+                )?;
+                let (status, reason) = if verification_ids.is_empty() {
+                    (
+                        "missing_contribution",
+                        "peer does not have this contribution yet",
+                    )
+                } else {
+                    (
+                        "superseded",
+                        "peer has a verification for another contribution on this work unit",
+                    )
+                };
+                statuses.push(SettlementRescueReceiptStatus {
+                    contribution_id: item.contribution_id.clone(),
+                    campaign_id: item.campaign_id.clone(),
+                    work_unit_id: item.work_unit_id.clone(),
+                    receipt_hash: item.receipt_hash.clone(),
+                    status: status.to_string(),
+                    can_verify: false,
+                    verification_ids,
+                    reason: Some(reason.to_string()),
+                });
+                continue;
+            };
+
+            if campaign_id != item.campaign_id
+                || work_unit_id != item.work_unit_id
+                || receipt_hash != item.receipt_hash
+            {
+                statuses.push(SettlementRescueReceiptStatus {
+                    contribution_id: item.contribution_id.clone(),
+                    campaign_id,
+                    work_unit_id,
+                    receipt_hash,
+                    status: "conflicting_contribution".to_string(),
+                    can_verify: false,
+                    verification_ids: Vec::new(),
+                    reason: Some(
+                        "peer has different signed contribution content for this id".to_string(),
+                    ),
+                });
+                continue;
+            }
+
+            let work_unit_verifications = verification_ids_for_work_unit_in_connection(
+                &connection,
+                &campaign_id,
+                &work_unit_id,
+            )?;
+            if status == CONTRIBUTION_STATUS_SUPERSEDED || !work_unit_verifications.is_empty() {
+                statuses.push(SettlementRescueReceiptStatus {
+                    contribution_id: item.contribution_id.clone(),
+                    campaign_id,
+                    work_unit_id,
+                    receipt_hash,
+                    status: "superseded".to_string(),
+                    can_verify: false,
+                    verification_ids: work_unit_verifications,
+                    reason: Some(
+                        "work unit is already finalized by another contribution".to_string(),
+                    ),
+                });
+                continue;
+            }
+
+            if status != CONTRIBUTION_STATUS_SUBMITTED {
+                statuses.push(SettlementRescueReceiptStatus {
+                    contribution_id: item.contribution_id.clone(),
+                    campaign_id,
+                    work_unit_id,
+                    receipt_hash,
+                    status: "not_verifiable".to_string(),
+                    can_verify: false,
+                    verification_ids: Vec::new(),
+                    reason: Some(format!("contribution status is {status}")),
+                });
+                continue;
+            }
+
+            if worker_agent_id == local_agent_id {
+                statuses.push(SettlementRescueReceiptStatus {
+                    contribution_id: item.contribution_id.clone(),
+                    campaign_id,
+                    work_unit_id,
+                    receipt_hash,
+                    status: "cannot_verify_self".to_string(),
+                    can_verify: false,
+                    verification_ids: Vec::new(),
+                    reason: Some("peer is the contribution worker".to_string()),
+                });
+                continue;
+            }
+
+            statuses.push(SettlementRescueReceiptStatus {
+                contribution_id: item.contribution_id.clone(),
+                campaign_id,
+                work_unit_id,
+                receipt_hash,
+                status: "can_verify".to_string(),
+                can_verify: true,
+                verification_ids: Vec::new(),
+                reason: None,
+            });
+        }
+        Ok(statuses)
+    }
+
+    pub fn network_verification_candidates_by_ids(
+        &self,
+        verifier_agent_id: &str,
+        contribution_ids: &[String],
+        limit: usize,
+    ) -> Result<Vec<NodeContribution>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut seen = HashSet::new();
+        let mut candidates = Vec::new();
+        for contribution_id in contribution_ids {
+            if candidates.len() >= limit || !seen.insert(contribution_id.as_str()) {
+                continue;
+            }
+            let contribution_json = connection
+                .query_row(
+                    &format!(
+                        "SELECT c.contribution_json FROM audit_contributions c
+                         WHERE c.contribution_id = ?1
+                           AND c.worker_agent_id != ?2
+                           AND c.status = ?3
+                           AND NOT EXISTS (
+                            SELECT 1 FROM audit_verifications v
+                            WHERE v.target_contribution_id = c.contribution_id
+                           )
+                           AND NOT EXISTS ({SETTLED_WORK_UNIT_FOR_CONTRIBUTION_SQL})
+                         LIMIT 1",
+                    ),
+                    params![
+                        contribution_id,
+                        verifier_agent_id,
+                        CONTRIBUTION_STATUS_SUBMITTED
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some(json) = contribution_json {
+                candidates.push(serde_json::from_str(&json).map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(candidates)
     }
 
     pub fn audit_labor_inventory(
@@ -4651,6 +4947,49 @@ fn verification_bundle_for_contribution_in_connection(
     Ok(Some((verification, allocations)))
 }
 
+fn verification_ids_for_contribution_in_connection(
+    connection: &Connection,
+    contribution_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT verification_id FROM audit_verifications
+             WHERE target_contribution_id = ?1
+             ORDER BY created_at, verification_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![contribution_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| row.map_err(|error| error.to_string()))
+        .collect()
+}
+
+fn verification_ids_for_work_unit_in_connection(
+    connection: &Connection,
+    campaign_id: &str,
+    work_unit_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT v.verification_id
+             FROM audit_verifications v
+             JOIN audit_contributions c
+               ON c.contribution_id = v.target_contribution_id
+             WHERE c.campaign_id = ?1
+               AND c.work_unit_id = ?2
+             ORDER BY v.created_at, v.verification_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![campaign_id, work_unit_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| error.to_string())?;
+    rows.map(|row| row.map_err(|error| error.to_string()))
+        .collect()
+}
+
 fn credit_allocations_for_verification_id_in_connection(
     connection: &Connection,
     verification_id: &str,
@@ -6740,6 +7079,214 @@ mod tests {
             repairs[0].contribution.contribution_id,
             contribution.contribution_id
         );
+    }
+
+    #[test]
+    fn settlement_rescue_status_targets_exact_pending_receipts() {
+        let origin = test_store();
+        let peer = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let worker = libp2p::identity::Keypair::generate_ed25519();
+        let verifier = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        origin.create_protocol_campaign(&campaign).unwrap();
+        peer.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = origin
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "repo-inventory")
+            .unwrap();
+        let claim = signed_work_unit_claim(&worker, &campaign, &work_unit).unwrap();
+        origin.record_work_unit_claim(&claim).unwrap();
+        peer.record_work_unit_claim(&claim).unwrap();
+        let contribution = signed_contribution(
+            &worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Settlement rescue should name this receipt exactly.".to_string(),
+            vec![],
+            vec![labor_artifact("settlement-rescue.md")],
+            vec![CoverageItem {
+                area: "settlement rescue".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Exact pending receipt is recoverable.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        origin.record_contribution(&contribution).unwrap();
+        peer.record_network_contribution(&contribution).unwrap();
+        {
+            let connection = origin.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_contributions
+                     SET created_at = ?1
+                     WHERE contribution_id = ?2",
+                    params![
+                        now_millis() as i64 - 180_000,
+                        contribution.contribution_id.clone()
+                    ],
+                )
+                .unwrap();
+        }
+
+        let manifest = origin
+            .pending_settlement_rescue_manifest(&agent_id(&worker.public()), 90_000, 10)
+            .unwrap();
+        assert_eq!(manifest.len(), 1);
+        assert_eq!(manifest[0].contribution_id, contribution.contribution_id);
+
+        let statuses = peer
+            .settlement_rescue_statuses(&agent_id(&verifier.public()), &manifest)
+            .unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].status, "can_verify");
+        assert!(statuses[0].can_verify);
+
+        let candidates = peer
+            .network_verification_candidates_by_ids(
+                &agent_id(&verifier.public()),
+                &[contribution.contribution_id.clone(), "missing".to_string()],
+                10,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].contribution_id, contribution.contribution_id);
+
+        let verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "SETTLEMENT_RESCUE_ACCEPTED".to_string(),
+            "Direct settlement rescue verified the named receipt.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("settlement-rescue-verification.md")],
+        )
+        .unwrap();
+        let allocations = allocate_credits(&contribution, &verification).unwrap();
+        peer.record_verification_bundle(&verification, &allocations)
+            .unwrap();
+
+        let statuses = peer
+            .settlement_rescue_statuses(&agent_id(&verifier.public()), &manifest)
+            .unwrap();
+        assert_eq!(statuses[0].status, "already_verified");
+        assert_eq!(
+            statuses[0].verification_ids,
+            vec![verification.verification_id]
+        );
+        assert!(!statuses[0].can_verify);
+    }
+
+    #[test]
+    fn settlement_rescue_status_exposes_superseding_verification() {
+        let origin = test_store();
+        let peer = test_store();
+        let requester = libp2p::identity::Keypair::generate_ed25519();
+        let stuck_worker = libp2p::identity::Keypair::generate_ed25519();
+        let winning_worker = libp2p::identity::Keypair::generate_ed25519();
+        let verifier = libp2p::identity::Keypair::generate_ed25519();
+        let campaign = labor_campaign(agent_id(&requester.public()));
+        origin.create_protocol_campaign(&campaign).unwrap();
+        peer.create_protocol_campaign(&campaign).unwrap();
+        let work_unit = origin
+            .list_work_units(&campaign.campaign_id)
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.kind == "dependency-config-review")
+            .unwrap();
+
+        let stuck_claim = signed_work_unit_claim(&stuck_worker, &campaign, &work_unit).unwrap();
+        origin.record_work_unit_claim(&stuck_claim).unwrap();
+        let stuck_contribution = signed_contribution(
+            &stuck_worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "This receipt is unresolved on the origin node.".to_string(),
+            vec![],
+            vec![labor_artifact("stuck.md")],
+            vec![CoverageItem {
+                area: "stuck receipt".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Origin is waiting for finality.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        origin.record_contribution(&stuck_contribution).unwrap();
+        {
+            let connection = origin.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE audit_contributions
+                     SET created_at = ?1
+                     WHERE contribution_id = ?2",
+                    params![
+                        now_millis() as i64 - 180_000,
+                        stuck_contribution.contribution_id.clone()
+                    ],
+                )
+                .unwrap();
+        }
+
+        let winning_claim = signed_work_unit_claim(&winning_worker, &campaign, &work_unit).unwrap();
+        peer.record_work_unit_claim(&winning_claim).unwrap();
+        let winning_contribution = signed_contribution(
+            &winning_worker,
+            campaign.campaign_id.clone(),
+            work_unit.work_unit_id.clone(),
+            RuntimeDescriptor::deterministic_fixture(),
+            "Peer finalized equivalent work first.".to_string(),
+            vec![],
+            vec![labor_artifact("winning.md")],
+            vec![CoverageItem {
+                area: "winning receipt".to_string(),
+                status: "completed".to_string(),
+                evidence: vec!["Peer has finality for the work unit.".to_string()],
+            }],
+            vec!["no repository code execution".to_string()],
+        )
+        .unwrap();
+        peer.record_contribution(&winning_contribution).unwrap();
+        let verification = signed_verification(
+            &verifier,
+            campaign.campaign_id.clone(),
+            winning_contribution.contribution_id.clone(),
+            "accepted".to_string(),
+            "SUPERSEDING_WORK_ACCEPTED".to_string(),
+            "Peer accepted another receipt for the same work unit.".to_string(),
+            vec![VerificationEvidence {
+                label: "receipt".to_string(),
+                reference: winning_contribution.receipt_hash.clone(),
+            }],
+            vec![labor_artifact("superseding-verification.md")],
+        )
+        .unwrap();
+        let allocations = allocate_credits(&winning_contribution, &verification).unwrap();
+        peer.record_verification_bundle(&verification, &allocations)
+            .unwrap();
+
+        let manifest = origin
+            .pending_settlement_rescue_manifest(&agent_id(&stuck_worker.public()), 90_000, 10)
+            .unwrap();
+        let statuses = peer
+            .settlement_rescue_statuses(&agent_id(&verifier.public()), &manifest)
+            .unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].status, "superseded");
+        assert_eq!(
+            statuses[0].verification_ids,
+            vec![verification.verification_id]
+        );
+        assert!(!statuses[0].can_verify);
     }
 
     #[test]

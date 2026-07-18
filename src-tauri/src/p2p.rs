@@ -28,7 +28,7 @@ use crate::{
     state::{P2pState, PeerInfo},
     store::{
         now_millis, rejection_ack, AtpStore, AuditEventBody, LaborObjectPreflight,
-        ATP_STORE_TESTNET_ID,
+        SettlementRescueManifestItem, SettlementRescueReceiptStatus, ATP_STORE_TESTNET_ID,
     },
     worker::SignedExecutionResult,
 };
@@ -73,6 +73,10 @@ const STALE_RECEIPT_REPAIR_AFTER: Duration = Duration::from_secs(2 * 60);
 const STALE_RECEIPT_REPAIR_INTERVAL: Duration = Duration::from_secs(60);
 const STALE_RECEIPT_REPAIR_LIMIT: usize = 32;
 const MAX_OUTBOUND_REPAIR_BACKLOG: usize = 32;
+const SETTLEMENT_RESCUE_INTERVAL: Duration = Duration::from_secs(15);
+const SETTLEMENT_RESCUE_AFTER: Duration = Duration::from_secs(90);
+const SETTLEMENT_RESCUE_LIMIT: usize = 32;
+const MAX_OUTBOUND_SETTLEMENT_RESCUE_BACKLOG: usize = 16;
 const PENDING_LABOR_RETRY_LIMIT_PER_KIND: usize = 64;
 const PENDING_LABOR_RETRY_PASSES: usize = 3;
 const PENDING_LABOR_RETRY_ORDER: [&str; 4] = ["campaign", "claim", "contribution", "verification"];
@@ -84,6 +88,7 @@ const LABOR_CAPABILITY_HISTORICAL_CLAIMS: &str = "historical_claim_evidence_v1";
 const LABOR_CAPABILITY_VERIFY_AFTER_BUNDLE: &str = "verify_after_bundle_v1";
 const LABOR_CAPABILITY_TELEMETRY: &str = "audit_labor_telemetry_v1";
 const LABOR_CAPABILITY_VERIFIER_PULL: &str = "verifier_pull_v1";
+const LABOR_CAPABILITY_SETTLEMENT_RESCUE: &str = "settlement_rescue_v1";
 
 #[derive(Debug, Clone)]
 struct InfrastructureTarget {
@@ -173,6 +178,7 @@ enum WireRequest {
     LaborInventory(LaborInventory),
     LaborObjectRequest(LaborObjectRequest),
     LaborObjectBundle(LaborObjectBundle),
+    SettlementRescue(SettlementRescueRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +220,7 @@ enum WireResponse {
     LaborInventory(LaborInventoryResponse),
     LaborObjectBundle(LaborObjectBundle),
     LaborObjectBundleAck(LaborObjectBundleResponse),
+    SettlementRescue(SettlementRescueResponse),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -301,6 +308,32 @@ struct LaborObjectBundleResponse {
     reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettlementRescueRequest {
+    testnet_id: String,
+    #[serde(default)]
+    app_version: String,
+    #[serde(default)]
+    capabilities: Vec<String>,
+    receipts: Vec<SettlementRescueManifestItem>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettlementRescueResponse {
+    accepted: bool,
+    testnet_id: String,
+    #[serde(default)]
+    app_version: String,
+    #[serde(default)]
+    capabilities: Vec<String>,
+    statuses: Vec<SettlementRescueReceiptStatus>,
+    #[serde(default)]
+    issued_verifications: usize,
+    reason: Option<String>,
+}
+
 #[derive(Debug)]
 enum PendingOutbound {
     Envelope {
@@ -341,8 +374,17 @@ enum PendingOutbound {
     LaborInventory {
         peer_id: PeerId,
     },
+    LaborObjectRequest {
+        peer_id: PeerId,
+        silent: bool,
+    },
     LaborObjectBundle {
         peer_id: PeerId,
+        silent: bool,
+    },
+    SettlementRescue {
+        peer_id: PeerId,
+        contribution_ids: Vec<String>,
         silent: bool,
     },
 }
@@ -357,7 +399,9 @@ impl PendingOutbound {
             | Self::Contribution { peer_id, .. }
             | Self::VerificationResult { peer_id, .. }
             | Self::LaborInventory { peer_id }
-            | Self::LaborObjectBundle { peer_id, .. } => peer_id,
+            | Self::LaborObjectRequest { peer_id, .. }
+            | Self::LaborObjectBundle { peer_id, .. }
+            | Self::SettlementRescue { peer_id, .. } => peer_id,
         }
     }
 
@@ -367,7 +411,9 @@ impl PendingOutbound {
             | Self::WorkUnitClaim { silent, .. }
             | Self::Contribution { silent, .. }
             | Self::VerificationResult { silent, .. }
-            | Self::LaborObjectBundle { silent, .. } => *silent,
+            | Self::LaborObjectRequest { silent, .. }
+            | Self::LaborObjectBundle { silent, .. }
+            | Self::SettlementRescue { silent, .. } => *silent,
             _ => false,
         }
     }
@@ -381,7 +427,19 @@ fn send_wire_request_to_peer(
     pending: PendingOutbound,
 ) -> bool {
     let peer_id = pending.peer_id().clone();
-    if !peer_send_allowed(state, outbound, &peer_id) {
+    // Cooldowns should block fresh dials, not silence a live connection that
+    // can still carry settlement recovery traffic.
+    let connected = swarm.is_connected(&peer_id);
+    if !connected && !peer_send_allowed(state, outbound, &peer_id) {
+        return false;
+    }
+    if connected
+        && outbound
+            .values()
+            .filter(|pending| pending.peer_id() == &peer_id)
+            .count()
+            >= MAX_OUTBOUND_REQUESTS_PER_PEER
+    {
         return false;
     }
     let request_id = swarm
@@ -429,6 +487,7 @@ fn labor_wire_capabilities() -> Vec<String> {
         LABOR_CAPABILITY_VERIFY_AFTER_BUNDLE,
         LABOR_CAPABILITY_TELEMETRY,
         LABOR_CAPABILITY_VERIFIER_PULL,
+        LABOR_CAPABILITY_SETTLEMENT_RESCUE,
     ]
     .into_iter()
     .map(ToString::to_string)
@@ -445,6 +504,31 @@ fn is_labor_wire_compatible_app_version(app_version: &str) -> bool {
 
 fn has_labor_capability(capabilities: &[String], capability: &str) -> bool {
     capabilities.iter().any(|candidate| candidate == capability)
+}
+
+fn remember_peer_capabilities(state: &P2pState, peer_id: PeerId, capabilities: &[String]) {
+    if capabilities.is_empty() {
+        return;
+    }
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.peer_capabilities.insert(
+            peer_id.to_string(),
+            capabilities.iter().cloned().collect::<HashSet<_>>(),
+        );
+    }
+}
+
+fn peer_supports_capability(state: &P2pState, peer_id: &PeerId, capability: &str) -> bool {
+    state
+        .inner
+        .lock()
+        .map(|inner| {
+            inner
+                .peer_capabilities
+                .get(&peer_id.to_string())
+                .is_some_and(|capabilities| capabilities.contains(capability))
+        })
+        .unwrap_or(false)
 }
 
 #[derive(NetworkBehaviour)]
@@ -655,6 +739,7 @@ pub async fn spawn_swarm(
         let mut rendezvous_cookie = None;
         let mut last_verifier_liveness_discovery_ms = 0u64;
         let mut last_stale_receipt_repair_ms = 0u64;
+        let mut last_settlement_rescue_ms = 0u64;
         let mut discovery_interval = tokio::time::interval(RENDEZVOUS_DISCOVERY_INTERVAL);
         discovery_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut registration_interval = tokio::time::interval(RENDEZVOUS_REGISTRATION_INTERVAL);
@@ -774,6 +859,7 @@ pub async fn spawn_swarm(
                         &mut rendezvous_cookie,
                         &mut last_verifier_liveness_discovery_ms,
                         &mut last_stale_receipt_repair_ms,
+                        &mut last_settlement_rescue_ms,
                         &mut outbound,
                     );
                 }
@@ -1136,6 +1222,7 @@ fn handle_swarm_event(
                         }
                     }
                     WireRequest::LaborInventory(inventory) => {
+                        remember_peer_capabilities(state, peer, &inventory.capabilities);
                         WireResponse::LaborInventory(handle_labor_inventory_request(
                             swarm,
                             app,
@@ -1149,9 +1236,11 @@ fn handle_swarm_event(
                         ))
                     }
                     WireRequest::LaborObjectRequest(request) => {
+                        remember_peer_capabilities(state, peer, &request.capabilities);
                         WireResponse::LaborObjectBundle(build_labor_object_bundle(store, request))
                     }
                     WireRequest::LaborObjectBundle(bundle) => {
+                        remember_peer_capabilities(state, peer, &bundle.capabilities);
                         let peer_id = peer.to_string();
                         let response =
                             ingest_labor_object_bundle(app, store, Some(peer_id.as_str()), bundle);
@@ -1167,6 +1256,20 @@ fn handle_swarm_event(
                             );
                         }
                         WireResponse::LaborObjectBundleAck(response)
+                    }
+                    WireRequest::SettlementRescue(request) => {
+                        remember_peer_capabilities(state, peer, &request.capabilities);
+                        WireResponse::SettlementRescue(handle_settlement_rescue_request(
+                            swarm,
+                            app,
+                            state,
+                            store,
+                            keypair,
+                            local_agent_id,
+                            peer,
+                            request,
+                            outbound,
+                        ))
                     }
                 };
                 let _ = swarm
@@ -1312,6 +1415,7 @@ fn handle_swarm_event(
                         );
                     }
                     WireResponse::LaborInventory(response) => {
+                        remember_peer_capabilities(state, peer, &response.capabilities);
                         if response.accepted {
                             let inventory_peer = pending
                                 .as_ref()
@@ -1354,6 +1458,7 @@ fn handle_swarm_event(
                         }
                     }
                     WireResponse::LaborObjectBundle(bundle) => {
+                        remember_peer_capabilities(state, peer, &bundle.capabilities);
                         let peer_id = peer.to_string();
                         let response =
                             ingest_labor_object_bundle(app, store, Some(peer_id.as_str()), bundle);
@@ -1386,6 +1491,7 @@ fn handle_swarm_event(
                         );
                     }
                     WireResponse::LaborObjectBundleAck(response) => {
+                        remember_peer_capabilities(state, peer, &response.capabilities);
                         let _ = app.emit(
                             if response.accepted {
                                 "audit:labor_object_bundle_acknowledged"
@@ -1401,6 +1507,19 @@ fn handle_swarm_event(
                                 "queued": response.queued,
                                 "reason": response.reason,
                             }),
+                        );
+                    }
+                    WireResponse::SettlementRescue(response) => {
+                        remember_peer_capabilities(state, peer, &response.capabilities);
+                        handle_settlement_rescue_response(
+                            swarm,
+                            app,
+                            state,
+                            store,
+                            peer,
+                            pending.as_ref(),
+                            response,
+                            outbound,
                         );
                     }
                 }
@@ -1498,9 +1617,19 @@ fn handle_swarm_event(
                 Some(PendingOutbound::LaborInventory { peer_id }) => {
                     (None, Some(format!("labor-inventory:{peer_id}")), None)
                 }
+                Some(PendingOutbound::LaborObjectRequest { peer_id, .. }) => {
+                    (None, Some(format!("labor-object-request:{peer_id}")), None)
+                }
                 Some(PendingOutbound::LaborObjectBundle { peer_id, .. }) => {
                     (None, Some(format!("labor-object-bundle:{peer_id}")), None)
                 }
+                Some(PendingOutbound::SettlementRescue {
+                    contribution_ids, ..
+                }) => (
+                    None,
+                    Some(format!("settlement-rescue:{}", contribution_ids.len())),
+                    None,
+                ),
                 None => (None, None, None),
             };
             let _ = app.emit(
@@ -1528,7 +1657,9 @@ fn handle_swarm_event(
         SwarmEvent::Behaviour(AgentBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
             if let Ok(mut inner) = state.inner.lock() {
                 for (peer_id, _addr) in list {
-                    inner.peers.remove(&peer_id.to_string());
+                    let peer_key = peer_id.to_string();
+                    inner.peers.remove(&peer_key);
+                    inner.peer_capabilities.remove(&peer_key);
                     let _ = app.emit(
                         "p2p:peer_disconnected",
                         serde_json::json!({ "peerId": peer_id.to_string() }),
@@ -1724,7 +1855,9 @@ fn handle_swarm_event(
             }
             rendezvous::client::Event::Expired { peer } => {
                 if let Ok(mut inner) = state.inner.lock() {
-                    inner.peers.remove(&peer.to_string());
+                    let peer_key = peer.to_string();
+                    inner.peers.remove(&peer_key);
+                    inner.peer_capabilities.remove(&peer_key);
                 }
             }
         },
@@ -1839,8 +1972,10 @@ fn handle_swarm_event(
                 }
             }
             if let Ok(mut inner) = state.inner.lock() {
-                inner.peers.remove(&peer_id.to_string());
-                inner.active_peer_links.remove(&peer_id.to_string());
+                let peer_key = peer_id.to_string();
+                inner.peers.remove(&peer_key);
+                inner.peer_capabilities.remove(&peer_key);
+                inner.active_peer_links.remove(&peer_key);
             }
             if !is_infrastructure_peer(network, peer_id) {
                 *rendezvous_cookie = None;
@@ -2096,9 +2231,11 @@ fn sync_audit_labor_network(
     rendezvous_cookie: &mut Option<rendezvous::Cookie>,
     last_verifier_liveness_discovery_ms: &mut u64,
     last_stale_receipt_repair_ms: &mut u64,
+    last_settlement_rescue_ms: &mut u64,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let has_peers = !target_peers(state, None).is_empty();
+    let has_peers =
+        swarm.connected_peers().next().is_some() || !target_peers(state, None).is_empty();
 
     match store.expire_stale_claims(WORK_UNIT_CLAIM_TTL_MS) {
         Ok(expired) if expired > 0 => {
@@ -2137,6 +2274,15 @@ fn sync_audit_labor_network(
     );
 
     if has_peers {
+        maybe_rescue_pending_settlement(
+            swarm,
+            app,
+            state,
+            store,
+            local_agent_id,
+            last_settlement_rescue_ms,
+            outbound,
+        );
         maybe_repair_stale_receipts(
             swarm,
             app,
@@ -2422,7 +2568,7 @@ fn broadcast_labor_inventory(
     local_agent_id: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    for peer_id in target_peers(state, None) {
+    for peer_id in broadcast_peers(swarm, state) {
         send_labor_inventory_to_peer(swarm, state, store, local_agent_id, &peer_id, outbound);
     }
 }
@@ -2941,6 +3087,359 @@ fn push_labor_objects_to_peer(
     );
 }
 
+fn request_labor_objects_from_peer(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    peer_id: &PeerId,
+    campaign_ids: &[String],
+    claim_ids: &[String],
+    contribution_ids: &[String],
+    verification_ids: &[String],
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    if campaign_ids.is_empty()
+        && claim_ids.is_empty()
+        && contribution_ids.is_empty()
+        && verification_ids.is_empty()
+    {
+        return;
+    }
+    if outbound
+        .values()
+        .filter(|pending| pending.peer_id() == peer_id)
+        .count()
+        >= MAX_OUTBOUND_REQUESTS_PER_PEER
+    {
+        return;
+    }
+    let request = LaborObjectRequest {
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        app_version: labor_wire_app_version(),
+        capabilities: labor_wire_capabilities(),
+        campaign_ids: campaign_ids.to_vec(),
+        claim_ids: claim_ids.to_vec(),
+        contribution_ids: contribution_ids.to_vec(),
+        verification_ids: verification_ids.to_vec(),
+    };
+    send_wire_request_to_peer(
+        swarm,
+        state,
+        outbound,
+        WireRequest::LaborObjectRequest(request),
+        PendingOutbound::LaborObjectRequest {
+            peer_id: peer_id.clone(),
+            silent: false,
+        },
+    );
+}
+
+fn maybe_rescue_pending_settlement(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    local_agent_id: &str,
+    last_settlement_rescue_ms: &mut u64,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) -> usize {
+    let now = now_millis();
+    if now.saturating_sub(*last_settlement_rescue_ms)
+        < SETTLEMENT_RESCUE_INTERVAL.as_millis() as u64
+    {
+        return 0;
+    }
+    if outbound.len() >= MAX_OUTBOUND_SETTLEMENT_RESCUE_BACKLOG {
+        let _ = store.record_labor_event(
+            "settlement_rescue_backpressure",
+            None,
+            Some("settlement_rescue"),
+            None,
+            false,
+            Some("outbound request backlog is full"),
+            &serde_json::json!({
+                "outboundRequests": outbound.len(),
+                "limit": MAX_OUTBOUND_SETTLEMENT_RESCUE_BACKLOG,
+            }),
+        );
+        return 0;
+    }
+
+    let receipts = match store.pending_settlement_rescue_manifest(
+        local_agent_id,
+        SETTLEMENT_RESCUE_AFTER.as_millis() as u64,
+        SETTLEMENT_RESCUE_LIMIT,
+    ) {
+        Ok(receipts) => receipts,
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({
+                    "reason": format!("settlement rescue manifest failed: {reason}"),
+                }),
+            );
+            return 0;
+        }
+    };
+    if receipts.is_empty() {
+        return 0;
+    }
+
+    *last_settlement_rescue_ms = now;
+    let contribution_ids = receipts
+        .iter()
+        .map(|receipt| receipt.contribution_id.clone())
+        .collect::<Vec<_>>();
+    let peers = settlement_rescue_peers(swarm, state);
+    if peers.is_empty() {
+        let _ = store.record_labor_event(
+            "settlement_rescue_waiting_for_peer",
+            None,
+            Some("settlement_rescue"),
+            None,
+            false,
+            Some("no connected settlement-rescue-capable peers"),
+            &serde_json::json!({
+                "receipts": receipts.len(),
+                "capability": LABOR_CAPABILITY_SETTLEMENT_RESCUE,
+            }),
+        );
+        return 0;
+    }
+
+    let mut sent = 0usize;
+    for peer_id in peers {
+        let request = SettlementRescueRequest {
+            testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+            app_version: labor_wire_app_version(),
+            capabilities: labor_wire_capabilities(),
+            receipts: receipts.clone(),
+        };
+        if send_wire_request_to_peer(
+            swarm,
+            state,
+            outbound,
+            WireRequest::SettlementRescue(request),
+            PendingOutbound::SettlementRescue {
+                peer_id,
+                contribution_ids: contribution_ids.clone(),
+                silent: false,
+            },
+        ) {
+            sent += 1;
+        }
+    }
+    let _ = store.record_labor_event(
+        "settlement_rescue_requested",
+        None,
+        Some("settlement_rescue"),
+        None,
+        sent > 0,
+        None,
+        &serde_json::json!({
+            "receipts": receipts.len(),
+            "peers": sent,
+        }),
+    );
+    sent
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_settlement_rescue_request(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    keypair: &identity::Keypair,
+    local_agent_id: &str,
+    peer_id: PeerId,
+    request: SettlementRescueRequest,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) -> SettlementRescueResponse {
+    if request.testnet_id != ATP_STORE_TESTNET_ID
+        || !is_labor_wire_compatible_app_version(&request.app_version)
+        || !has_labor_capability(&request.capabilities, LABOR_CAPABILITY_SETTLEMENT_RESCUE)
+    {
+        let reason = if request.testnet_id != ATP_STORE_TESTNET_ID {
+            format!(
+                "peer testnet {} does not match {}",
+                request.testnet_id, ATP_STORE_TESTNET_ID
+            )
+        } else if !is_labor_wire_compatible_app_version(&request.app_version) {
+            format!(
+                "peer app version {} does not match {}",
+                if request.app_version.is_empty() {
+                    "unknown"
+                } else {
+                    request.app_version.as_str()
+                },
+                LABOR_WIRE_COMPAT_APP_VERSION
+            )
+        } else {
+            format!("peer lacks required labor capability {LABOR_CAPABILITY_SETTLEMENT_RESCUE}")
+        };
+        return SettlementRescueResponse {
+            accepted: false,
+            testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+            app_version: labor_wire_app_version(),
+            capabilities: labor_wire_capabilities(),
+            reason: Some(reason),
+            ..Default::default()
+        };
+    }
+
+    let contribution_ids = request
+        .receipts
+        .iter()
+        .map(|receipt| receipt.contribution_id.clone())
+        .collect::<Vec<_>>();
+    let issued_verifications = verify_network_contributions_by_id(
+        swarm,
+        app,
+        state,
+        store,
+        keypair,
+        local_agent_id,
+        &contribution_ids,
+        outbound,
+    );
+    let statuses = match store.settlement_rescue_statuses(local_agent_id, &request.receipts) {
+        Ok(statuses) => statuses,
+        Err(reason) => {
+            return SettlementRescueResponse {
+                accepted: false,
+                testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+                app_version: labor_wire_app_version(),
+                capabilities: labor_wire_capabilities(),
+                issued_verifications,
+                reason: Some(format!("settlement rescue status failed: {reason}")),
+                ..Default::default()
+            };
+        }
+    };
+    let peer_string = peer_id.to_string();
+    let _ = store.record_labor_event(
+        "settlement_rescue_served",
+        Some(peer_string.as_str()),
+        Some("settlement_rescue"),
+        None,
+        true,
+        None,
+        &serde_json::json!({
+            "receipts": request.receipts.len(),
+            "statuses": settlement_status_counts(&statuses),
+            "issuedVerifications": issued_verifications,
+        }),
+    );
+    SettlementRescueResponse {
+        accepted: true,
+        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+        app_version: labor_wire_app_version(),
+        capabilities: labor_wire_capabilities(),
+        statuses,
+        issued_verifications,
+        reason: None,
+    }
+}
+
+fn handle_settlement_rescue_response(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    peer_id: PeerId,
+    pending: Option<&PendingOutbound>,
+    response: SettlementRescueResponse,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) {
+    if !response.accepted {
+        let _ = app.emit(
+            "atp:delivery_failed",
+            serde_json::json!({
+                "peerId": peer_id.to_string(),
+                "reason": response.reason,
+            }),
+        );
+        return;
+    }
+
+    let requested_ids = pending
+        .and_then(|pending| match pending {
+            PendingOutbound::SettlementRescue {
+                contribution_ids, ..
+            } => Some(contribution_ids.as_slice()),
+            _ => None,
+        })
+        .unwrap_or(&[]);
+    let mut missing_contributions = Vec::new();
+    let mut verification_ids = Vec::new();
+    for status in &response.statuses {
+        if !requested_ids.is_empty() && !requested_ids.contains(&status.contribution_id) {
+            continue;
+        }
+        if status.status == "missing_contribution" && status.verification_ids.is_empty() {
+            missing_contributions.push(status.contribution_id.clone());
+        }
+        merge_strings(&mut verification_ids, status.verification_ids.clone());
+    }
+
+    if !missing_contributions.is_empty() {
+        push_labor_objects_to_peer(
+            swarm,
+            state,
+            store,
+            &peer_id,
+            &[],
+            &[],
+            &missing_contributions,
+            &[],
+            outbound,
+        );
+    }
+    if !verification_ids.is_empty() {
+        request_labor_objects_from_peer(
+            swarm,
+            state,
+            &peer_id,
+            &[],
+            &[],
+            &[],
+            &verification_ids,
+            outbound,
+        );
+    }
+    let peer_string = peer_id.to_string();
+    let _ = store.record_labor_event(
+        "settlement_rescue_response",
+        Some(peer_string.as_str()),
+        Some("settlement_rescue"),
+        None,
+        true,
+        None,
+        &serde_json::json!({
+            "statuses": settlement_status_counts(&response.statuses),
+            "issuedVerifications": response.issued_verifications,
+            "pushedContributions": missing_contributions.len(),
+            "requestedVerifications": verification_ids.len(),
+        }),
+    );
+    if !verification_ids.is_empty() || !missing_contributions.is_empty() {
+        let _ = app.emit("audit:labor_changed", ());
+    }
+}
+
+fn settlement_status_counts(
+    statuses: &[SettlementRescueReceiptStatus],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut counts = HashMap::<String, usize>::new();
+    for status in statuses {
+        *counts.entry(status.status.clone()).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(key, count)| (key, serde_json::json!(count)))
+        .collect()
+}
+
 fn maybe_repair_stale_receipts(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     app: &AppHandle,
@@ -3010,12 +3509,26 @@ fn maybe_repair_stale_receipts(
     }
     let claims = bundle.claims.len();
     let receipts = bundle.contributions.len();
-    broadcast_labor_object_bundle(swarm, state, bundle, true, outbound);
+    let targets = broadcast_labor_object_bundle(swarm, state, bundle, true, outbound);
+    let _ = store.record_labor_event(
+        "stale_receipts_rebroadcast",
+        None,
+        Some("bundle"),
+        None,
+        targets > 0,
+        None,
+        &serde_json::json!({
+            "receipts": receipts,
+            "claims": claims,
+            "targets": targets,
+        }),
+    );
     let _ = app.emit(
         "audit:stale_receipts_rebroadcast",
         serde_json::json!({
             "receipts": receipts,
             "claims": claims,
+            "targets": targets,
         }),
     );
 }
@@ -3043,7 +3556,64 @@ fn verify_network_contributions(
             }
         };
 
-    for contribution in candidates.into_iter().take(LABOR_AUTO_VERIFY_LIMIT) {
+    issue_network_verifications_for_candidates(
+        swarm,
+        app,
+        state,
+        store,
+        keypair,
+        candidates
+            .into_iter()
+            .take(LABOR_AUTO_VERIFY_LIMIT)
+            .collect(),
+        outbound,
+    );
+}
+
+fn verify_network_contributions_by_id(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    keypair: &identity::Keypair,
+    local_agent_id: &str,
+    contribution_ids: &[String],
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) -> usize {
+    let candidates = match store.network_verification_candidates_by_ids(
+        local_agent_id,
+        contribution_ids,
+        SETTLEMENT_RESCUE_LIMIT,
+    ) {
+        Ok(candidates) => candidates,
+        Err(reason) => {
+            let _ = app.emit(
+                "atp:delivery_failed",
+                serde_json::json!({
+                    "reason": format!("settlement rescue verifier scan failed: {reason}"),
+                }),
+            );
+            return 0;
+        }
+    };
+    issue_network_verifications_for_candidates(
+        swarm, app, state, store, keypair, candidates, outbound,
+    )
+}
+
+fn issue_network_verifications_for_candidates(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    keypair: &identity::Keypair,
+    candidates: Vec<NodeContribution>,
+    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
+) -> usize {
+    let mut issued = 0usize;
+    for contribution in candidates {
+        let campaign_id = contribution.campaign_id.clone();
+        let contribution_id = contribution.contribution_id.clone();
         let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
         let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
         let evidence_size = evidence_ref.len() as u64;
@@ -3105,8 +3675,8 @@ fn verify_network_contributions(
                 let _ = app.emit(
                     "atp:delivery_failed",
                     serde_json::json!({
-                        "campaignId": contribution.campaign_id,
-                        "contributionId": contribution.contribution_id,
+                        "campaignId": campaign_id,
+                        "contributionId": contribution_id,
                         "reason": format!("network verification failed: {reason}"),
                     }),
                 );
@@ -3137,6 +3707,7 @@ fn verify_network_contributions(
                 "creditTotal": credit_total,
             }),
         );
+        issued += 1;
         broadcast_verification_result(
             swarm,
             state,
@@ -3156,6 +3727,7 @@ fn verify_network_contributions(
             }),
         );
     }
+    issued
 }
 
 fn send_envelope(
@@ -3355,16 +3927,43 @@ fn broadcast_labor_object_bundle(
     bundle: LaborObjectBundle,
     silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    for peer_id in target_peers(state, None) {
-        send_wire_request_to_peer(
+) -> usize {
+    let mut sent = 0usize;
+    for peer_id in broadcast_peers(swarm, state) {
+        if send_wire_request_to_peer(
             swarm,
             state,
             outbound,
             WireRequest::LaborObjectBundle(bundle.clone()),
             PendingOutbound::LaborObjectBundle { peer_id, silent },
-        );
+        ) {
+            sent += 1;
+        }
     }
+    sent
+}
+
+fn settlement_rescue_peers(swarm: &libp2p::Swarm<AgentBehaviour>, state: &P2pState) -> Vec<PeerId> {
+    broadcast_peers(swarm, state)
+        .into_iter()
+        .filter(|peer_id| {
+            peer_supports_capability(state, peer_id, LABOR_CAPABILITY_SETTLEMENT_RESCUE)
+        })
+        .collect()
+}
+
+/// Peers eligible for broadcast: the cooldown-filtered registry plus every
+/// peer with a live connection, so a previous dial failure cannot silence
+/// traffic that an established stream can still carry.
+fn broadcast_peers(swarm: &libp2p::Swarm<AgentBehaviour>, state: &P2pState) -> Vec<PeerId> {
+    let mut peers = target_peers(state, None);
+    for peer_id in swarm.connected_peers() {
+        if !peers.contains(peer_id) {
+            peers.push(peer_id.clone());
+        }
+    }
+    peers.truncate(MAX_BROADCAST_PEERS_PER_TICK);
+    peers
 }
 
 fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
@@ -4343,6 +4942,7 @@ mod tests {
         let capabilities = labor_wire_capabilities();
         assert!(capabilities.contains(&LABOR_CAPABILITY_INVENTORY_V2.to_string()));
         assert!(capabilities.contains(&LABOR_CAPABILITY_SPARSE_INVENTORY_V3.to_string()));
+        assert!(capabilities.contains(&LABOR_CAPABILITY_SETTLEMENT_RESCUE.to_string()));
     }
 
     #[test]

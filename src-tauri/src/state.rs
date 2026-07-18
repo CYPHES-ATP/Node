@@ -23,6 +23,7 @@ pub struct P2pShared {
     pub keypair: Option<libp2p::identity::Keypair>,
     pub sender: Option<mpsc::UnboundedSender<SwarmCommand>>,
     pub peers: HashMap<String, PeerInfo>,
+    pub peer_capabilities: HashMap<String, HashSet<String>>,
     pub active_peer_links: HashSet<String>,
     pub listen_addrs: Vec<String>,
     pub relay_configured: bool,
