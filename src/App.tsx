@@ -65,7 +65,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.5";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.6";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -523,7 +523,12 @@ function AppContent() {
     networkProgress.pendingGrossCredits + pendingReceiptMeter - networkProgress.pendingPenaltyCredits,
   );
   const provisionalCreditTotal = creditSummary.provisionalTotal || 0;
-  const activeNodeCount = nodeStatus === "online" ? peerCount + 1 : peerCount;
+  const activeLinkCount = nodeStatus === "online" ? peerCount : 0;
+  const relayStatusLabel = networkInfo?.relay_configured
+    ? networkInfo.relay_connected
+      ? "relay linked"
+      : "relay disconnected"
+    : "network standby";
   const autoModeArmed = true;
   const workModeEnabled = autoMode.autoWorker || autoMode.questSeeder;
   const sortedCampaigns = useMemo(
@@ -1477,8 +1482,8 @@ function AppContent() {
                 <div>
                   <Activity size={16} />
                   <small>Active links</small>
-                  <strong>{activeNodeCount}</strong>
-                  <span>{networkInfo?.relay_connected ? "relay linked" : "network standby"}</span>
+                  <strong>{activeLinkCount}</strong>
+                  <span>{relayStatusLabel}</span>
                 </div>
               </div>
               <div

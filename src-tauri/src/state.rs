@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -23,11 +23,13 @@ pub struct P2pShared {
     pub keypair: Option<libp2p::identity::Keypair>,
     pub sender: Option<mpsc::UnboundedSender<SwarmCommand>>,
     pub peers: HashMap<String, PeerInfo>,
+    pub active_peer_links: HashSet<String>,
     pub listen_addrs: Vec<String>,
     pub relay_configured: bool,
     pub relay_connected: bool,
     pub rendezvous_registered: bool,
     pub bootstrap_source: Option<String>,
+    pub last_infrastructure_activity_ms: u64,
 }
 
 #[derive(Default, Clone)]

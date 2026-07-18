@@ -49,6 +49,7 @@ const MAX_WIRE_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
 // so this only paginates the sync.
 const MAX_LABOR_BUNDLE_BYTES: usize = 1_200_000;
 const INFRASTRUCTURE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
+const INFRASTRUCTURE_ACTIVITY_STALE_AFTER: Duration = Duration::from_secs(90);
 const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -608,6 +609,7 @@ pub async fn spawn_swarm(
         inner.relay_connected = false;
         inner.rendezvous_registered = false;
         inner.bootstrap_source = network.source.clone();
+        inner.last_infrastructure_activity_ms = now_millis();
     }
 
     tauri::async_runtime::spawn(async move {
@@ -685,12 +687,14 @@ pub async fn spawn_swarm(
                             );
                         }
                         SwarmCommand::Dial(address) => {
-                            if let Err(error) = swarm.dial(address.clone()) {
-                                let _ = app.emit(
-                                    "p2p:connection_failed",
-                                    serde_json::json!({"address": address.to_string(), "reason": error.to_string()}),
-                                );
-                            }
+                            dial_with_telemetry(
+                                &mut swarm,
+                                &app,
+                                &store,
+                                "peer_dial_failed",
+                                relay_peer_id(&address),
+                                address,
+                            );
                         }
                     }
                 }
@@ -711,7 +715,7 @@ pub async fn spawn_swarm(
                     );
                 }
                 _ = infrastructure_interval.tick() => {
-                    ensure_infrastructure_connections(&mut swarm, &network);
+                    ensure_infrastructure_connections(&mut swarm, &app, &state, &store, &network);
                 }
                 _ = labor_sync_interval.tick() => {
                     sync_audit_labor_network(
@@ -1475,7 +1479,7 @@ fn handle_swarm_event(
                 }
                 swarm.add_peer_address(peer_id, addr.clone());
                 if !swarm.is_connected(&peer_id) {
-                    let _ = swarm.dial(addr);
+                    dial_with_telemetry(swarm, app, store, "peer_dial_failed", Some(peer_id), addr);
                 }
             }
         }
@@ -1502,6 +1506,24 @@ fn handle_swarm_event(
                 on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
             }
         }
+        SwarmEvent::Behaviour(AgentBehaviourEvent::Ping(ping::Event { peer, result, .. })) => {
+            if is_infrastructure_peer(network, peer) {
+                match result {
+                    Ok(_) => mark_infrastructure_activity(state, network, peer),
+                    Err(error) => {
+                        clear_infrastructure_connection_state(state, network, peer);
+                        record_dial_failure(
+                            app,
+                            store,
+                            "infrastructure_dial_failed",
+                            Some(peer),
+                            None,
+                            format!("infrastructure ping failed: {error}").as_str(),
+                        );
+                    }
+                }
+            }
+        }
         SwarmEvent::Behaviour(AgentBehaviourEvent::Relay(
             relay::client::Event::ReservationReqAccepted {
                 relay_peer_id,
@@ -1509,6 +1531,7 @@ fn handle_swarm_event(
                 ..
             },
         )) => {
+            mark_infrastructure_activity(state, network, relay_peer_id);
             if let Some(relay) = network
                 .relay
                 .as_ref()
@@ -1543,6 +1566,7 @@ fn handle_swarm_event(
                 namespace,
                 ..
             } => {
+                mark_infrastructure_activity(state, network, rendezvous_node);
                 if let Ok(mut inner) = state.inner.lock() {
                     inner.rendezvous_registered = true;
                 }
@@ -1563,8 +1587,10 @@ fn handle_swarm_event(
             rendezvous::client::Event::Discovered {
                 registrations,
                 cookie,
+                rendezvous_node,
                 ..
             } => {
+                mark_infrastructure_activity(state, network, rendezvous_node);
                 *rendezvous_cookie = Some(cookie);
                 let mut discovered = 0usize;
                 for registration in registrations {
@@ -1580,7 +1606,14 @@ fn handle_swarm_event(
                     }
                     if !swarm.is_connected(&peer_id) {
                         for address in preferred_dial_candidates(&dial_candidates) {
-                            let _ = swarm.dial(address);
+                            dial_with_telemetry(
+                                swarm,
+                                app,
+                                store,
+                                "peer_dial_failed",
+                                Some(peer_id),
+                                address,
+                            );
                         }
                     }
                     discovered += 1;
@@ -1626,6 +1659,9 @@ fn handle_swarm_event(
             }
         },
         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+            if is_infrastructure_peer(network, peer_id) {
+                mark_infrastructure_activity(state, network, peer_id);
+            }
             if !*relay_listener_started {
                 if let Some(relay) = network.relay.as_ref() {
                     if peer_id == relay.peer_id {
@@ -1650,6 +1686,40 @@ fn handle_swarm_event(
                 on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
             }
         }
+        SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+            if let Some(peer_id) = peer_id {
+                if is_infrastructure_peer(network, peer_id) {
+                    clear_infrastructure_connection_state(state, network, peer_id);
+                    record_dial_failure(
+                        app,
+                        store,
+                        "infrastructure_dial_failed",
+                        Some(peer_id),
+                        None,
+                        error.to_string().as_str(),
+                    );
+                } else {
+                    mark_peer_failure(state, peer_id);
+                    record_dial_failure(
+                        app,
+                        store,
+                        "peer_dial_failed",
+                        Some(peer_id),
+                        None,
+                        error.to_string().as_str(),
+                    );
+                }
+            } else {
+                record_dial_failure(
+                    app,
+                    store,
+                    "peer_dial_failed",
+                    None,
+                    None,
+                    error.to_string().as_str(),
+                );
+            }
+        }
         SwarmEvent::ConnectionClosed {
             peer_id,
             num_established,
@@ -1664,6 +1734,7 @@ fn handle_swarm_event(
                 .is_some_and(|relay| relay.peer_id == peer_id)
             {
                 *rendezvous_registration_started = false;
+                clear_infrastructure_connection_state(state, network, peer_id);
                 if let Ok(mut inner) = state.inner.lock() {
                     inner.relay_connected = false;
                     inner.rendezvous_registered = false;
@@ -1675,12 +1746,14 @@ fn handle_swarm_event(
                 .is_some_and(|rendezvous| rendezvous.peer_id == peer_id)
             {
                 *rendezvous_registration_started = false;
+                clear_infrastructure_connection_state(state, network, peer_id);
                 if let Ok(mut inner) = state.inner.lock() {
                     inner.rendezvous_registered = false;
                 }
             }
             if let Ok(mut inner) = state.inner.lock() {
                 inner.peers.remove(&peer_id.to_string());
+                inner.active_peer_links.remove(&peer_id.to_string());
             }
             if !is_infrastructure_peer(network, peer_id) {
                 *rendezvous_cookie = None;
@@ -1849,6 +1922,9 @@ fn on_peer_connected(
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     touch_peer(state, peer_id);
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.active_peer_links.insert(peer_id.to_string());
+    }
     let peer_agent_id = format!("urn:libp2p:{peer_id}");
     if let Ok(envelopes) = store.envelopes_for_peer(local_agent_id, &peer_agent_id) {
         for envelope in envelopes {
@@ -1980,7 +2056,7 @@ fn recover_verifier_liveness_if_stale(
 
     *last_verifier_liveness_discovery_ms = now;
     *rendezvous_cookie = None;
-    ensure_infrastructure_connections(swarm, network);
+    ensure_infrastructure_connections(swarm, app, state, store, network);
     discover_rendezvous(swarm, network.rendezvous.as_ref(), &network.namespace, None);
 
     let _ = app.emit(
@@ -3392,8 +3468,119 @@ fn dial_infrastructure(
     Ok(())
 }
 
+fn mark_infrastructure_activity(state: &P2pState, network: &NetworkBootstrap, peer_id: PeerId) {
+    if !is_infrastructure_peer(network, peer_id) {
+        return;
+    }
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.last_infrastructure_activity_ms = now_millis();
+        if network
+            .relay
+            .as_ref()
+            .is_some_and(|relay| relay.peer_id == peer_id)
+        {
+            inner.relay_connected = true;
+        }
+    }
+}
+
+fn clear_infrastructure_connection_state(
+    state: &P2pState,
+    network: &NetworkBootstrap,
+    peer_id: PeerId,
+) {
+    if let Ok(mut inner) = state.inner.lock() {
+        if network
+            .relay
+            .as_ref()
+            .is_some_and(|relay| relay.peer_id == peer_id)
+        {
+            inner.relay_connected = false;
+            inner.rendezvous_registered = false;
+        }
+        if network
+            .rendezvous
+            .as_ref()
+            .is_some_and(|rendezvous| rendezvous.peer_id == peer_id)
+        {
+            inner.rendezvous_registered = false;
+        }
+    }
+}
+
+fn infrastructure_activity_is_stale(state: &P2pState) -> bool {
+    state
+        .inner
+        .lock()
+        .map(|inner| {
+            now_millis().saturating_sub(inner.last_infrastructure_activity_ms)
+                > INFRASTRUCTURE_ACTIVITY_STALE_AFTER.as_millis() as u64
+        })
+        .unwrap_or(true)
+}
+
+fn record_dial_failure(
+    app: &AppHandle,
+    store: &AtpStore,
+    event_kind: &str,
+    peer_id: Option<PeerId>,
+    address: Option<&Multiaddr>,
+    reason: &str,
+) {
+    let peer_string = peer_id.map(|peer| peer.to_string());
+    let address_string = address.map(ToString::to_string);
+    let _ = store.record_labor_event(
+        event_kind,
+        peer_string.as_deref(),
+        Some("network_route"),
+        address_string.as_deref().or(peer_string.as_deref()),
+        false,
+        Some(reason),
+        &serde_json::json!({
+            "peerId": peer_string,
+            "address": address_string,
+            "reason": reason,
+        }),
+    );
+    let _ = app.emit(
+        "p2p:connection_failed",
+        serde_json::json!({
+            "peerId": peer_string,
+            "address": address_string,
+            "reason": reason,
+        }),
+    );
+}
+
+fn dial_with_telemetry(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    store: &AtpStore,
+    event_kind: &str,
+    peer_id: Option<PeerId>,
+    address: Multiaddr,
+) -> bool {
+    match swarm.dial(address.clone()) {
+        Ok(()) => true,
+        Err(error) => {
+            record_dial_failure(
+                app,
+                store,
+                event_kind,
+                peer_id,
+                Some(&address),
+                error.to_string().as_str(),
+            );
+            false
+        }
+    }
+}
+
 fn ensure_infrastructure_connections(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
     network: &NetworkBootstrap,
 ) {
     let mut peers = Vec::<PeerId>::new();
@@ -3401,10 +3588,50 @@ fn ensure_infrastructure_connections(
         .into_iter()
         .flatten()
     {
-        if peers.contains(&target.peer_id) || swarm.is_connected(&target.peer_id) {
+        if peers.contains(&target.peer_id) {
             continue;
         }
-        let _ = swarm.dial(target.address.clone());
+        if swarm.is_connected(&target.peer_id) {
+            if !infrastructure_activity_is_stale(state) {
+                peers.push(target.peer_id);
+                continue;
+            }
+            let reason = format!(
+                "infrastructure peer has had no observable activity for {} seconds; recycling connection",
+                INFRASTRUCTURE_ACTIVITY_STALE_AFTER.as_secs()
+            );
+            let _ = store.record_labor_event(
+                "infrastructure_connection_recycled",
+                Some(target.peer_id.to_string().as_str()),
+                Some("network_route"),
+                Some(target.address.to_string().as_str()),
+                false,
+                Some(reason.as_str()),
+                &serde_json::json!({
+                    "peerId": target.peer_id.to_string(),
+                    "address": target.address.to_string(),
+                    "reason": reason,
+                }),
+            );
+            let _ = app.emit(
+                "p2p:connection_failed",
+                serde_json::json!({
+                    "peerId": target.peer_id.to_string(),
+                    "address": target.address.to_string(),
+                    "reason": reason,
+                }),
+            );
+            clear_infrastructure_connection_state(state, network, target.peer_id);
+            let _ = swarm.disconnect_peer_id(target.peer_id);
+        }
+        dial_with_telemetry(
+            swarm,
+            app,
+            store,
+            "infrastructure_dial_failed",
+            Some(target.peer_id),
+            target.address.clone(),
+        );
         peers.push(target.peer_id);
     }
 }

@@ -19,7 +19,7 @@ exports a professional markdown report bundle. This is online peer coordination
 and local receipt accounting, not durable global indexing, token settlement, or
 autonomous OpenClaw/Hermes execution yet.
 
-v0.16.5 runs mainnet as a non-mandatory performance upgrade over the
+v0.16.6 runs mainnet as a non-mandatory infrastructure-liveness upgrade over the
 `cyphes-final-testnet-v0.16.0` SQLite store marker, preserving that marker as
 the genesis ledger identifier and carrying forward the
 stable Autonomous Guardian Loop:
@@ -37,9 +37,9 @@ the sparse-inventory capability before expensive labor-bundle ingest from peers,
 pauses visibly when GitHub rate limits the node, and supports a local GitHub
 token for higher API quota. New contributions also carry standardized Cognition
 Proof packets, and verifier acceptance signs an autonomous-finality packet that
-binds settlement to the contribution receipt and proof hash. v0.16.5 also
+binds settlement to the contribution receipt and proof hash. v0.16.6 also
 requires evidence-backed structured output or one successful repair pass before
-a model run counts as a full-quality proof. v0.16.5 keeps the cheap duplicate and
+a model run counts as a full-quality proof. v0.16.6 keeps the cheap duplicate and
 superseded-object preflight before labor-bundle signature verification, so
 known or already-settled contribution/verification objects are telemetered and
 skipped without mutating credits, work status, or verification state. It also
@@ -54,13 +54,17 @@ path, impact, and reproduction evidence. v0.16.2 also added explicit forward-onl
 model tiers, including `minimax-m3` at `10.0x`, `gpt-oss-20b` at `3.0x`, and
 frontier/cloud labels at the high tier, with the signed runtime multiplier
 preserved inside each new receipt.
-The v0.16.5 cockpit uses an aggregate backend dashboard summary for ordinary
+The v0.16.6 cockpit uses an aggregate backend dashboard summary for ordinary
 refreshes, caches verified credit summaries by allocation ledger head, coalesces
 network-triggered campaign/credit reloads, and lazy-loads full campaign
 snapshots only when receipt inspection or worker actions need the raw packets.
 Verifier-first nodes also check the durable store for independently verifiable
 submitted receipts before waiting on campaign-snapshot hydration, improving
 two-node and fresh-rejoin settlement liveness without changing the ATP wire.
+v0.16.6 adds a libp2p infrastructure watchdog that treats silent relay and
+rendezvous links as stale after 90 seconds, disconnects and redials them, and
+records dial failures as labor telemetry so a dark node is diagnosable instead
+of silently listening with no established connections.
 The main cockpit also includes a Receipt Inspector for reviewing verified,
 pending, and penalized Cognition Proof packets without trusting raw SQLite rows.
 External disclosure, protocol contact, payout claims, and settlement remain

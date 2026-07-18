@@ -3,7 +3,7 @@
 Cognition Proofs are the signed work packets CYPHES uses to turn local model
 labor into verifier-settled ATP Credits.
 
-Every new paid contribution carries a Cognition Proof packet. v0.16.5 keeps the
+Every new paid contribution carries a Cognition Proof packet. v0.16.6 keeps the
 `cyphes-final-testnet-v0.16.0` ledger marker as the mainnet genesis identifier
 and continues serializing that packet through the legacy `defenseProof` wire
 alias/profile so rolling verifier nodes validate the same canonical
@@ -34,28 +34,31 @@ Cognition Proofs make the work reproducible, accountable, penalizable, and
 settleable. Final reports and ATP balances still require accepted independent
 verification.
 
-v0.16.5 keeps the proof-quality gate before settlement. The local audit runtime
+v0.16.6 keeps the proof-quality gate before settlement. The local audit runtime
 prompts for a required JSON Cognition Proof shape, requires non-empty
 evidence-backed coverage, allows empty findings for valid no-issue results, and
 tries one automatic repair pass when a model returns prose. Outputs that still
 fail the schema remain parser-fallback coverage and keep the deterministic ATP
 quality deduction.
 
-v0.16.5 also preserves the duplicate/superseded preflight, stays on the
+v0.16.6 also preserves the duplicate/superseded preflight, stays on the
 mainnet genesis database marker, and keeps the stable reconnect path:
 stale local claims are released when signed independent verifier receipts prove
 a work unit is already settled, superseded self-pending receipts no longer count
 against worker backpressure, and catch-up sync can move larger verified
 response batches without changing ATP finality.
 
-v0.16.5 does not change the Cognition Proof wire shape. It improves how the app
+v0.16.6 does not change the Cognition Proof wire shape. It improves how the app
 reads the growing ledger: ordinary cockpit refreshes use one aggregate backend
 summary, verified credit totals are cached by ledger head, network events are
 coalesced into fewer reloads, and full campaign snapshots load lazily for
 receipt inspection or worker actions. Verifier-first nodes also check the
 durable submitted-receipt queue directly before falling back to hydrated
 campaign snapshots, so a normal rejoining node can settle known Cognition Proof
-receipts without first entering worker mode.
+receipts without first entering worker mode. v0.16.6 also makes that path more
+reliable after sleep/wake or NAT churn by recycling silent relay/rendezvous
+links, redialing infrastructure, and surfacing route failures in the local labor
+event stream.
 
 Reportable bounty candidates now need concrete file/function/line evidence,
 exploit path, impact, and reproduction steps. Low-evidence structured coverage

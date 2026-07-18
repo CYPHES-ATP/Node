@@ -409,5 +409,7 @@ export interface NetworkInfo {
   relay_connected: boolean;
   rendezvous_registered: boolean;
   bootstrap_source?: string;
+  last_infrastructure_activity_ms: number;
   connected_peers: number;
+  known_peers: number;
 }

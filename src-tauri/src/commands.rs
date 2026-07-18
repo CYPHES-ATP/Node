@@ -59,7 +59,9 @@ pub struct NetworkInfo {
     pub relay_connected: bool,
     pub rendezvous_registered: bool,
     pub bootstrap_source: Option<String>,
+    pub last_infrastructure_activity_ms: u64,
     pub connected_peers: usize,
+    pub known_peers: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,7 +293,9 @@ pub async fn get_network_info(state: State<'_, P2pState>) -> Result<NetworkInfo,
         relay_connected: inner.relay_connected,
         rendezvous_registered: inner.rendezvous_registered,
         bootstrap_source: inner.bootstrap_source.clone(),
-        connected_peers: inner.peers.len(),
+        last_infrastructure_activity_ms: inner.last_infrastructure_activity_ms,
+        connected_peers: inner.active_peer_links.len(),
+        known_peers: inner.peers.len(),
     })
 }
 
@@ -1466,7 +1470,12 @@ pub async fn migrate_legacy_jobs(
 #[tauri::command]
 pub async fn get_peers(state: State<'_, P2pState>) -> Result<Vec<PeerInfo>, String> {
     let inner = state.inner.lock().map_err(|error| error.to_string())?;
-    Ok(inner.peers.values().cloned().collect())
+    Ok(inner
+        .peers
+        .values()
+        .filter(|peer| inner.active_peer_links.contains(&peer.peer_id))
+        .cloned()
+        .collect())
 }
 
 #[cfg(test)]
