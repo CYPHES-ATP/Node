@@ -7,6 +7,7 @@ use std::{
 
 use futures::StreamExt;
 use libp2p::{
+    core::transport::ListenerId,
     dcutr, identify, identity, mdns, noise, ping, relay, rendezvous, request_response,
     request_response::{OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, StreamProtocol, SwarmEvent},
@@ -54,6 +55,7 @@ const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(20);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PEER_IDLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const LABOR_NETWORK_SYNC_INTERVAL: Duration = Duration::from_secs(12);
+const RELAY_RESERVATION_RETRY_AFTER: Duration = Duration::from_secs(45);
 const LABOR_AUTO_VERIFY_LIMIT: usize = 8;
 const LABOR_AUTO_VERIFY_SCAN_LIMIT: usize = 512;
 const LABOR_INVENTORY_LIMIT: usize = 512;
@@ -80,6 +82,33 @@ const LABOR_CAPABILITY_VERIFIER_PULL: &str = "verifier_pull_v1";
 struct InfrastructureTarget {
     peer_id: PeerId,
     address: Multiaddr,
+}
+
+#[derive(Debug, Default)]
+struct RelayReservationState {
+    listener_id: Option<ListenerId>,
+    requested_at_ms: Option<u64>,
+    confirmed: bool,
+}
+
+impl RelayReservationState {
+    fn has_pending_request(&self) -> bool {
+        self.listener_id.is_some() && !self.confirmed
+    }
+
+    fn is_pending_stale(&self, now_ms: u64) -> bool {
+        self.has_pending_request()
+            && self.requested_at_ms.is_some_and(|requested_at_ms| {
+                now_ms.saturating_sub(requested_at_ms)
+                    >= RELAY_RESERVATION_RETRY_AFTER.as_millis() as u64
+            })
+    }
+
+    fn reset(&mut self) {
+        self.listener_id = None;
+        self.requested_at_ms = None;
+        self.confirmed = false;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -618,7 +647,7 @@ pub async fn spawn_swarm(
 
     tauri::async_runtime::spawn(async move {
         let mut outbound = HashMap::<OutboundRequestId, PendingOutbound>::new();
-        let mut relay_listener_started = false;
+        let mut relay_reservation = RelayReservationState::default();
         let mut rendezvous_registration_started = false;
         let mut rendezvous_cookie = None;
         let mut last_verifier_liveness_discovery_ms = 0u64;
@@ -727,7 +756,7 @@ pub async fn spawn_swarm(
                         &store,
                         &network,
                         local_peer_id,
-                        &mut relay_listener_started,
+                        &mut relay_reservation,
                     );
                 }
                 _ = labor_sync_interval.tick() => {
@@ -757,7 +786,7 @@ pub async fn spawn_swarm(
                         &local_agent_id,
                         &mut outbound,
                         &network,
-                        &mut relay_listener_started,
+                        &mut relay_reservation,
                         &mut rendezvous_registration_started,
                         &mut rendezvous_cookie,
                     );
@@ -781,7 +810,7 @@ fn handle_swarm_event(
     local_agent_id: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
     network: &NetworkBootstrap,
-    relay_listener_started: &mut bool,
+    relay_reservation: &mut RelayReservationState,
     rendezvous_registration_started: &mut bool,
     rendezvous_cookie: &mut Option<rendezvous::Cookie>,
 ) {
@@ -1544,7 +1573,8 @@ fn handle_swarm_event(
                 ..
             },
         )) => {
-            *relay_listener_started = true;
+            relay_reservation.confirmed = true;
+            relay_reservation.requested_at_ms = None;
             mark_infrastructure_activity(state, network, relay_peer_id);
             if let Some(relay) = network
                 .relay
@@ -1700,7 +1730,7 @@ fn handle_swarm_event(
             if is_infrastructure_peer(network, peer_id) {
                 mark_infrastructure_activity(state, network, peer_id);
             }
-            if !*relay_listener_started {
+            if !relay_reservation.confirmed {
                 if let Some(relay) = network.relay.as_ref() {
                     if peer_id == relay.peer_id {
                         ensure_relay_reservation(
@@ -1710,7 +1740,7 @@ fn handle_swarm_event(
                             store,
                             network,
                             local_peer_id,
-                            relay_listener_started,
+                            relay_reservation,
                         );
                     }
                 }
@@ -1773,7 +1803,7 @@ fn handle_swarm_event(
                     store,
                     network,
                     local_peer_id,
-                    relay_listener_started,
+                    relay_reservation,
                     rendezvous_registration_started,
                     rendezvous_cookie,
                     "relay connection closed",
@@ -1805,6 +1835,9 @@ fn handle_swarm_event(
             }
         }
         SwarmEvent::NewListenAddr { address, .. } => {
+            if is_relay_circuit_address(&address) && !relay_reservation.confirmed {
+                return;
+            }
             let address = address.to_string();
             if let Ok(mut inner) = state.inner.lock() {
                 if !inner.listen_addrs.contains(&address) {
@@ -1818,6 +1851,7 @@ fn handle_swarm_event(
         }
         SwarmEvent::ExternalAddrConfirmed { address } => {
             if is_relay_circuit_address(&address)
+                && relay_reservation.confirmed
                 && !*rendezvous_registration_started
                 && register_rendezvous(swarm, app, network.rendezvous.as_ref(), &network.namespace)
             {
@@ -1833,7 +1867,7 @@ fn handle_swarm_event(
                     store,
                     network,
                     local_peer_id,
-                    relay_listener_started,
+                    relay_reservation,
                     rendezvous_registration_started,
                     rendezvous_cookie,
                     "relay circuit external address expired",
@@ -1845,14 +1879,19 @@ fn handle_swarm_event(
                     store,
                     network,
                     local_peer_id,
-                    relay_listener_started,
+                    relay_reservation,
                 );
             }
         }
         SwarmEvent::ListenerClosed {
-            addresses, reason, ..
+            listener_id,
+            addresses,
+            reason,
+            ..
         } => {
-            if addresses.iter().any(is_relay_circuit_address) {
+            if relay_reservation.listener_id == Some(listener_id)
+                || addresses.iter().any(is_relay_circuit_address)
+            {
                 let reason = reason
                     .as_ref()
                     .err()
@@ -1865,7 +1904,7 @@ fn handle_swarm_event(
                     store,
                     network,
                     local_peer_id,
-                    relay_listener_started,
+                    relay_reservation,
                     rendezvous_registration_started,
                     rendezvous_cookie,
                     &reason,
@@ -1877,7 +1916,7 @@ fn handle_swarm_event(
                     store,
                     network,
                     local_peer_id,
-                    relay_listener_started,
+                    relay_reservation,
                 );
             }
             if let Ok(mut inner) = state.inner.lock() {
@@ -3711,12 +3750,15 @@ fn lose_relay_reservation(
     store: &AtpStore,
     network: &NetworkBootstrap,
     local_peer_id: PeerId,
-    relay_listener_started: &mut bool,
+    relay_reservation: &mut RelayReservationState,
     rendezvous_registration_started: &mut bool,
     rendezvous_cookie: &mut Option<rendezvous::Cookie>,
     reason: &str,
 ) {
-    *relay_listener_started = false;
+    if let Some(listener_id) = relay_reservation.listener_id.take() {
+        let _ = swarm.remove_listener(listener_id);
+    }
+    relay_reservation.reset();
     *rendezvous_registration_started = false;
     *rendezvous_cookie = None;
     clear_local_relay_circuit_address(swarm, state, network, local_peer_id);
@@ -3763,21 +3805,49 @@ fn ensure_relay_reservation(
     store: &AtpStore,
     network: &NetworkBootstrap,
     local_peer_id: PeerId,
-    relay_listener_started: &mut bool,
+    relay_reservation: &mut RelayReservationState,
 ) {
     let Some(relay) = network.relay.as_ref() else {
         return;
     };
-    if *relay_listener_started || !swarm.is_connected(&relay.peer_id) {
+    if !swarm.is_connected(&relay.peer_id) {
         return;
     }
+    if relay_reservation.confirmed {
+        return;
+    }
+    let now_ms = now_millis();
+    if relay_reservation.has_pending_request() && !relay_reservation.is_pending_stale(now_ms) {
+        return;
+    }
+    if let Some(listener_id) = relay_reservation.listener_id.take() {
+        let _ = swarm.remove_listener(listener_id);
+        let peer_id = relay.peer_id.to_string();
+        let address = relay.address.to_string();
+        let _ = store.record_labor_event(
+            "relay_reservation_retry",
+            Some(&peer_id),
+            Some("network_route"),
+            Some(&address),
+            false,
+            Some("relay reservation request timed out before acceptance"),
+            &serde_json::json!({
+                "peerId": peer_id,
+                "address": address,
+                "retryAfterMs": RELAY_RESERVATION_RETRY_AFTER.as_millis(),
+            }),
+        );
+    }
+    relay_reservation.reset();
 
     clear_local_relay_circuit_address(swarm, state, network, local_peer_id);
     let mut circuit_addr = relay.address.clone();
     circuit_addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
     match swarm.listen_on(circuit_addr.clone()) {
-        Ok(_) => {
-            *relay_listener_started = true;
+        Ok(listener_id) => {
+            relay_reservation.listener_id = Some(listener_id);
+            relay_reservation.requested_at_ms = Some(now_ms);
+            relay_reservation.confirmed = false;
             let peer_id = relay.peer_id.to_string();
             let address = circuit_addr.to_string();
             let _ = store.record_labor_event(
@@ -3790,17 +3860,21 @@ fn ensure_relay_reservation(
                 &serde_json::json!({
                     "peerId": peer_id,
                     "address": address,
+                    "listenerId": format!("{listener_id:?}"),
                 }),
             );
         }
-        Err(error) => record_dial_failure(
-            app,
-            store,
-            "relay_reservation_failed",
-            Some(relay.peer_id),
-            Some(&relay.address),
-            format!("could not reserve relay circuit: {error}").as_str(),
-        ),
+        Err(error) => {
+            relay_reservation.reset();
+            record_dial_failure(
+                app,
+                store,
+                "relay_reservation_failed",
+                Some(relay.peer_id),
+                Some(&relay.address),
+                format!("could not reserve relay circuit: {error}").as_str(),
+            );
+        }
     }
 }
 
