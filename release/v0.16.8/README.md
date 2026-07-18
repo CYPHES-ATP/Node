@@ -23,6 +23,7 @@ edge case observed after peers left the network:
 
 - `CYPHES_0.16.8_aarch64.dmg` - Apple Silicon macOS
 - `CYPHES_0.16.8_x64.dmg` - Intel macOS
+- `CYPHES_0.16.8_x64-setup.exe` - Windows x64
 - `SHA256SUMS.txt` - release checksums
 
 ## Validation
@@ -42,4 +43,5 @@ edge case observed after peers left the network:
 ```text
 a14a13ad45382b0209c7b737636d1a1f653f9bf32a77393fb853256d3b6b8e7e  CYPHES_0.16.8_aarch64.dmg
 751a8b6d9d6970809dbcbbbf5307caaef874b6a1b2d68acae9f35a8002843a5a  CYPHES_0.16.8_x64.dmg
+975d95c0686292381c0d7c50376911fa0b76bf7462fccf374fb739ddc3000361  CYPHES_0.16.8_x64-setup.exe
 ```
