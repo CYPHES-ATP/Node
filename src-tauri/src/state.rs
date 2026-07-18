@@ -30,6 +30,10 @@ pub struct P2pShared {
     pub rendezvous_registered: bool,
     pub bootstrap_source: Option<String>,
     pub last_infrastructure_activity_ms: u64,
+    /// Infrastructure peers being deliberately disconnected before a redial.
+    /// Keeping this state prevents an immediate dial from racing the closing
+    /// socket and leaving the relay path stuck in CLOSE_WAIT.
+    pub infrastructure_recycle_pending: HashSet<String>,
 }
 
 #[derive(Default, Clone)]

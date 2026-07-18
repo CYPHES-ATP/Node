@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -7,7 +7,7 @@ use std::{
 
 use base64::Engine as _;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -264,6 +264,8 @@ const STORE_META_APP_VERSION_KEY: &str = "app_version";
 const STORE_META_SCHEMA_KEY: &str = "schema";
 const STORE_SCHEMA_VERSION: &str = "audit-labor-v1";
 const CLAIM_CONTRIBUTION_CLOCK_SKEW_MS: i64 = 60_000;
+const LABOR_TELEMETRY_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
+const LABOR_TELEMETRY_MAX_ROWS: i64 = 50_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ContributionIngestPolicy {
@@ -316,6 +318,7 @@ impl AtpStore {
             credit_summary_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         store.initialize()?;
+        store.prune_labor_telemetry()?;
         store.reconcile_superseded_contributions()?;
         Ok(store)
     }
@@ -1936,6 +1939,47 @@ impl AtpStore {
         })
     }
 
+    /// Return only advertised IDs that are genuinely absent from the complete
+    /// local database. Comparing two bounded 512-item inventory windows causes
+    /// older, already-known objects to be transferred forever once either node
+    /// has more than one window of history.
+    pub fn missing_labor_object_ids(
+        &self,
+        campaign_ids: &[String],
+        claim_ids: &[String],
+        contribution_ids: &[String],
+        verification_ids: &[String],
+    ) -> Result<AuditLaborInventory, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        Ok(AuditLaborInventory {
+            campaign_ids: missing_ids_in_connection(
+                &connection,
+                "protocol_audit_campaigns",
+                "campaign_id",
+                campaign_ids,
+            )?,
+            claim_ids: missing_ids_in_connection(
+                &connection,
+                "audit_work_unit_claims",
+                "claim_id",
+                claim_ids,
+            )?,
+            contribution_ids: missing_ids_in_connection(
+                &connection,
+                "audit_contributions",
+                "contribution_id",
+                contribution_ids,
+            )?,
+            verification_ids: missing_ids_in_connection(
+                &connection,
+                "audit_verifications",
+                "verification_id",
+                verification_ids,
+            )?,
+            needs_verifier_contribution_ids: Vec::new(),
+        })
+    }
+
     pub fn campaigns_by_ids(
         &self,
         campaign_ids: &[String],
@@ -2244,13 +2288,44 @@ impl AtpStore {
         payload: &serde_json::Value,
     ) -> Result<(), String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
-        let event_id = format!("labor_event_{}", uuid::Uuid::new_v4().simple());
+        let now = now_millis() as i64;
+        let aggregate = matches!(
+            event_kind,
+            "labor_object_bundle_ingested"
+                | "labor_object_bundle_duplicate_skipped"
+                | "peer_dial_failed"
+                | "outbound_request_failed"
+        );
+        let event_id = if aggregate {
+            format!(
+                "labor_event_bucket_{event_kind}_{}_{}",
+                peer_id.unwrap_or("none"),
+                now / 60_000
+            )
+        } else {
+            format!("labor_event_{}", uuid::Uuid::new_v4().simple())
+        };
+        let mut payload = payload.clone();
+        if aggregate {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert("occurrences".to_string(), serde_json::json!(1));
+            }
+        }
         connection
             .execute(
                 "INSERT INTO audit_labor_events
                     (event_id, event_kind, peer_id, object_kind, object_id, accepted, reason,
                      payload_json, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(event_id) DO UPDATE SET
+                    accepted = excluded.accepted,
+                    reason = excluded.reason,
+                    payload_json = json_set(
+                        excluded.payload_json,
+                        '$.occurrences',
+                        COALESCE(json_extract(audit_labor_events.payload_json, '$.occurrences'), 1) + 1
+                    ),
+                    created_at = excluded.created_at",
                 params![
                     event_id,
                     event_kind,
@@ -2259,9 +2334,55 @@ impl AtpStore {
                     object_id,
                     if accepted { 1 } else { 0 },
                     reason,
-                    serde_json::to_string(payload).map_err(|error| error.to_string())?,
-                    now_millis() as i64,
+                    serde_json::to_string(&payload).map_err(|error| error.to_string())?,
+                    now,
                 ],
+            )
+            .map_err(|error| error.to_string())?;
+
+        // Cheap time-based retention on every write and a bounded-row trim on
+        // minute boundaries. Telemetry is diagnostic state, not ATP ledger
+        // evidence, and must not grow without bound during a route storm.
+        connection
+            .execute(
+                "DELETE FROM audit_labor_events WHERE created_at < ?1",
+                params![now.saturating_sub(LABOR_TELEMETRY_RETENTION_MS)],
+            )
+            .map_err(|error| error.to_string())?;
+        if now % 60_000 < 1_000 {
+            connection
+                .execute(
+                    "DELETE FROM audit_labor_events
+                     WHERE event_id IN (
+                        SELECT event_id FROM audit_labor_events
+                        ORDER BY created_at DESC, event_id DESC
+                        LIMIT -1 OFFSET ?1
+                     )",
+                    params![LABOR_TELEMETRY_MAX_ROWS],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn prune_labor_telemetry(&self) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let cutoff = (now_millis() as i64).saturating_sub(LABOR_TELEMETRY_RETENTION_MS);
+        connection
+            .execute(
+                "DELETE FROM audit_labor_events WHERE created_at < ?1",
+                params![cutoff],
+            )
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "DELETE FROM audit_labor_events
+                 WHERE event_id IN (
+                    SELECT event_id FROM audit_labor_events
+                    ORDER BY created_at DESC, event_id DESC
+                    LIMIT -1 OFFSET ?1
+                 )",
+                params![LABOR_TELEMETRY_MAX_ROWS],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -4082,6 +4203,43 @@ fn percent_complete(done: usize, total: usize) -> u8 {
     (((done as f64 / total as f64) * 100.0).round() as i64).clamp(0, 100) as u8
 }
 
+fn missing_ids_in_connection(
+    connection: &Connection,
+    table: &str,
+    id_column: &str,
+    ids: &[String],
+) -> Result<Vec<String>, String> {
+    // Table and column names are fixed internal call-site constants above; IDs
+    // remain bound parameters.
+    let mut known = HashSet::new();
+    // Stay below SQLite's common 999-bound-parameter limit.
+    for chunk in ids.chunks(900) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT {id_column} FROM {table} WHERE {id_column} IN ({placeholders})");
+        let mut statement = connection
+            .prepare(sql.as_str())
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params_from_iter(chunk.iter()), |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            known.insert(row.map_err(|error| error.to_string())?);
+        }
+    }
+    Ok(ids
+        .iter()
+        .filter(|id| !known.contains(id.as_str()))
+        .cloned()
+        .collect())
+}
+
 fn network_ledger_head_in_connection(connection: &Connection) -> Result<String, String> {
     let campaign_count = count_table_rows(connection, "protocol_audit_campaigns")?;
     let work_unit_count = count_table_rows(connection, "audit_work_units")?;
@@ -4809,6 +4967,63 @@ mod tests {
             )
             .unwrap();
         assert_eq!(marker, ATP_STORE_TESTNET_ID);
+    }
+
+    #[test]
+    fn missing_labor_ids_check_complete_tables_not_inventory_windows() {
+        let store = test_store();
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO protocol_audit_campaigns
+                        (campaign_id, campaign_json, status, requester_agent_id, created_at, updated_at)
+                     VALUES ('known-campaign', '{}', 'active', 'requester', 1, 1)",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let missing = store
+            .missing_labor_object_ids(
+                &["known-campaign".to_string(), "unknown-campaign".to_string()],
+                &[],
+                &[],
+                &[],
+            )
+            .unwrap();
+
+        assert_eq!(missing.campaign_ids, vec!["unknown-campaign"]);
+    }
+
+    #[test]
+    fn noisy_labor_telemetry_is_aggregated_per_minute() {
+        let store = test_store();
+        for _ in 0..3 {
+            store
+                .record_labor_event(
+                    "labor_object_bundle_ingested",
+                    Some("peer-a"),
+                    Some("bundle"),
+                    None,
+                    true,
+                    None,
+                    &serde_json::json!({"duplicates": 1}),
+                )
+                .unwrap();
+        }
+        let connection = store.connection.lock().unwrap();
+        let (rows, occurrences) = connection
+            .query_row(
+                "SELECT COUNT(*), json_extract(MAX(payload_json), '$.occurrences')
+                 FROM audit_labor_events
+                 WHERE event_kind = 'labor_object_bundle_ingested'",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rows, 1);
+        assert_eq!(occurrences, 3);
     }
 
     #[test]

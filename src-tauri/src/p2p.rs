@@ -63,6 +63,10 @@ const MAX_BROADCAST_PEERS_PER_TICK: usize = 32;
 const MAX_DISCOVERY_DIAL_CANDIDATES: usize = 2;
 const MAX_DISCOVERY_PEER_DIALS_PER_TICK: usize = 3;
 const MAX_OUTBOUND_REQUESTS_PER_PEER: usize = 8;
+// Bulk sync may use only half of the per-peer window so receipt and
+// verification settlement always retains request capacity.
+const MAX_BULK_OUTBOUND_REQUESTS_PER_PEER: usize = 4;
+const MAX_OUTBOUND_BULK_BACKLOG: usize = 16;
 const PEER_FAILURE_BASE_COOLDOWN_MS: u64 = 30_000;
 const PEER_FAILURE_MAX_COOLDOWN_MS: u64 = 5 * 60_000;
 const STALE_RECEIPT_REPAIR_AFTER: Duration = Duration::from_secs(2 * 60);
@@ -334,9 +338,6 @@ enum PendingOutbound {
     LaborInventory {
         peer_id: PeerId,
     },
-    LaborObjectRequest {
-        peer_id: PeerId,
-    },
     LaborObjectBundle {
         peer_id: PeerId,
         silent: bool,
@@ -353,7 +354,6 @@ impl PendingOutbound {
             | Self::Contribution { peer_id, .. }
             | Self::VerificationResult { peer_id, .. }
             | Self::LaborInventory { peer_id }
-            | Self::LaborObjectRequest { peer_id }
             | Self::LaborObjectBundle { peer_id, .. } => peer_id,
         }
     }
@@ -1495,9 +1495,6 @@ fn handle_swarm_event(
                 Some(PendingOutbound::LaborInventory { peer_id }) => {
                     (None, Some(format!("labor-inventory:{peer_id}")), None)
                 }
-                Some(PendingOutbound::LaborObjectRequest { peer_id }) => {
-                    (None, Some(format!("labor-object-request:{peer_id}")), None)
-                }
                 Some(PendingOutbound::LaborObjectBundle { peer_id, .. }) => {
                     (None, Some(format!("labor-object-bundle:{peer_id}")), None)
                 }
@@ -1542,7 +1539,9 @@ fn handle_swarm_event(
             ..
         })) => {
             for address in info.listen_addrs {
-                swarm.add_peer_address(peer_id, address);
+                if !is_private_or_local_address(&address) {
+                    swarm.add_peer_address(peer_id, address);
+                }
             }
             if !is_infrastructure_peer(network, peer_id) {
                 on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
@@ -1728,6 +1727,11 @@ fn handle_swarm_event(
         },
         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
             if is_infrastructure_peer(network, peer_id) {
+                if let Ok(mut inner) = state.inner.lock() {
+                    inner
+                        .infrastructure_recycle_pending
+                        .remove(&peer_id.to_string());
+                }
                 mark_infrastructure_activity(state, network, peer_id);
             }
             if !relay_reservation.confirmed {
@@ -1752,6 +1756,11 @@ fn handle_swarm_event(
         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
             if let Some(peer_id) = peer_id {
                 if is_infrastructure_peer(network, peer_id) {
+                    if let Ok(mut inner) = state.inner.lock() {
+                        inner
+                            .infrastructure_recycle_pending
+                            .remove(&peer_id.to_string());
+                    }
                     clear_infrastructure_connection_state(state, network, peer_id);
                     record_dial_failure(
                         app,
@@ -1790,6 +1799,11 @@ fn handle_swarm_event(
         } => {
             if num_established > 0 {
                 return;
+            }
+            if let Ok(mut inner) = state.inner.lock() {
+                inner
+                    .infrastructure_recycle_pending
+                    .remove(&peer_id.to_string());
             }
             if network
                 .relay
@@ -2114,7 +2128,6 @@ fn sync_audit_labor_network(
     );
 
     if has_peers {
-        broadcast_labor_inventory(swarm, state, store, local_agent_id, outbound);
         maybe_repair_stale_receipts(
             swarm,
             app,
@@ -2123,6 +2136,9 @@ fn sync_audit_labor_network(
             last_stale_receipt_repair_ms,
             outbound,
         );
+        if outbound.len() < MAX_OUTBOUND_BULK_BACKLOG {
+            broadcast_labor_inventory(swarm, state, store, local_agent_id, outbound);
+        }
     }
 
     verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
@@ -2275,31 +2291,33 @@ fn handle_labor_inventory_request(
         &remote_inventory.verifications,
     );
 
-    let missing_campaigns =
-        missing_from_remote(&remote_inventory.campaigns, &local_inventory.campaigns);
-    let missing_claims = missing_from_remote(&remote_inventory.claims, &local_inventory.claims);
-    let mut missing_contributions = missing_from_remote(
-        &remote_inventory.contributions,
-        &local_inventory.contributions,
-    );
+    let mut offered_contributions = remote_inventory.contributions.clone();
     merge_strings(
-        &mut missing_contributions,
+        &mut offered_contributions,
         remote_inventory.needs_verifier.clone(),
     );
-    let missing_verifications = missing_from_remote(
+    let missing = match store.missing_labor_object_ids(
+        &remote_inventory.campaigns,
+        &remote_inventory.claims,
+        &offered_contributions,
         &remote_inventory.verifications,
-        &local_inventory.verifications,
-    );
-    request_labor_objects_from_peer(
-        swarm,
-        state,
-        &peer_id,
-        &missing_campaigns,
-        &missing_claims,
-        &missing_contributions,
-        &missing_verifications,
-        outbound,
-    );
+    ) {
+        Ok(missing) => missing,
+        Err(reason) => {
+            return LaborInventoryResponse {
+                accepted: false,
+                testnet_id: ATP_STORE_TESTNET_ID.to_string(),
+                app_version: labor_wire_app_version(),
+                capabilities: labor_wire_capabilities(),
+                reason: Some(format!("labor inventory existence check failed: {reason}")),
+                ..Default::default()
+            };
+        }
+    };
+    let missing_campaigns = missing.campaign_ids;
+    let missing_claims = missing.claim_ids;
+    let missing_contributions = missing.contribution_ids;
+    let missing_verifications = missing.verification_ids;
 
     let _ = app.emit(
         "audit:labor_inventory_received",
@@ -2366,6 +2384,14 @@ fn send_labor_inventory_to_peer(
     peer_id: &PeerId,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
+    if outbound
+        .values()
+        .filter(|pending| pending.peer_id() == peer_id)
+        .count()
+        >= MAX_BULK_OUTBOUND_REQUESTS_PER_PEER
+    {
+        return;
+    }
     let Ok(inventory) = wire_labor_inventory(store, local_agent_id) else {
         return;
     };
@@ -2390,43 +2416,6 @@ fn broadcast_labor_inventory(
     for peer_id in target_peers(state, None) {
         send_labor_inventory_to_peer(swarm, state, store, local_agent_id, &peer_id, outbound);
     }
-}
-
-fn request_labor_objects_from_peer(
-    swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    state: &P2pState,
-    peer_id: &PeerId,
-    campaign_ids: &[String],
-    claim_ids: &[String],
-    contribution_ids: &[String],
-    verification_ids: &[String],
-    outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
-) {
-    if campaign_ids.is_empty()
-        && claim_ids.is_empty()
-        && contribution_ids.is_empty()
-        && verification_ids.is_empty()
-    {
-        return;
-    }
-    let request = LaborObjectRequest {
-        testnet_id: ATP_STORE_TESTNET_ID.to_string(),
-        app_version: labor_wire_app_version(),
-        capabilities: labor_wire_capabilities(),
-        campaign_ids: campaign_ids.to_vec(),
-        claim_ids: claim_ids.to_vec(),
-        contribution_ids: contribution_ids.to_vec(),
-        verification_ids: verification_ids.to_vec(),
-    };
-    send_wire_request_to_peer(
-        swarm,
-        state,
-        outbound,
-        WireRequest::LaborObjectRequest(request),
-        PendingOutbound::LaborObjectRequest {
-            peer_id: peer_id.clone(),
-        },
-    );
 }
 
 /// Retain items in order while their cumulative serialized size stays within
@@ -2895,6 +2884,14 @@ fn push_labor_objects_to_peer(
         && claim_ids.is_empty()
         && contribution_ids.is_empty()
         && verification_ids.is_empty()
+    {
+        return;
+    }
+    if outbound
+        .values()
+        .filter(|pending| pending.peer_id() == peer_id)
+        .count()
+        >= MAX_BULK_OUTBOUND_REQUESTS_PER_PEER
     {
         return;
     }
@@ -3894,6 +3891,19 @@ fn ensure_infrastructure_connections(
             continue;
         }
         if swarm.is_connected(&target.peer_id) {
+            let recycle_pending = state
+                .inner
+                .lock()
+                .map(|inner| {
+                    inner
+                        .infrastructure_recycle_pending
+                        .contains(&target.peer_id.to_string())
+                })
+                .unwrap_or(false);
+            if recycle_pending {
+                peers.push(target.peer_id);
+                continue;
+            }
             if !infrastructure_activity_is_stale(state) {
                 peers.push(target.peer_id);
                 continue;
@@ -3924,7 +3934,17 @@ fn ensure_infrastructure_connections(
                 }),
             );
             clear_infrastructure_connection_state(state, network, target.peer_id);
+            if let Ok(mut inner) = state.inner.lock() {
+                inner
+                    .infrastructure_recycle_pending
+                    .insert(target.peer_id.to_string());
+            }
             let _ = swarm.disconnect_peer_id(target.peer_id);
+            // ConnectionClosed clears the pending marker. Dialing in this same
+            // poll races the closing transport and can strand the relay socket
+            // in CLOSE_WAIT.
+            peers.push(target.peer_id);
+            continue;
         }
         dial_with_telemetry(
             swarm,
@@ -3952,7 +3972,10 @@ fn discovered_peer_dial_candidates(
 ) -> Vec<Multiaddr> {
     let mut candidates = Vec::new();
     for address in advertised_addresses {
-        if !candidates.contains(address) {
+        // Private addresses learned through rendezvous belong to the remote
+        // peer's LAN. Same-LAN routes are learned separately through mDNS, so
+        // retaining these here only creates unreachable route noise.
+        if !is_private_or_local_address(address) && !candidates.contains(address) {
             candidates.push(address.clone());
         }
     }
@@ -3968,6 +3991,25 @@ fn discovered_peer_dial_candidates(
             .then_with(|| left.to_string().cmp(&right.to_string()))
     });
     candidates
+}
+
+fn is_private_or_local_address(address: &Multiaddr) -> bool {
+    address.iter().any(|protocol| match protocol {
+        libp2p::multiaddr::Protocol::Ip4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.octets()[0] == 0
+        }
+        libp2p::multiaddr::Protocol::Ip6(ip) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+        }
+        _ => false,
+    })
 }
 
 fn preferred_dial_candidates(candidates: &[Multiaddr]) -> Vec<Multiaddr> {
@@ -4207,7 +4249,7 @@ mod tests {
     }
 
     #[test]
-    fn discovered_peer_dial_candidates_include_relay_circuit_route() {
+    fn discovered_peer_dial_candidates_drop_remote_private_routes() {
         let relay_address = infrastructure_address();
         let network =
             build_network_bootstrap(Some(relay_address), None, None, Some("test".to_string()))
@@ -4217,10 +4259,9 @@ mod tests {
             .parse::<Multiaddr>()
             .unwrap();
 
-        let candidates =
-            discovered_peer_dial_candidates(&network, peer_id, &[private_address.clone()]);
+        let candidates = discovered_peer_dial_candidates(&network, peer_id, &[private_address]);
 
-        assert!(candidates.contains(&private_address));
+        assert_eq!(candidates.len(), 1);
         assert!(candidates.iter().any(|address| address
             .to_string()
             .ends_with(&format!("/p2p-circuit/p2p/{peer_id}"))));
