@@ -12,8 +12,8 @@ use crate::{
         signed_autonomous_finality_verification, signed_contribution_for_work_unit,
         signed_work_unit_claim, AuditFinding, AuditWorkUnit, AuditWorkUnitClaim,
         CampaignAttachment, CampaignReportSnapshot, ContributionArtifact, CoverageItem,
-        CreditSummary, NodeContribution, ProtocolAuditCampaign, RuntimeDescriptor,
-        VerificationEvidence,
+        CreditAllocation, CreditSummary, NodeContribution, ProtocolAuditCampaign,
+        RuntimeDescriptor, VerificationEvidence, VerificationResult,
     },
     audit_profile::{is_git_commit_sha, AuditContract, ReceiptApproval, RepositoryTarget},
     audit_runtime::{
@@ -81,6 +81,16 @@ pub struct ProtocolCampaignRequest {
 pub struct ExportedReportBundle {
     pub campaign_id: String,
     pub bundle_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkVerificationIssued {
+    pub contribution_id: String,
+    pub campaign_id: String,
+    pub worker_agent_id: String,
+    pub credit_total: u32,
+    pub allocations: Vec<CreditAllocation>,
 }
 
 #[derive(Debug, Serialize)]
@@ -954,12 +964,93 @@ pub async fn verify_campaign_contribution(
         }
         return Ok(allocations);
     }
+
+    let (verification, allocations) = issue_signed_network_verification(
+        &keypair,
+        store.inner(),
+        &contribution,
+        decision,
+        reason_code,
+        reason,
+    )?;
+    if contribution.worker_agent_id != local_agent_id {
+        sender
+            .send(SwarmCommand::SendVerificationResult {
+                verification: verification.clone(),
+                allocations: allocations.clone(),
+                audience: contribution.worker_agent_id,
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    let _ = app.emit("audit:labor_changed", ());
+    Ok(allocations)
+}
+
+#[tauri::command]
+pub async fn verify_next_pending_contribution(
+    app: AppHandle,
+    state: State<'_, P2pState>,
+    store: State<'_, AtpStore>,
+) -> Result<Option<NetworkVerificationIssued>, String> {
+    let (keypair, sender) = node_runtime(&state)?;
+    let local_agent_id = agent_id(&keypair.public());
+    let Some(contribution) = store
+        .network_verification_candidates(&local_agent_id, 1)?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+
+    let (verification, allocations) = issue_signed_network_verification(
+        &keypair,
+        store.inner(),
+        &contribution,
+        "accepted".to_string(),
+        "AUTONOMOUS_FINALITY_ACCEPTED".to_string(),
+        "Independent network verifier accepted the signed Cognition Proof and receipt for immediate ATP finality.".to_string(),
+    )?;
+    sender
+        .send(SwarmCommand::SendVerificationResult {
+            verification: verification.clone(),
+            allocations: allocations.clone(),
+            audience: contribution.worker_agent_id.clone(),
+        })
+        .map_err(|error| error.to_string())?;
+    let credit_total = allocations.iter().map(|allocation| allocation.total).sum();
+    let _ = app.emit(
+        "audit:network_verification_issued",
+        serde_json::json!({
+            "verificationId": verification.verification_id,
+            "contributionId": contribution.contribution_id,
+            "creditTotal": credit_total,
+        }),
+    );
+    let _ = app.emit("audit:labor_changed", ());
+
+    Ok(Some(NetworkVerificationIssued {
+        contribution_id: contribution.contribution_id,
+        campaign_id: contribution.campaign_id,
+        worker_agent_id: contribution.worker_agent_id,
+        credit_total,
+        allocations,
+    }))
+}
+
+fn issue_signed_network_verification(
+    keypair: &libp2p::identity::Keypair,
+    store: &AtpStore,
+    contribution: &NodeContribution,
+    decision: String,
+    reason_code: String,
+    reason: String,
+) -> Result<(VerificationResult, Vec<CreditAllocation>), String> {
     let evidence_ref = format!("contribution:{}", contribution.receipt_hash);
     let evidence_hash = crate::audit_labor::sha256_ref(evidence_ref.as_bytes());
     let evidence_size = evidence_ref.len() as u64;
     let verification = signed_autonomous_finality_verification(
-        &keypair,
-        &contribution,
+        keypair,
+        contribution,
         decision,
         reason_code,
         reason,
@@ -975,17 +1066,7 @@ pub async fn verify_campaign_contribution(
         }],
     )?;
     let allocations = store.record_verification(&verification)?;
-    if contribution.worker_agent_id != local_agent_id {
-        sender
-            .send(SwarmCommand::SendVerificationResult {
-                verification: verification.clone(),
-                allocations: allocations.clone(),
-                audience: contribution.worker_agent_id,
-            })
-            .map_err(|error| error.to_string())?;
-    }
-    let _ = app.emit("audit:labor_changed", ());
-    Ok(allocations)
+    Ok((verification, allocations))
 }
 
 #[tauri::command]

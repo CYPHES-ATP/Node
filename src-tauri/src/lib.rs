@@ -19,6 +19,7 @@ use commands::{
     migrate_legacy_jobs, offer_audit, record_campaign_contribution, route_audit,
     run_accepted_audit_pipeline, run_accepted_audit_skill, run_audit, run_campaign_audit_pipeline,
     run_campaign_audit_skill, run_claimed_work_unit, start_node, verify_campaign_contribution,
+    verify_next_pending_contribution,
 };
 use state::P2pState;
 use store::AtpStore;
@@ -110,6 +111,7 @@ pub fn run() {
             run_accepted_audit_skill,
             run_accepted_audit_pipeline,
             verify_campaign_contribution,
+            verify_next_pending_contribution,
             export_campaign_report,
             get_credit_summary,
             offer_audit,

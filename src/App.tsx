@@ -65,7 +65,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.4";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.16.5";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -1117,6 +1117,19 @@ function AppContent() {
   }
 
   async function autoVerifyNextContribution() {
+    const issued = await p2p.verifyNextPendingContribution();
+    if (issued) {
+      updateAutoCounter(setAutoCounters, (current) => ({
+        ...current,
+        verifications: current.verifications + 1,
+      }));
+      pushAutoPulse(`Network verifier issued +${issued.creditTotal} ATP`, "success");
+      setNotice(
+        `Network-verified ${issued.contributionId.slice(0, 22)}...; ${issued.creditTotal} ATP Credits issued.`,
+      );
+      return true;
+    }
+
     for (const campaign of verifierCandidateCampaigns) {
       const snapshot = await refreshCampaignSnapshot(campaign.campaignId);
       const verifiedIds = new Set(snapshot.verifications.map((item) => item.targetContributionId));
@@ -1463,7 +1476,7 @@ function AppContent() {
                 </button>
                 <div>
                   <Activity size={16} />
-                  <small>Active nodes</small>
+                  <small>Active links</small>
                   <strong>{activeNodeCount}</strong>
                   <span>{networkInfo?.relay_connected ? "relay linked" : "network standby"}</span>
                 </div>

@@ -319,6 +319,14 @@ export interface NetworkDashboardSummary {
   creditSummary: CreditSummary;
 }
 
+export interface NetworkVerificationIssued {
+  contributionId: string;
+  campaignId: string;
+  workerAgentId: string;
+  creditTotal: number;
+  allocations: CreditAllocation[];
+}
+
 export interface ExportedReportBundle {
   campaignId: string;
   bundlePath: string;

@@ -16,6 +16,7 @@ import type {
   LocalModelList,
   NetworkDashboardSummary,
   NetworkInfo,
+  NetworkVerificationIssued,
   NodeContribution,
   ProtocolAuditCampaign,
   RepositorySummary,
@@ -363,6 +364,15 @@ export function useP2P() {
     return credits;
   }
 
+  async function verifyNextPendingContribution() {
+    if (!isTauriRuntime()) return null;
+    const issued = await invoke<NetworkVerificationIssued | null>("verify_next_pending_contribution");
+    if (issued) {
+      await refreshNetworkDashboard();
+    }
+    return issued;
+  }
+
   async function exportCampaignReport(campaignId: string) {
     return invoke<ExportedReportBundle>("export_campaign_report", { campaignId });
   }
@@ -429,6 +439,7 @@ export function useP2P() {
     runAcceptedAuditSkill,
     runAcceptedAuditPipeline,
     verifyCampaignContribution,
+    verifyNextPendingContribution,
     exportCampaignReport,
     offerAudit,
     acceptOffer,
