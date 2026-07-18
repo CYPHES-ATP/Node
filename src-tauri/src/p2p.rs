@@ -720,6 +720,15 @@ pub async fn spawn_swarm(
                 }
                 _ = infrastructure_interval.tick() => {
                     ensure_infrastructure_connections(&mut swarm, &app, &state, &store, &network);
+                    ensure_relay_reservation(
+                        &mut swarm,
+                        &app,
+                        &state,
+                        &store,
+                        &network,
+                        local_peer_id,
+                        &mut relay_listener_started,
+                    );
                 }
                 _ = labor_sync_interval.tick() => {
                     sync_audit_labor_network(
@@ -1535,6 +1544,7 @@ fn handle_swarm_event(
                 ..
             },
         )) => {
+            *relay_listener_started = true;
             mark_infrastructure_activity(state, network, relay_peer_id);
             if let Some(relay) = network
                 .relay
@@ -1563,7 +1573,22 @@ fn handle_swarm_event(
                     "renewal": renewal,
                 }),
             );
+            if !*rendezvous_registration_started
+                && register_rendezvous(swarm, app, network.rendezvous.as_ref(), &network.namespace)
+            {
+                *rendezvous_registration_started = true;
+            }
         }
+        SwarmEvent::Behaviour(AgentBehaviourEvent::Relay(event)) => match event {
+            relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. }
+            | relay::client::Event::InboundCircuitEstablished {
+                src_peer_id: relay_peer_id,
+                ..
+            } => {
+                mark_infrastructure_activity(state, network, relay_peer_id);
+            }
+            relay::client::Event::ReservationReqAccepted { .. } => {}
+        },
         SwarmEvent::Behaviour(AgentBehaviourEvent::Rendezvous(event)) => match event {
             rendezvous::client::Event::Registered {
                 rendezvous_node,
@@ -1678,20 +1703,15 @@ fn handle_swarm_event(
             if !*relay_listener_started {
                 if let Some(relay) = network.relay.as_ref() {
                     if peer_id == relay.peer_id {
-                        let mut circuit_addr = relay.address.clone();
-                        circuit_addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
-                        match swarm.listen_on(circuit_addr) {
-                            Ok(_) => *relay_listener_started = true,
-                            Err(error) => {
-                                let _ = app.emit(
-                                    "p2p:connection_failed",
-                                    serde_json::json!({
-                                        "address": relay.address.to_string(),
-                                        "reason": format!("could not reserve relay circuit: {error}"),
-                                    }),
-                                );
-                            }
-                        }
+                        ensure_relay_reservation(
+                            swarm,
+                            app,
+                            state,
+                            store,
+                            network,
+                            local_peer_id,
+                            relay_listener_started,
+                        );
                     }
                 }
             }
@@ -1746,12 +1766,19 @@ fn handle_swarm_event(
                 .as_ref()
                 .is_some_and(|relay| relay.peer_id == peer_id)
             {
-                *rendezvous_registration_started = false;
+                lose_relay_reservation(
+                    swarm,
+                    app,
+                    state,
+                    store,
+                    network,
+                    local_peer_id,
+                    relay_listener_started,
+                    rendezvous_registration_started,
+                    rendezvous_cookie,
+                    "relay connection closed",
+                );
                 clear_infrastructure_connection_state(state, network, peer_id);
-                if let Ok(mut inner) = state.inner.lock() {
-                    inner.relay_connected = false;
-                    inner.rendezvous_registered = false;
-                }
             }
             if network
                 .rendezvous
@@ -1790,27 +1817,68 @@ fn handle_swarm_event(
             );
         }
         SwarmEvent::ExternalAddrConfirmed { address } => {
-            if address
-                .iter()
-                .any(|protocol| protocol == libp2p::multiaddr::Protocol::P2pCircuit)
+            if is_relay_circuit_address(&address)
                 && !*rendezvous_registration_started
                 && register_rendezvous(swarm, app, network.rendezvous.as_ref(), &network.namespace)
             {
                 *rendezvous_registration_started = true;
             }
         }
-        SwarmEvent::ListenerClosed { addresses, .. } => {
-            if addresses.iter().any(|address| {
-                address
-                    .iter()
-                    .any(|protocol| protocol == libp2p::multiaddr::Protocol::P2pCircuit)
-            }) {
-                *relay_listener_started = false;
-                *rendezvous_registration_started = false;
-                if let Ok(mut inner) = state.inner.lock() {
-                    inner.relay_connected = false;
-                    inner.rendezvous_registered = false;
-                }
+        SwarmEvent::ExternalAddrExpired { address } => {
+            if is_relay_circuit_address(&address) {
+                lose_relay_reservation(
+                    swarm,
+                    app,
+                    state,
+                    store,
+                    network,
+                    local_peer_id,
+                    relay_listener_started,
+                    rendezvous_registration_started,
+                    rendezvous_cookie,
+                    "relay circuit external address expired",
+                );
+                ensure_relay_reservation(
+                    swarm,
+                    app,
+                    state,
+                    store,
+                    network,
+                    local_peer_id,
+                    relay_listener_started,
+                );
+            }
+        }
+        SwarmEvent::ListenerClosed {
+            addresses, reason, ..
+        } => {
+            if addresses.iter().any(is_relay_circuit_address) {
+                let reason = reason
+                    .as_ref()
+                    .err()
+                    .map(|error| format!("relay circuit listener closed: {error}"))
+                    .unwrap_or_else(|| "relay circuit listener closed".to_string());
+                lose_relay_reservation(
+                    swarm,
+                    app,
+                    state,
+                    store,
+                    network,
+                    local_peer_id,
+                    relay_listener_started,
+                    rendezvous_registration_started,
+                    rendezvous_cookie,
+                    &reason,
+                );
+                ensure_relay_reservation(
+                    swarm,
+                    app,
+                    state,
+                    store,
+                    network,
+                    local_peer_id,
+                    relay_listener_started,
+                );
             }
             if let Ok(mut inner) = state.inner.lock() {
                 let expired = addresses
@@ -3606,6 +3674,133 @@ fn dial_with_telemetry(
             );
             false
         }
+    }
+}
+
+fn is_relay_circuit_address(address: &Multiaddr) -> bool {
+    address
+        .iter()
+        .any(|protocol| protocol == libp2p::multiaddr::Protocol::P2pCircuit)
+}
+
+fn clear_local_relay_circuit_address(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    state: &P2pState,
+    network: &NetworkBootstrap,
+    local_peer_id: PeerId,
+) {
+    let Some(relay) = network.relay.as_ref() else {
+        return;
+    };
+    let address = relay_circuit_address(relay, local_peer_id);
+    swarm.remove_external_address(&address);
+    let address_string = address.to_string();
+    let local_peer_suffix = format!("/p2p-circuit/p2p/{local_peer_id}");
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.listen_addrs.retain(|existing| {
+            existing != &address_string && !existing.contains(&local_peer_suffix)
+        });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lose_relay_reservation(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    network: &NetworkBootstrap,
+    local_peer_id: PeerId,
+    relay_listener_started: &mut bool,
+    rendezvous_registration_started: &mut bool,
+    rendezvous_cookie: &mut Option<rendezvous::Cookie>,
+    reason: &str,
+) {
+    *relay_listener_started = false;
+    *rendezvous_registration_started = false;
+    *rendezvous_cookie = None;
+    clear_local_relay_circuit_address(swarm, state, network, local_peer_id);
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.relay_connected = false;
+        inner.rendezvous_registered = false;
+    }
+
+    let relay_peer_id = network
+        .relay
+        .as_ref()
+        .map(|relay| relay.peer_id.to_string());
+    let relay_address = network
+        .relay
+        .as_ref()
+        .map(|relay| relay.address.to_string());
+    let _ = store.record_labor_event(
+        "relay_reservation_lost",
+        relay_peer_id.as_deref(),
+        Some("network_route"),
+        relay_address.as_deref(),
+        false,
+        Some(reason),
+        &serde_json::json!({
+            "peerId": relay_peer_id,
+            "address": relay_address,
+            "reason": reason,
+        }),
+    );
+    let _ = app.emit(
+        "p2p:connection_failed",
+        serde_json::json!({
+            "peerId": relay_peer_id,
+            "address": relay_address,
+            "reason": reason,
+        }),
+    );
+}
+
+fn ensure_relay_reservation(
+    swarm: &mut libp2p::Swarm<AgentBehaviour>,
+    app: &AppHandle,
+    state: &P2pState,
+    store: &AtpStore,
+    network: &NetworkBootstrap,
+    local_peer_id: PeerId,
+    relay_listener_started: &mut bool,
+) {
+    let Some(relay) = network.relay.as_ref() else {
+        return;
+    };
+    if *relay_listener_started || !swarm.is_connected(&relay.peer_id) {
+        return;
+    }
+
+    clear_local_relay_circuit_address(swarm, state, network, local_peer_id);
+    let mut circuit_addr = relay.address.clone();
+    circuit_addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
+    match swarm.listen_on(circuit_addr.clone()) {
+        Ok(_) => {
+            *relay_listener_started = true;
+            let peer_id = relay.peer_id.to_string();
+            let address = circuit_addr.to_string();
+            let _ = store.record_labor_event(
+                "relay_reservation_requested",
+                Some(&peer_id),
+                Some("network_route"),
+                Some(&address),
+                true,
+                None,
+                &serde_json::json!({
+                    "peerId": peer_id,
+                    "address": address,
+                }),
+            );
+        }
+        Err(error) => record_dial_failure(
+            app,
+            store,
+            "relay_reservation_failed",
+            Some(relay.peer_id),
+            Some(&relay.address),
+            format!("could not reserve relay circuit: {error}").as_str(),
+        ),
     }
 }
 

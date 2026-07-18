@@ -44,8 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     max_circuits: 512,
                     max_circuits_per_peer: 32,
                     reservation_duration: std::time::Duration::from_secs(2 * 60 * 60),
+                    reservation_rate_limiters: Vec::new(),
                     max_circuit_duration: std::time::Duration::from_secs(10 * 60),
                     max_circuit_bytes: 64 * 1024 * 1024,
+                    circuit_src_rate_limiters: Vec::new(),
                     ..relay::Config::default()
                 },
             ),
