@@ -28,12 +28,12 @@ const LEGACY_PROOF_WIRE_COMPAT: bool = true;
 pub const AUTONOMOUS_FINALITY_PROFILE: &str = "cyphes.autonomous-finality/0.1";
 pub const AUDIT_LABOR_PROFILE_VERSION: &str = "0.1";
 pub const DEFAULT_SKILL_PACK_ID: &str = "cyphes-audit-skill";
-pub const DEFAULT_SKILL_PACK_VERSION: &str = "0.4";
-pub const DEFAULT_SKILL_PACK_LABEL: &str = "CYPHES audit methodology v0.4";
+pub const DEFAULT_SKILL_PACK_VERSION: &str = "0.5";
+pub const DEFAULT_SKILL_PACK_LABEL: &str = "CYPHES audit methodology v0.5";
 pub const WORK_UNIT_CLAIM_TTL_MS: u64 = 15 * 60 * 1000;
 
 const DEFAULT_AUDIT_SKILL_TEXT: &str =
-    include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
+    include_str!("../../protocol/skills/cyphes-audit-skill.v0.5.md");
 const PARSER_FALLBACK_CREDIT_MULTIPLIER: f64 = 0.10;
 const LOW_EVIDENCE_CREDIT_MULTIPLIER: f64 = 0.20;
 const STANDARD_OUTPUT_MODEL_MULTIPLIER_CAP: f64 = 1.0;

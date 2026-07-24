@@ -5,7 +5,7 @@
   <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.0 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.0_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.1 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.1_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,12 +17,25 @@
 
 ## Download
 
-The current active release is **CYPHES v0.17.0 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.17.1 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
+
+v0.17.1 is a non-mandatory audit-quality release. It keeps the same database
+marker, `/cyphes/atp/0.15.1` labor wire, receipt format, and economics, and
+changes only what a worker reads and how it judges what it finds. Cloud-proxied
+models now receive a context budget matched to their window (48 files /
+700 KB, against 16 files / 180 KB for the local tier), and every worker now
+follows Solidity and Vyper imports plus inherited base contracts so the file
+that decides a finding is actually in context. Vyper sources are selectable at
+all for the first time. Audit skill pack v0.5 adds an Exploitability Gate that
+requires a worker to check for an existing mitigation, name the caller who can
+reach the code, compute whether a numeric bound is reachable with real values,
+read adjacent comments for documented intent, and cite evidence from the file
+it is accusing — before it may claim anything above `informational`.
 
 v0.17.0 is a non-mandatory mainnet liveness release over the existing
 `cyphes-final-testnet-v0.16.0.sqlite3` genesis ledger marker. That marker is
@@ -57,12 +70,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.17.0 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.0/CYPHES_0.17.0_aarch64.dmg)
-- [Download CYPHES v0.17.0 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.0/CYPHES_0.17.0_x64.dmg)
+- [Download CYPHES v0.17.1 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.1/CYPHES_0.17.1_aarch64.dmg)
+- [Download CYPHES v0.17.1 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.1/CYPHES_0.17.1_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.17.0 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.0/CYPHES_0.17.0_x64-setup.exe)
+- [Download CYPHES v0.17.1 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.1/CYPHES_0.17.1_x64-setup.exe)
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -331,6 +344,20 @@ Artifact Two independently returns:
   count actual active peer links rather than local/self state. Rendezvous
   discovery dials now respect peer failure cooldowns, preventing stale peer
   records from repeatedly consuming relay circuit budget.
+- v0.17.1 is a non-mandatory Mainnet audit-quality release. Repository context
+  selection is now sized per runtime class: cloud-proxied models get 48 files
+  and a 700 KB budget instead of the 16-file / 180 KB local budget, and every
+  worker resolves Solidity/Vyper imports and inherited base contracts into a
+  second fetch pass so the file that settles a finding is present. `.vy` and
+  other contract languages are selectable for the first time — previously every
+  Vyper-scoped campaign silently received no scoped source. Audit skill pack
+  v0.5 adds an Exploitability Gate: before a finding may exceed
+  `informational`, the worker must confirm no mitigation is already present,
+  name the caller who can reach it, show a numeric bound is reachable with
+  realistic values, check adjacent code and comments for documented intent, and
+  cite evidence from the file under accusation. Severity inflation and
+  "source not supplied in context" dead ends were the two dominant failure
+  modes in final-testnet output.
 - v0.17.0 is a non-mandatory Mainnet settlement-rescue release. It keeps the
   same database marker, ATP wire, receipt format, and economics, but adds an
   exact-ID recovery handshake for straggler receipts. Nodes with stale submitted

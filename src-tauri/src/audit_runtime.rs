@@ -14,11 +14,19 @@ use crate::{
     github,
 };
 
-const AUDIT_SKILL_TEXT: &str = include_str!("../../protocol/skills/cyphes-audit-skill.v0.4.md");
+const AUDIT_SKILL_TEXT: &str = include_str!("../../protocol/skills/cyphes-audit-skill.v0.5.md");
 const MAX_TREE_FILES: usize = 20_000;
 const MAX_SELECTED_FILES: usize = 16;
 const MAX_FILE_BYTES: usize = 28_000;
 const MAX_CONTEXT_BYTES: usize = 180_000;
+/// Cloud-proxied models carry context windows two orders of magnitude larger
+/// than the local tier. Feeding them the local budget was the single largest
+/// source of "source not supplied in context" dead ends on the final testnet.
+const CLOUD_MAX_SELECTED_FILES: usize = 48;
+const CLOUD_MAX_FILE_BYTES: usize = 48_000;
+const CLOUD_MAX_CONTEXT_BYTES: usize = 700_000;
+/// Cap on files pulled in purely because a seed file referenced them.
+const MAX_DEPENDENCY_FILES: usize = 24;
 const MAX_MODEL_OUTPUT_TOKENS: u32 = 6_500;
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT: &str = "You are CYPHES Audit Skill. Return exactly one valid JSON object that matches the CYPHES Cognition Proof schema. Do not include prose, markdown fences, or commentary outside JSON.";
 const STRUCTURED_OUTPUT_CONTRACT: &str = r#"
@@ -97,6 +105,31 @@ struct RepositoryContext {
 struct SelectedFile {
     path: String,
     content: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ContextBudget {
+    max_files: usize,
+    max_file_bytes: usize,
+    max_total_bytes: usize,
+}
+
+impl ContextBudget {
+    fn for_runtime(provider: &str, model: &str) -> Self {
+        if provider_class(provider, model) == "cloud-proxy" {
+            Self {
+                max_files: CLOUD_MAX_SELECTED_FILES,
+                max_file_bytes: CLOUD_MAX_FILE_BYTES,
+                max_total_bytes: CLOUD_MAX_CONTEXT_BYTES,
+            }
+        } else {
+            Self {
+                max_files: MAX_SELECTED_FILES,
+                max_file_bytes: MAX_FILE_BYTES,
+                max_total_bytes: MAX_CONTEXT_BYTES,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,7 +287,8 @@ pub async fn run_local_audit_skill(
         18,
         None,
     );
-    let context = repository_context(&client, campaign).await?;
+    let context = repository_context(&client, campaign, ContextBudget::for_runtime(provider, model))
+        .await?;
 
     emit_progress(app, campaign, work_unit, "Building model prompt", 32, None);
     let prompt = build_prompt(campaign, work_unit, &context, prior_contributions);
@@ -844,6 +878,7 @@ struct ModelOutput {
 async fn repository_context(
     client: &reqwest::Client,
     campaign: &ProtocolAuditCampaign,
+    budget: ContextBudget,
 ) -> Result<RepositoryContext, String> {
     let repository = &campaign.repository;
     let tree_url = format!(
@@ -864,16 +899,43 @@ async fn repository_context(
         .map(|entry| entry.path.clone())
         .collect::<Vec<_>>();
     let scoped_paths = scoped_paths_from_campaign(campaign);
-    let selected_paths = select_context_files(&blobs, &scoped_paths);
+    let seed_paths = select_context_files(&blobs, &scoped_paths, budget);
     let mut selected_files = Vec::new();
     let mut total_bytes = 0usize;
-    for path in selected_paths {
-        if total_bytes >= MAX_CONTEXT_BYTES {
+
+    for path in seed_paths {
+        if total_bytes >= budget.max_total_bytes || selected_files.len() >= budget.max_files {
             break;
         }
         match fetch_raw_file(client, repository, &path).await {
             Ok(content) => {
-                let content = truncate_bytes(&content, MAX_FILE_BYTES);
+                let content = truncate_bytes(&content, budget.max_file_bytes);
+                total_bytes += content.len();
+                selected_files.push(SelectedFile { path, content });
+            }
+            Err(error)
+                if error.contains("GitHub rate limit")
+                    || error.contains("GitHub paused")
+                    || error.contains("GitHub API") =>
+            {
+                return Err(error);
+            }
+            Err(_) => {}
+        }
+    }
+
+    // Second pass: pull in what the seed files actually reference. A finding
+    // about `leveragedPosition` is unresolvable without the base contract that
+    // carries its `nonReentrant` modifier, and the seed selector never had a
+    // reason to fetch it.
+    let dependency_paths = dependency_paths(&selected_files, &blobs, budget);
+    for path in dependency_paths {
+        if total_bytes >= budget.max_total_bytes || selected_files.len() >= budget.max_files {
+            break;
+        }
+        match fetch_raw_file(client, repository, &path).await {
+            Ok(content) => {
+                let content = truncate_bytes(&content, budget.max_file_bytes);
                 total_bytes += content.len();
                 selected_files.push(SelectedFile { path, content });
             }
@@ -895,17 +957,166 @@ async fn repository_context(
     })
 }
 
-fn select_context_files(blobs: &[GitTreeEntry], scoped_paths: &[String]) -> Vec<String> {
+/// Resolve files referenced by already-selected sources: Solidity/Vyper imports,
+/// inherited base contracts, and `implements:` declarations. Returns repository
+/// paths that are present in the tree and not already selected.
+fn dependency_paths(
+    selected: &[SelectedFile],
+    blobs: &[GitTreeEntry],
+    budget: ContextBudget,
+) -> Vec<String> {
+    let mut symbols: Vec<String> = Vec::new();
+    for file in selected {
+        collect_referenced_symbols(&file.content, &mut symbols);
+    }
+
+    let mut resolved: Vec<String> = Vec::new();
+    for symbol in symbols {
+        if resolved.len() >= MAX_DEPENDENCY_FILES {
+            break;
+        }
+        let Some(path) = resolve_symbol_to_path(&symbol, blobs, budget) else {
+            continue;
+        };
+        if selected.iter().any(|file| file.path == path) || resolved.contains(&path) {
+            continue;
+        }
+        resolved.push(path);
+    }
+    resolved
+}
+
+/// Pull import targets and base-contract names out of a source file. Deliberately
+/// textual: the goal is a candidate list to resolve against the tree, not a parse.
+fn collect_referenced_symbols(content: &str, out: &mut Vec<String>) {
+    for line in content.lines().take(600) {
+        let trimmed = line.trim();
+
+        // Solidity: import "x.sol";  import {A} from "x.sol";
+        // Vyper:    from x import y
+        if trimmed.starts_with("import") || trimmed.starts_with("from ") {
+            if let Some(start) = trimmed.find('"').or_else(|| trimmed.find('\'')) {
+                let quote = trimmed.as_bytes()[start] as char;
+                if let Some(end) = trimmed[start + 1..].find(quote) {
+                    let target = &trimmed[start + 1..start + 1 + end];
+                    if !target.is_empty() {
+                        out.push(target.to_string());
+                    }
+                }
+            }
+        }
+
+        // Solidity: contract X is A, B {   /   abstract contract X is A {
+        if let Some(index) = trimmed.find(" is ") {
+            let head = &trimmed[..index];
+            if head.contains("contract ") || head.contains("interface ") {
+                let tail = &trimmed[index + 4..];
+                for base in tail
+                    .trim_end_matches('{')
+                    .split(',')
+                    .map(|part| part.trim().trim_end_matches('{').trim())
+                {
+                    let name = base.split('(').next().unwrap_or(base).trim();
+                    if !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    {
+                        out.push(name.to_string());
+                    }
+                }
+            }
+        }
+
+        // Vyper: implements: ERC20
+        if let Some(rest) = trimmed.strip_prefix("implements:") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                out.push(name.to_string());
+            }
+        }
+    }
+}
+
+/// Map an import target or contract name onto a real path in the tree.
+fn resolve_symbol_to_path(
+    symbol: &str,
+    blobs: &[GitTreeEntry],
+    budget: ContextBudget,
+) -> Option<String> {
+    let symbol = symbol.trim();
+    if symbol.is_empty() {
+        return None;
+    }
+    let size_ok = |entry: &GitTreeEntry| entry.size.unwrap_or(0) <= budget.max_file_bytes as u64;
+
+    // Import path: match on the trailing path segment chain, so both
+    // "./IVault.sol" and "@openzeppelin/contracts/token/ERC20/IERC20.sol"
+    // resolve against a vendored or remapped copy when one exists.
+    if symbol.contains('.') {
+        let needle = symbol.trim_start_matches("./").trim_start_matches('/');
+        let tail = needle.rsplit('/').next().unwrap_or(needle);
+        if let Some(entry) = blobs
+            .iter()
+            .find(|entry| entry.path.ends_with(needle) && size_ok(entry) && looks_textual(&entry.path))
+            .or_else(|| {
+                blobs.iter().find(|entry| {
+                    entry
+                        .path
+                        .rsplit('/')
+                        .next()
+                        .map(|name| name == tail)
+                        .unwrap_or(false)
+                        && size_ok(entry)
+                        && looks_textual(&entry.path)
+                })
+            })
+        {
+            return Some(entry.path.clone());
+        }
+        return None;
+    }
+
+    // Bare contract name: look for <Name>.sol / <Name>.vy.
+    for extension in [".sol", ".vy"] {
+        let file_name = format!("{symbol}{extension}");
+        if let Some(entry) = blobs.iter().find(|entry| {
+            entry
+                .path
+                .rsplit('/')
+                .next()
+                .map(|name| name == file_name)
+                .unwrap_or(false)
+                && size_ok(entry)
+        }) {
+            return Some(entry.path.clone());
+        }
+    }
+    None
+}
+
+fn select_context_files(
+    blobs: &[GitTreeEntry],
+    scoped_paths: &[String],
+    budget: ContextBudget,
+) -> Vec<String> {
+    // Leave headroom so the dependency pass has somewhere to put the files the
+    // scoped source actually needs.
+    let seed_cap = if budget.max_files > MAX_SELECTED_FILES {
+        budget.max_files - MAX_DEPENDENCY_FILES.min(budget.max_files / 2)
+    } else {
+        budget.max_files
+    };
     let mut selected = Vec::new();
     for scoped_path in scoped_paths {
         for entry in blobs {
-            if selected.len() >= MAX_SELECTED_FILES {
+            if selected.len() >= seed_cap {
                 break;
             }
             if selected.iter().any(|path| path == &entry.path) {
                 continue;
             }
-            let size_ok = entry.size.unwrap_or(0) <= MAX_FILE_BYTES as u64;
+            let size_ok = entry.size.unwrap_or(0) <= budget.max_file_bytes as u64;
             let in_scope =
                 entry.path == *scoped_path || entry.path.starts_with(&format!("{scoped_path}/"));
             if size_ok && in_scope && looks_textual(&entry.path) {
@@ -914,24 +1125,27 @@ fn select_context_files(blobs: &[GitTreeEntry], scoped_paths: &[String]) -> Vec<
         }
     }
     for entry in blobs {
-        if selected.len() >= MAX_SELECTED_FILES {
+        if selected.len() >= seed_cap {
             break;
         }
         let path = entry.path.as_str();
-        let size_ok = entry.size.unwrap_or(0) <= MAX_FILE_BYTES as u64;
+        if selected.iter().any(|selected_path| selected_path == path) {
+            continue;
+        }
+        let size_ok = entry.size.unwrap_or(0) <= budget.max_file_bytes as u64;
         if size_ok && is_priority_context_file(path) {
             selected.push(path.to_string());
         }
     }
     if selected.len() < 8 {
         for entry in blobs {
-            if selected.len() >= MAX_SELECTED_FILES {
+            if selected.len() >= seed_cap {
                 break;
             }
             if selected.iter().any(|path| path == &entry.path) {
                 continue;
             }
-            let size_ok = entry.size.unwrap_or(0) <= MAX_FILE_BYTES as u64;
+            let size_ok = entry.size.unwrap_or(0) <= budget.max_file_bytes as u64;
             if size_ok && looks_textual(&entry.path) {
                 selected.push(entry.path.clone());
             }
@@ -1039,6 +1253,9 @@ fn is_priority_context_file(path: &str) -> bool {
         || lower == "foundry.toml"
         || lower == "hardhat.config.ts"
         || lower == "hardhat.config.js"
+        || lower == ".gitmodules"
+        || lower == "foundry.lock"
+        || lower == "remappings.txt"
         || lower == ".github/dependabot.yml"
         || lower.starts_with(".github/workflows/")
 }
@@ -1063,6 +1280,16 @@ fn looks_textual(path: &str) -> bool {
             | "go"
             | "py"
             | "sol"
+            // Contract languages beyond Solidity. Omitting `vy` silently
+            // starved every Curve and Yearn campaign of its scoped source.
+            | "vy"
+            | "cairo"
+            | "move"
+            | "huff"
+            | "yul"
+            | "circom"
+            | "lock"
+            | "gitmodules"
     )
 }
 
@@ -1902,10 +2129,101 @@ mod tests {
             },
         ];
 
-        let selected = select_context_files(&blobs, &["contracts/UniswapV2ERC20.sol".to_string()]);
+        let selected = select_context_files(
+            &blobs,
+            &["contracts/UniswapV2ERC20.sol".to_string()],
+            ContextBudget::for_runtime("ollama", "llama3.2:3b"),
+        );
 
         assert_eq!(selected[0], "contracts/UniswapV2ERC20.sol");
         assert!(selected.contains(&"README.md".to_string()));
+    }
+
+    #[test]
+    fn cloud_runtime_gets_a_larger_context_budget_than_local() {
+        let local = ContextBudget::for_runtime("ollama", "llama3.2:3b");
+        let cloud = ContextBudget::for_runtime("ollama", "glm-5.2:cloud");
+
+        assert_eq!(local.max_files, MAX_SELECTED_FILES);
+        assert_eq!(local.max_total_bytes, MAX_CONTEXT_BYTES);
+        assert!(cloud.max_files > local.max_files);
+        assert!(cloud.max_total_bytes > local.max_total_bytes);
+    }
+
+    #[test]
+    fn vyper_and_contract_sources_are_selectable() {
+        // Omitting `.vy` starved every Curve and Yearn campaign of its scoped source.
+        assert!(looks_textual("contracts/pools/3pool/StableSwap3Pool.vy"));
+        assert!(looks_textual("contracts/Vault.vy"));
+        assert!(looks_textual("src/Comet.sol"));
+        assert!(looks_textual(".gitmodules"));
+        assert!(!looks_textual("assets/logo.png"));
+    }
+
+    #[test]
+    fn referenced_symbols_cover_imports_and_base_contracts() {
+        let source = r#"
+pragma solidity 0.8.17;
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { IVault } from "./interfaces/IVault.sol";
+
+abstract contract FraxlendPairCore is FraxlendPairAccessControl, ERC20, ReentrancyGuard {
+    function leveragedPosition() external nonReentrant {}
+}
+"#;
+        let mut symbols = Vec::new();
+        collect_referenced_symbols(source, &mut symbols);
+
+        assert!(symbols
+            .iter()
+            .any(|s| s.ends_with("ReentrancyGuard.sol")));
+        assert!(symbols.iter().any(|s| s.ends_with("IVault.sol")));
+        assert!(symbols.iter().any(|s| s == "FraxlendPairAccessControl"));
+        assert!(symbols.iter().any(|s| s == "ERC20"));
+    }
+
+    #[test]
+    fn dependency_resolution_pulls_in_the_base_contract() {
+        let blobs = vec![
+            GitTreeEntry {
+                path: "src/contracts/FraxlendPair.sol".to_string(),
+                kind: "blob".to_string(),
+                size: Some(4_096),
+            },
+            GitTreeEntry {
+                path: "src/contracts/FraxlendPairCore.sol".to_string(),
+                kind: "blob".to_string(),
+                size: Some(8_192),
+            },
+            GitTreeEntry {
+                path: "lib/openzeppelin/contracts/security/ReentrancyGuard.sol".to_string(),
+                kind: "blob".to_string(),
+                size: Some(1_024),
+            },
+        ];
+        let selected = vec![SelectedFile {
+            path: "src/contracts/FraxlendPair.sol".to_string(),
+            content: r#"
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+contract FraxlendPair is FraxlendPairCore {
+}
+"#
+            .to_string(),
+        }];
+
+        let deps = dependency_paths(
+            &selected,
+            &blobs,
+            ContextBudget::for_runtime("ollama", "glm-5.2:cloud"),
+        );
+
+        // Both the base contract carrying `nonReentrant` and the guard itself.
+        assert!(deps.contains(&"src/contracts/FraxlendPairCore.sol".to_string()));
+        assert!(deps.contains(
+            &"lib/openzeppelin/contracts/security/ReentrancyGuard.sol".to_string()
+        ));
+        // Never re-fetch what is already in context.
+        assert!(!deps.contains(&"src/contracts/FraxlendPair.sol".to_string()));
     }
 
     #[test]
