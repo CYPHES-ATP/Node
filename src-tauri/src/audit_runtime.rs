@@ -31,35 +31,53 @@ const MAX_MODEL_OUTPUT_TOKENS: u32 = 6_500;
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT: &str = "You are CYPHES Audit Skill. Return exactly one valid JSON object that matches the CYPHES Cognition Proof schema. Do not include prose, markdown fences, or commentary outside JSON.";
 const STRUCTURED_OUTPUT_CONTRACT: &str = r#"
 # Required Cognition Proof Output
-Return exactly one JSON object with these fields:
+Return exactly one JSON object with the fields shown below.
+
+Field rules — read these before copying the shape:
+- "severity" is exactly one of: informational, low, medium, high, critical.
+  Emit a single value. Never emit a list or a joined string.
+- "status" is exactly one of: candidate, non_reportable, duplicate, invalid,
+  needs_review, needs_reproduction.
+- "title" names the specific defect and where it lives. Never emit a generic
+  label or a copy of this instruction text.
+- "impact" is required for any finding at low severity or above, and must state
+  who can reach the code, whether a mitigation is already present, and whether
+  the bad state is reachable with realistic values. Use null only for
+  informational findings.
+- "evidence" entries cite a file path from the supplied context, plus a function
+  or line where you have one, and must come from the file being accused.
+
+Shape (illustration only — do not copy these values):
 
 {
-  "summaryMarkdown": "short evidence-backed audit summary",
+  "summaryMarkdown": "Markdown notes using the headings from the skill pack, starting with the pass objective.",
   "findings": [
     {
       "id": "CYPHES-LOCAL-001",
-      "title": "finding or security lead title",
-      "severity": "critical|high|medium|low|informational",
-      "status": "candidate|non_reportable|duplicate|invalid|needs_review",
-      "impact": "impact statement or null",
-      "evidence": ["concrete file, function, line, exploit path, and reproduction evidence"],
+      "title": "withdraw() skips fee accrual when totalSupply is zero",
+      "severity": "low",
+      "status": "candidate",
+      "impact": "Reachable by any depositor when the vault is empty. No mitigation: the early return at line 214 precedes _accrue(). Bounded to one accrual period, no fund loss.",
+      "evidence": ["contracts/Vault.sol: withdraw(), line 214 - early return before _accrue()"],
       "reportable": false
     }
   ],
   "coverage": [
     {
-      "area": "files/functions/classes reviewed",
-      "status": "completed|partial|blocked|inconclusive",
-      "evidence": ["specific files, functions, invariants, commands, or reasoning checked"]
+      "area": "exploit-class matrix",
+      "status": "completed",
+      "evidence": ["contracts/Vault.sol: reentrancy, authorization, rounding reviewed"]
     }
   ],
-  "commands": ["read-only actions or reasoning steps performed"]
+  "commands": ["Traced withdraw() call path to _accrue() and compared against deposit()"]
 }
 
 Rules:
 - Use an empty findings array when no vulnerability is found.
-- Coverage must be non-empty and evidence-backed.
-- reportable:true requires concrete file/function/line, exploit path, impact, and reproduction steps.
+- Coverage must be non-empty and evidence-backed. Name the files and functions
+  you reviewed; do not restate the area label as its own evidence.
+- reportable:true requires concrete file/function/line, exploit path, impact,
+  reproduction steps, and a passing Exploitability Gate.
 - A no-issue result is valid only when coverage explains what was checked.
 - Do not invent line numbers, tools, commands, or findings.
 "#;
@@ -1875,38 +1893,63 @@ fn declared_context_window_tokens(model: &str) -> Option<u32> {
     }
 }
 
+/// Ordered model-tier table. First match wins, so more specific patterns must
+/// come first. Replaces a hand-rolled `if/else` cascade that silently paid every
+/// GLM release the 0.9 unknown-model floor — the same rate as a 3B local model —
+/// because no branch happened to mention "glm".
+///
+/// Matching is on an operator-controlled string and is therefore a
+/// classification, not a proof. See `crate::audit_labor::throughput_gated_multiplier`
+/// for the check that stops a renamed local model from claiming the top rate.
+const MODEL_TIERS: &[(&str, f64)] = &[
+    // Frontier-class, cloud-served.
+    ("minimax-m3", 10.0),
+    ("gpt-oss-120b", 10.0),
+    ("qwen-max", 10.0),
+    ("qwen3-max", 10.0),
+    ("kimi", 10.0),
+    ("claude", 10.0),
+    ("gpt-5", 10.0),
+    ("gpt-4", 10.0),
+    ("gemini", 10.0),
+    ("deepseek-r1", 10.0),
+    ("deepseek-v3", 10.0),
+    ("glm-5", 10.0),
+    ("glm-4", 10.0),
+    ("glm", 10.0),
+    ("llama-4", 10.0),
+    ("mistral-large", 10.0),
+    ("frontier", 10.0),
+    ("405b", 10.0),
+    ("120b", 10.0),
+    // Large local.
+    ("gpt-oss-20b", 3.0),
+    ("70b", 3.0),
+    ("72b", 3.0),
+    ("32b", 2.5),
+    ("34b", 2.5),
+    ("20b", 2.0),
+    ("22b", 2.0),
+    ("24b", 2.0),
+    ("14b", 1.6),
+    ("13b", 1.6),
+    ("7b", 1.0),
+    ("8b", 1.0),
+];
+
+/// Highest multiplier a model may earn without its cloud claim surviving the
+/// throughput gate. Large *local* models are legitimately slow, so throughput
+/// cannot discriminate below this line.
+pub const UNVERIFIED_CLOUD_MULTIPLIER_CEILING: f64 = 3.0;
+pub const UNKNOWN_MODEL_MULTIPLIER: f64 = 0.9;
+
 fn model_multiplier(model: &str) -> f64 {
     let lower = model.to_ascii_lowercase();
-    if lower.contains("minimax-m3")
-        || lower.contains("gpt-oss-120b")
-        || lower.contains("qwen-max")
-        || lower.contains("qwen3-max")
-        || lower.contains("kimi")
-        || lower.contains("frontier")
-        || lower.contains("claude")
-        || lower.contains("gpt-5")
-        || lower.contains("gpt-4")
-        || lower.contains("gemini")
-        || lower.contains("deepseek-r1")
-        || lower.contains("405b")
-        || lower.contains("120b")
-    {
-        10.0
-    } else if lower.contains("gpt-oss-20b") {
-        3.0
-    } else if lower.contains("70b") || lower.contains("72b") {
-        3.0
-    } else if lower.contains("32b") || lower.contains("34b") {
-        2.5
-    } else if lower.contains("20b") || lower.contains("22b") || lower.contains("24b") {
-        2.0
-    } else if lower.contains("14b") || lower.contains("13b") {
-        1.6
-    } else if lower.contains("7b") || lower.contains("8b") {
-        1.0
-    } else {
-        0.9
-    }
+    MODEL_TIERS
+        .iter()
+        .find(|(pattern, _)| lower.contains(pattern))
+        .map(|(_, multiplier)| *multiplier)
+        .unwrap_or(UNKNOWN_MODEL_MULTIPLIER)
 }
 
 fn estimated_tokens_per_second(content: &str, elapsed: Duration) -> Option<f64> {
@@ -2107,6 +2150,25 @@ mod tests {
         assert!(model_multiplier("qwen2.5-32b") > model_multiplier("qwen2.5-14b"));
         assert!(model_multiplier("oss-20b") > model_multiplier("qwen2.5-7b"));
         assert!(model_multiplier("unknown-local") < 1.0);
+    }
+
+    #[test]
+    fn glm_is_tiered_as_frontier_not_as_an_unknown_model() {
+        // Regression: no branch matched "glm", so the two highest-quality models
+        // on the final testnet were paid the 0.9 unknown-model floor — the same
+        // rate as llama3.2:3b, which produced 1% unique finding titles.
+        assert_eq!(model_multiplier("glm-5.2:cloud"), 10.0);
+        assert_eq!(model_multiplier("glm-5.1:cloud"), 10.0);
+        assert_eq!(model_multiplier("glm-4.6"), 10.0);
+        assert!(model_multiplier("glm-5.2:cloud") > model_multiplier("llama3.2:3b"));
+        assert_eq!(model_multiplier("llama3.2:3b"), UNKNOWN_MODEL_MULTIPLIER);
+    }
+
+    #[test]
+    fn specific_tier_patterns_win_over_generic_size_suffixes() {
+        // "gpt-oss-120b" must not fall through to the generic "20b" rule.
+        assert_eq!(model_multiplier("gpt-oss-120b"), 10.0);
+        assert_eq!(model_multiplier("gpt-oss-20b"), 3.0);
     }
 
     #[test]

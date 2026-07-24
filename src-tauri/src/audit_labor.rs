@@ -1,3 +1,4 @@
+use crate::audit_runtime::UNVERIFIED_CLOUD_MULTIPLIER_CEILING;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::Utc;
 use libp2p::identity;
@@ -38,6 +39,12 @@ const PARSER_FALLBACK_CREDIT_MULTIPLIER: f64 = 0.10;
 const LOW_EVIDENCE_CREDIT_MULTIPLIER: f64 = 0.20;
 const STANDARD_OUTPUT_MODEL_MULTIPLIER_CAP: f64 = 1.0;
 const EXCELLENT_OUTPUT_COVERAGE_THRESHOLD: u32 = 3;
+/// Floor for a credible datacenter-served generation rate. Measured final-testnet
+/// throughput: local 3B 15.9-16.9 tok/s, phi4-mini 5.3-5.9, gpt-oss-20b 18.2-20.2;
+/// cloud glm-5.1 38.5-40.3, minimax-m3 50.7-65.0, glm-5.2 81.2. The gap between
+/// the fastest observed local model and the slowest observed cloud model is wide,
+/// so this sits well clear of both.
+const MIN_CLOUD_TOKENS_PER_SECOND: f64 = 25.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1354,13 +1361,48 @@ fn effective_model_multiplier(
     reportable_findings: u32,
     high_quality_coverage: u32,
 ) -> f64 {
-    let model_multiplier = contribution.runtime.model_multiplier;
+    let model_multiplier = throughput_gated_multiplier(&contribution.runtime);
     if quality_multiplier < 1.0 {
         model_multiplier * quality_multiplier
     } else if qualifies_for_large_model_bonus(reportable_findings, high_quality_coverage) {
         model_multiplier
     } else {
         model_multiplier.min(STANDARD_OUTPUT_MODEL_MULTIPLIER_CAP)
+    }
+}
+
+/// A cloud-proxied model claims to be running on datacenter hardware. Datacenter
+/// inference is fast; a local 3B renamed to `minimax-m3:cloud` is not. When a
+/// contribution claims the cloud tier but reports throughput a datacenter would
+/// never produce, pay it as the large-local tier instead of the frontier tier.
+///
+/// This is a filter against trivial forgery (`ollama cp llama3.2:3b
+/// minimax-m3:cloud`), not a proof of model identity. The worker computes its own
+/// `tokens_per_second`, so a modified client can still lie. It raises the cost of
+/// cheating from one shell command to a patched binary; it does not eliminate it.
+///
+/// Deliberately one-sided: large *local* models are legitimately slower than
+/// small ones, so low throughput is not evidence against a 70B claim. Only the
+/// cloud claim is gated.
+pub fn throughput_gated_multiplier(runtime: &RuntimeDescriptor) -> f64 {
+    let declared = runtime.model_multiplier;
+    if declared <= UNVERIFIED_CLOUD_MULTIPLIER_CEILING {
+        return declared;
+    }
+    let claims_cloud = runtime
+        .provider_class
+        .as_deref()
+        .map(|class| class == "cloud-proxy")
+        .unwrap_or(false);
+    if !claims_cloud {
+        // Frontier multiplier without a cloud claim: nothing to cross-check.
+        return declared;
+    }
+    // A missing measurement is not evidence of speed. An honest client always
+    // records it, so treat absence as a failed check rather than a free pass.
+    match runtime.tokens_per_second {
+        Some(measured) if measured >= MIN_CLOUD_TOKENS_PER_SECOND => declared,
+        _ => UNVERIFIED_CLOUD_MULTIPLIER_CEILING,
     }
 }
 
@@ -2263,6 +2305,66 @@ mod tests {
                 .to_string(),
             size_bytes: 100,
         }
+    }
+
+    fn cloud_runtime(model: &str, multiplier: f64, tokens_per_second: Option<f64>) -> RuntimeDescriptor {
+        let mut runtime = RuntimeDescriptor::deterministic_fixture();
+        runtime.model = model.to_string();
+        runtime.model_multiplier = multiplier;
+        runtime.provider_class = Some("cloud-proxy".to_string());
+        runtime.tokens_per_second = tokens_per_second;
+        runtime
+    }
+
+    #[test]
+    fn genuine_cloud_throughput_keeps_the_frontier_multiplier() {
+        // Measured final-testnet rates for these exact models.
+        assert_eq!(
+            throughput_gated_multiplier(&cloud_runtime("glm-5.2:cloud", 10.0, Some(81.2))),
+            10.0
+        );
+        assert_eq!(
+            throughput_gated_multiplier(&cloud_runtime("minimax-m3:cloud", 10.0, Some(50.7))),
+            10.0
+        );
+        assert_eq!(
+            throughput_gated_multiplier(&cloud_runtime("glm-5.1:cloud", 10.0, Some(38.5))),
+            10.0
+        );
+    }
+
+    #[test]
+    fn renamed_local_model_cannot_buy_the_frontier_multiplier() {
+        // `ollama cp llama3.2:3b minimax-m3:cloud` yields the frontier tier by
+        // name but cannot fake datacenter throughput.
+        assert_eq!(
+            throughput_gated_multiplier(&cloud_runtime("minimax-m3:cloud", 10.0, Some(16.9))),
+            UNVERIFIED_CLOUD_MULTIPLIER_CEILING
+        );
+        // Omitting the measurement is not a free pass.
+        assert_eq!(
+            throughput_gated_multiplier(&cloud_runtime("glm-5.2:cloud", 10.0, None)),
+            UNVERIFIED_CLOUD_MULTIPLIER_CEILING
+        );
+    }
+
+    #[test]
+    fn slow_large_local_models_are_never_penalised_by_the_gate() {
+        // A 70B on consumer hardware is legitimately slower than a 3B, so
+        // throughput is not evidence against it. Only cloud claims are gated.
+        let mut local = RuntimeDescriptor::deterministic_fixture();
+        local.model = "llama-3.3-70b".to_string();
+        local.model_multiplier = 3.0;
+        local.provider_class = Some("local".to_string());
+        local.tokens_per_second = Some(4.2);
+        assert_eq!(throughput_gated_multiplier(&local), 3.0);
+
+        let mut slow_local = RuntimeDescriptor::deterministic_fixture();
+        slow_local.model = "phi4-mini:latest".to_string();
+        slow_local.model_multiplier = 0.9;
+        slow_local.provider_class = Some("local".to_string());
+        slow_local.tokens_per_second = Some(5.3);
+        assert_eq!(throughput_gated_multiplier(&slow_local), 0.9);
     }
 
     #[test]
