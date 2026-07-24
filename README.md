@@ -5,7 +5,7 @@
   <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.1 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.1_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.2 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.2_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,12 +17,24 @@
 
 ## Download
 
-The current active release is **CYPHES v0.17.1 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.17.2 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
+
+v0.17.2 is a non-mandatory economic-integrity release. It corrects a model
+scoring defect, closes a credit-inflation path, and ships a commit-pinned
+benchmark set. The database marker, `/cyphes/atp/0.15.1` labor wire, and receipt
+format are unchanged; model economics remain forward-only, so no historical ATP
+is recomputed. GLM releases were previously matched by no tier rule and were
+credited at the `0.9x` unknown-model floor — the same rate as a 3B local model.
+Frontier multipliers on cloud-proxied runtimes are now gated on measured
+throughput, so relabelling a small local model no longer buys the top tier.
+`kimi-k3` takes a reserved `50.0x` tier. A new commit-pinned benchmark set of 19
+diff-active repositories makes model comparison reproducible instead of
+anecdotal.
 
 v0.17.1 is a non-mandatory audit-quality release. It keeps the same database
 marker, `/cyphes/atp/0.15.1` labor wire, receipt format, and economics, and
@@ -70,12 +82,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.17.1 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.1/CYPHES_0.17.1_aarch64.dmg)
-- [Download CYPHES v0.17.1 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.1/CYPHES_0.17.1_x64.dmg)
+- [Download CYPHES v0.17.2 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.2/CYPHES_0.17.2_aarch64.dmg)
+- [Download CYPHES v0.17.2 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.2/CYPHES_0.17.2_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.17.1 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.1/CYPHES_0.17.1_x64-setup.exe)
+- [Download CYPHES v0.17.2 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.2/CYPHES_0.17.2_x64-setup.exe)
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -113,9 +125,11 @@ runtime receipt, so v0.17.0 does not rewrite or recompute older ATP allocations.
 
 | Model or declared tier | New receipt multiplier |
 | --- | ---: |
+| `kimi-k3` | `50.0x` |
 | `minimax-m3` | `10.0x` |
 | `gpt-oss-120b` | `10.0x` |
-| `kimi`, `qwen-max`, frontier/cloud labels | `10.0x` |
+| `glm-4` / `glm-5` and later | `10.0x` |
+| `kimi` (pre-K3), `qwen-max`, `claude`, `gpt-4`/`gpt-5`, `gemini`, `deepseek`, `llama-4`, `mistral-large`, frontier/cloud labels | `10.0x` |
 | `gpt-oss-20b` | `3.0x` |
 | `70b` / `72b` local models | `3.0x` |
 | `32b` / `34b` local models | `2.5x` |
@@ -123,6 +137,15 @@ runtime receipt, so v0.17.0 does not rewrite or recompute older ATP allocations.
 | `13b` / `14b` local models | `1.6x` |
 | `7b` / `8b` local models | `1.0x` |
 | Unknown small/local models | `0.9x` |
+
+Any multiplier above `3.0x` on a cloud-proxied runtime is gated on measured
+throughput. A contribution that declares the cloud tier but reports fewer than
+25 tokens/sec — or omits the measurement entirely — is credited at `3.0x`, the
+large-local ceiling. The gate is deliberately one-sided: large *local* models
+are legitimately slower than small ones, so low throughput is never held against
+a local claim. This raises the cost of relabelling a small local model from one
+shell command to a patched binary. Model identity is not cryptographically
+provable, so this is a filter, not a proof.
 
 Parser fallback still earns the deterministic `0.10x` proof-quality tier, and
 low-evidence structured coverage earns the `0.20x` proof-quality tier. Strong
@@ -344,6 +367,20 @@ Artifact Two independently returns:
   count actual active peer links rather than local/self state. Rendezvous
   discovery dials now respect peer failure cooldowns, preventing stale peer
   records from repeatedly consuming relay circuit budget.
+- v0.17.2 is a non-mandatory Mainnet economic-integrity release. `model_multiplier`
+  was an if/else cascade with no branch matching `glm`, so every GLM release fell
+  through to the `0.9x` unknown-model floor. Across the final testnet those models
+  produced 5.02 and 3.75 findings per pass at 56% and 53% unique titles, while the
+  model taking 54% of all issued ATP produced 0.89 per pass at 1.2% unique. The
+  cascade is now an ordered tier table, so adding a model is a data change and
+  specific patterns provably beat generic size suffixes. Multipliers above `3.0x`
+  on a cloud-proxied runtime are gated on measured tokens/sec; a missing
+  measurement fails the gate rather than passing it. `kimi-k3` holds a reserved
+  `50.0x` tier that the bare `kimi` pattern cannot reach. Adds
+  `protocol/targets/benchmark-set.v1.json`: 19 commit-pinned, diff-active
+  repositories with a required full SHA, so a model comparison audits identical
+  code on every run. Of 71 repositories audited during the final testnet, 52 never
+  moved their pinned commit — 1,741 of 2,354 campaigns re-audited frozen code.
 - v0.17.1 is a non-mandatory Mainnet audit-quality release. Repository context
   selection is now sized per runtime class: cloud-proxied models get 48 files
   and a 700 KB budget instead of the 16-file / 180 KB local budget, and every

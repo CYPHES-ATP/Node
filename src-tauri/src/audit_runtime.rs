@@ -1308,6 +1308,7 @@ fn looks_textual(path: &str) -> bool {
             | "circom"
             | "lock"
             | "gitmodules"
+            | "rst"
     )
 }
 
@@ -1902,6 +1903,9 @@ fn declared_context_window_tokens(model: &str) -> Option<u32> {
 /// classification, not a proof. See `crate::audit_labor::throughput_gated_multiplier`
 /// for the check that stops a renamed local model from claiming the top rate.
 const MODEL_TIERS: &[(&str, f64)] = &[
+    // Reserved top tier. Matched on the exact family so the bare "kimi" pattern
+    // below cannot reach it.
+    ("kimi-k3", 50.0),
     // Frontier-class, cloud-served.
     ("minimax-m3", 10.0),
     ("gpt-oss-120b", 10.0),
@@ -2169,6 +2173,22 @@ mod tests {
         // "gpt-oss-120b" must not fall through to the generic "20b" rule.
         assert_eq!(model_multiplier("gpt-oss-120b"), 10.0);
         assert_eq!(model_multiplier("gpt-oss-20b"), 3.0);
+    }
+
+    #[test]
+    fn kimi_k3_holds_the_reserved_top_tier_without_widening_it() {
+        assert_eq!(model_multiplier("kimi-k3"), 50.0);
+        // The bare "kimi" pattern must not reach the reserved tier, or every
+        // past and future Kimi release inherits 50x by accident.
+        assert_eq!(model_multiplier("kimi-k2"), 10.0);
+        assert_eq!(model_multiplier("moonshot-kimi"), 10.0);
+    }
+
+    #[test]
+    fn the_reserved_top_tier_is_still_subject_to_the_throughput_gate() {
+        // 50x makes name-based classification the highest-value target in the
+        // system. It must not be reachable without a surviving cloud claim.
+        assert!(model_multiplier("kimi-k3") > UNVERIFIED_CLOUD_MULTIPLIER_CEILING);
     }
 
     #[test]

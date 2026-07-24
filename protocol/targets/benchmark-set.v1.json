@@ -1,0 +1,201 @@
+{
+  "profile": "cyphes.benchmark-set/1.0",
+  "version": "1.0",
+  "label": "CYPHES model benchmark set v1",
+  "purpose": "A fixed, commit-pinned campaign set for comparing models on identical work. Every target is a repository whose pinned commit moved at least once during the final testnet, so findings reflect current code rather than a frozen snapshot re-audited hundreds of times.",
+  "policy": "Commits are pinned and MUST NOT be resolved to HEAD at seed time. A benchmark run that resolves HEAD is not comparable to any other run.",
+  "selection": "Derived from final-testnet ledger analysis: of 71 audited repositories, 52 never moved their pinned commit across 12 epochs (1,741 of 2,354 campaigns re-audited frozen code). These 19 are the commit-diff-watch active set.",
+  "workUnitsPerCampaign": 7,
+  "targets": [
+    {
+      "benchmarkId": "bench-01-smartcontractkit-chainlink",
+      "protocolName": "Chainlink",
+      "repoFullName": "smartcontractkit/chainlink",
+      "repoUrl": "https://github.com/smartcontractkit/chainlink",
+      "commitSha": "9c7528bfd4f9ec7f46b997829de6c7c2c1bffe2e",
+      "scopePath": "contracts/src/v0.8/shared",
+      "category": "Oracle",
+      "observedCommits": 24
+    },
+    {
+      "benchmarkId": "bench-02-ethereum-optimism-optimism",
+      "protocolName": "Optimism Bedrock",
+      "repoFullName": "ethereum-optimism/optimism",
+      "repoUrl": "https://github.com/ethereum-optimism/optimism",
+      "commitSha": "fcaab9451e5318265938b38035b19b2dfc01897c",
+      "scopePath": "repository root",
+      "category": "L2",
+      "observedCommits": 14
+    },
+    {
+      "benchmarkId": "bench-03-sushi-labs-sushiswap",
+      "protocolName": "Sushi",
+      "repoFullName": "sushi-labs/sushiswap",
+      "repoUrl": "https://github.com/sushi-labs/sushiswap",
+      "commitSha": "cee3011ede821c7584ba8460786b4f11f4f46fbe",
+      "scopePath": "repository root",
+      "category": "DEX",
+      "observedCommits": 13
+    },
+    {
+      "benchmarkId": "bench-04-ethereum-execution-specs",
+      "protocolName": "Ethereum Execution Specs",
+      "repoFullName": "ethereum/execution-specs",
+      "repoUrl": "https://github.com/ethereum/execution-specs",
+      "commitSha": "3c15c23e7de8f59ebb2a9d22ecc11f0c1f705a98",
+      "scopePath": "repository root",
+      "category": "Core Protocol",
+      "observedCommits": 12
+    },
+    {
+      "benchmarkId": "bench-05-paradigmxyz-reth",
+      "protocolName": "Reth",
+      "repoFullName": "paradigmxyz/reth",
+      "repoUrl": "https://github.com/paradigmxyz/reth",
+      "commitSha": "f3a9130f3627fd3cc050fd27c1199aa63a04e594",
+      "scopePath": "repository root",
+      "category": "Client",
+      "observedCommits": 11
+    },
+    {
+      "benchmarkId": "bench-06-argotorg-solidity",
+      "protocolName": "Solidity",
+      "repoFullName": "argotorg/solidity",
+      "repoUrl": "https://github.com/argotorg/solidity",
+      "commitSha": "96bdc54854a16664ac9dde32862c733ee419c89c",
+      "scopePath": "repository root",
+      "category": "Compiler",
+      "observedCommits": 9
+    },
+    {
+      "benchmarkId": "bench-07-wormhole-foundation-wormhole",
+      "protocolName": "Wormhole",
+      "repoFullName": "wormhole-foundation/wormhole",
+      "repoUrl": "https://github.com/wormhole-foundation/wormhole",
+      "commitSha": "738e4c9a0481ce9fe97aea0627d155c6a9ece381",
+      "scopePath": "repository root",
+      "category": "Bridge",
+      "observedCommits": 9
+    },
+    {
+      "benchmarkId": "bench-08-openzeppelin-openzeppelin-contracts",
+      "protocolName": "OpenZeppelin Contracts",
+      "repoFullName": "OpenZeppelin/openzeppelin-contracts",
+      "repoUrl": "https://github.com/OpenZeppelin/openzeppelin-contracts",
+      "commitSha": "66611cac96ac3ec652497cb847d4343f8d7f400d",
+      "scopePath": "contracts/access/AccessControl.sol",
+      "category": "Library",
+      "observedCommits": 8
+    },
+    {
+      "benchmarkId": "bench-09-cowprotocol-contracts",
+      "protocolName": "CoW Protocol",
+      "repoFullName": "cowprotocol/contracts",
+      "repoUrl": "https://github.com/cowprotocol/contracts",
+      "commitSha": "acb95d9167abc97a87aea748be7dc06f1017396c",
+      "scopePath": "repository root",
+      "category": "DEX",
+      "observedCommits": 4
+    },
+    {
+      "benchmarkId": "bench-10-foundry-rs-forge-std",
+      "protocolName": "Forge Std",
+      "repoFullName": "foundry-rs/forge-std",
+      "repoUrl": "https://github.com/foundry-rs/forge-std",
+      "commitSha": "6e8c4a92c9a8b31c1b0f0c39296d1fa4695c7df8",
+      "scopePath": "repository root",
+      "category": "Tooling",
+      "observedCommits": 4
+    },
+    {
+      "benchmarkId": "bench-11-umaprotocol-protocol",
+      "protocolName": "UMA",
+      "repoFullName": "UMAprotocol/protocol",
+      "repoUrl": "https://github.com/UMAprotocol/protocol",
+      "commitSha": "c6ac81a699f671c4b553134e6f9852cc47e8195b",
+      "scopePath": "packages/core/contracts/data-verification-mechanism/implementation/Voting.sol",
+      "category": "Oracle",
+      "observedCommits": 4
+    },
+    {
+      "benchmarkId": "bench-12-venusprotocol-venus-protocol",
+      "protocolName": "Venus",
+      "repoFullName": "VenusProtocol/venus-protocol",
+      "repoUrl": "https://github.com/VenusProtocol/venus-protocol",
+      "commitSha": "2ef5ebeff8062bbc8b6cfcda67c2c176299373c0",
+      "scopePath": "contracts/Tokens/VToken.sol",
+      "category": "Lending",
+      "observedCommits": 4
+    },
+    {
+      "benchmarkId": "bench-13-sablier-labs-evm-monorepo",
+      "protocolName": "Sablier V2",
+      "repoFullName": "sablier-labs/evm-monorepo",
+      "repoUrl": "https://github.com/sablier-labs/evm-monorepo",
+      "commitSha": "ccc9a92c4c18d8fd2cba9842d73cd58c4f3a53be",
+      "scopePath": "repository root",
+      "category": "Payments",
+      "observedCommits": 3
+    },
+    {
+      "benchmarkId": "bench-14-morpho-org-morpho-blue",
+      "protocolName": "Morpho Blue",
+      "repoFullName": "morpho-org/morpho-blue",
+      "repoUrl": "https://github.com/morpho-org/morpho-blue",
+      "commitSha": "3085651a79553bbabbfd8be309c262dab45b686e",
+      "scopePath": "src/libraries/MarketParamsLib.sol",
+      "category": "Lending",
+      "observedCommits": 3
+    },
+    {
+      "benchmarkId": "bench-15-ourzora-zora-protocol",
+      "protocolName": "Zora",
+      "repoFullName": "ourzora/zora-protocol",
+      "repoUrl": "https://github.com/ourzora/zora-protocol",
+      "commitSha": "5f2aebad34f77990345b2a77f9a1170e39e7b1dc",
+      "scopePath": "packages/protocol-contracts/src/market/ZoraV3.sol",
+      "category": "NFT",
+      "observedCommits": 3
+    },
+    {
+      "benchmarkId": "bench-16-lidofinance-core",
+      "protocolName": "Lido",
+      "repoFullName": "lidofinance/core",
+      "repoUrl": "https://github.com/lidofinance/core",
+      "commitSha": "17005714f151e5502c559932319a3f2f74ac2436",
+      "scopePath": "contracts/0.8.9/StETH.sol",
+      "category": "Liquid Staking",
+      "observedCommits": 2
+    },
+    {
+      "benchmarkId": "bench-17-graphprotocol-contracts",
+      "protocolName": "The Graph",
+      "repoFullName": "graphprotocol/contracts",
+      "repoUrl": "https://github.com/graphprotocol/contracts",
+      "commitSha": "feea7ce35559cf6d78fa5cb98e941947d782bbef",
+      "scopePath": "contracts/staking/Staking.sol",
+      "category": "Indexing",
+      "observedCommits": 2
+    },
+    {
+      "benchmarkId": "bench-18-across-protocol-contracts",
+      "protocolName": "Across",
+      "repoFullName": "across-protocol/contracts",
+      "repoUrl": "https://github.com/across-protocol/contracts",
+      "commitSha": "fed107d0dd55d47ebd7d20eb6b231415e1de837b",
+      "scopePath": "contracts/HubPool.sol",
+      "category": "Bridge",
+      "observedCommits": 2
+    },
+    {
+      "benchmarkId": "bench-19-aragon-osx",
+      "protocolName": "Aragon OSx",
+      "repoFullName": "aragon/osx",
+      "repoUrl": "https://github.com/aragon/osx",
+      "commitSha": "daf4fbb06b89ab0a05516bccb70b625a1a38303b",
+      "scopePath": "packages/contracts/src/framework/plugin/repo/PluginRepo.sol",
+      "category": "Governance",
+      "observedCommits": 2
+    }
+  ]
+}

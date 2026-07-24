@@ -182,6 +182,43 @@ pub async fn list_guardian_targets() -> Result<Vec<GuardianTarget>, String> {
     Ok(index.targets)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct BenchmarkSet {
+    targets: Vec<BenchmarkTarget>,
+}
+
+/// A commit-pinned target used to compare models on identical work.
+///
+/// Distinct from `GuardianTarget` on purpose: `commit_sha` is required, not
+/// optional, so it is structurally impossible to seed a benchmark campaign
+/// against a moving HEAD. A run that resolves HEAD is not comparable to any
+/// other run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BenchmarkTarget {
+    pub benchmark_id: String,
+    pub protocol_name: String,
+    pub repo_full_name: String,
+    pub repo_url: String,
+    pub commit_sha: String,
+    pub scope_path: String,
+    #[serde(default)]
+    pub category: String,
+    /// Distinct pinned commits observed for this repository across the final
+    /// testnet. Every entry is > 1, which is what makes it benchmark-worthy.
+    #[serde(default)]
+    pub observed_commits: u32,
+}
+
+#[tauri::command]
+pub async fn list_benchmark_targets() -> Result<Vec<BenchmarkTarget>, String> {
+    let set: BenchmarkSet = serde_json::from_str(include_str!(
+        "../../protocol/targets/benchmark-set.v1.json"
+    ))
+    .map_err(|error| format!("invalid benchmark set: {error}"))?;
+    Ok(set.targets)
+}
+
 #[tauri::command]
 pub async fn list_local_model_providers() -> Result<Vec<LocalModelList>, String> {
     Ok(local_model_providers())
@@ -1481,6 +1518,7 @@ pub async fn get_peers(state: State<'_, P2pState>) -> Result<Vec<PeerInfo>, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn guardian_target_index_is_valid_and_honest() {
@@ -1501,6 +1539,50 @@ mod tests {
             assert!(target.scope_text.contains("No repository writes"));
             assert!(!target.audit_brief.to_lowercase().contains("immunefi"));
             assert!(target.audit_brief.contains("Do not submit externally"));
+        }
+    }
+
+    #[test]
+    fn benchmark_set_is_pinned_and_comparable() {
+        let set: BenchmarkSet =
+            serde_json::from_str(include_str!("../../protocol/targets/benchmark-set.v1.json"))
+                .expect("benchmark set should parse");
+
+        assert_eq!(set.targets.len(), 19);
+
+        let mut ids = HashSet::new();
+        let mut repos = HashSet::new();
+        for target in &set.targets {
+            // A benchmark is only comparable if every run audits identical code.
+            // An unpinned or short SHA silently turns the control into a variable.
+            assert_eq!(
+                target.commit_sha.len(),
+                40,
+                "{} must pin a full commit SHA",
+                target.benchmark_id
+            );
+            assert!(
+                target
+                    .commit_sha
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+                "{} SHA must be lowercase hex",
+                target.benchmark_id
+            );
+            assert!(target.repo_url.starts_with("https://github.com/"));
+            assert!(target.repo_url.ends_with(&target.repo_full_name));
+            assert!(!target.scope_path.trim().is_empty());
+            assert!(!target.category.trim().is_empty());
+            // Selection criterion: the repository's pinned commit actually moved
+            // during the final testnet. Frozen repos re-audited hundreds of times
+            // measure nothing.
+            assert!(
+                target.observed_commits > 1,
+                "{} is not commit-diff-active",
+                target.benchmark_id
+            );
+            assert!(ids.insert(target.benchmark_id.clone()), "duplicate benchmark id");
+            assert!(repos.insert(target.repo_full_name.clone()), "duplicate repository");
         }
     }
 }
