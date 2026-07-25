@@ -5,7 +5,7 @@
   <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.2 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.2_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.3 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.3_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,12 +17,21 @@
 
 ## Download
 
-The current active release is **CYPHES v0.17.2 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.17.3 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
+
+v0.17.3 is a non-mandatory headless-worker release. A node can now run with no
+display, no webview, and no Tauri runtime — the supported path for WSL2,
+servers, and any host without a desktop session. Until now every node required a
+rendered webview to do any work at all: the labor loop lived in the frontend on
+a timer, and the P2P node was only ever started from the cockpit, so a headless
+host would start, fail to composite a webview, and idle forever without ever
+connecting to the relay. `RUST_LOG` also works for the first time; the app
+previously had no logging framework at all. See **Headless nodes** below.
 
 v0.17.2 is a non-mandatory economic-integrity release. It corrects a model
 scoring defect, closes a credit-inflation path, and ships a commit-pinned
@@ -82,17 +91,52 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.17.2 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.2/CYPHES_0.17.2_aarch64.dmg)
-- [Download CYPHES v0.17.2 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.2/CYPHES_0.17.2_x64.dmg)
+- [Download CYPHES v0.17.3 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.3/CYPHES_0.17.3_aarch64.dmg)
+- [Download CYPHES v0.17.3 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.3/CYPHES_0.17.3_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.17.2 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.2/CYPHES_0.17.2_x64-setup.exe)
+- [Download CYPHES v0.17.3 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.3/CYPHES_0.17.3_x64-setup.exe)
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
 confirm **Open**. The Windows x64 setup build is unsigned. Linux users should
 run from source for now.
+
+### Headless nodes
+
+As of v0.17.3 a node can run with no display, no webview, and no Tauri runtime.
+This is the supported path for WSL2, servers, and any host without a desktop
+session, where the GUI build would previously start, fail to composite a
+webview, and then idle forever without connecting to the relay.
+
+```bash
+CYPHES_HEADLESS=1 \
+CYPHES_CONTRIBUTE=1 \
+CYPHES_CONTRIBUTE_PROVIDER=ollama \
+CYPHES_CONTRIBUTE_MODEL=glm-5.2:cloud \
+RUST_LOG=cyphes_desktop_lib=info \
+./cyphes-desktop
+```
+
+`--headless` works in place of `CYPHES_HEADLESS=1`. The node logs
+`[HEADLESS] node started` once the swarm is up, then `[CONTRIBUTE]` lines per
+tick, and exits cleanly on SIGTERM so systemd can supervise it.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CYPHES_HEADLESS` | unset | Run with no UI |
+| `CYPHES_CONTRIBUTE` | `0` | Claim and run work units. Unset means verifier-only |
+| `CYPHES_CONTRIBUTE_LOOP` | `true` | `false` runs a single tick and exits, for cron |
+| `CYPHES_CONTRIBUTE_PROVIDER` | `ollama` | `ollama` or `lmstudio` |
+| `CYPHES_CONTRIBUTE_MODEL` | unset | Required to contribute; without it the node stays verifier-only |
+| `CYPHES_CONTRIBUTE_MAX_RUNTIME_SECONDS` | `1800` | Per-work-unit inference timeout |
+| `CYPHES_CONTRIBUTE_MAX_DAILY_UNITS` | `500` | Daily work unit throttle; `0` disables |
+| `RUST_LOG` | `cyphes_desktop_lib=info` | Standard `tracing` filter |
+
+Verifier-only is the default and is deliberately useful on its own: network
+settlement stalls when no independent verifier is online, and a verifier node
+spends no inference budget.
 
 ## Mainnet Genesis Archive
 
@@ -367,6 +411,17 @@ Artifact Two independently returns:
   count actual active peer links rather than local/self state. Rendezvous
   discovery dials now respect peer failure cooldowns, preventing stale peer
   records from repeatedly consuming relay circuit budget.
+- v0.17.3 is a non-mandatory Mainnet headless-worker release. `CYPHES_HEADLESS=1`
+  (or `--headless`) branches before Tauri is constructed, because building the
+  Tauri runtime initialises GTK and requires a display. The headless path builds
+  the same store and P2P state the cockpit manages, starts the same swarm, and
+  drives the same tick, with the same ordering and backpressure gates: verify
+  first, refuse to claim while the local verification pool is dirty, then claim
+  and run one unit per tick. Verification is deliberately the default duty and
+  costs no inference. GUI and headless share one implementation of claim, run,
+  and verify, so the two cannot drift. Adds `tracing`/`RUST_LOG` support, which
+  the app had never had, and clean SIGTERM shutdown for systemd. Campaign seeding
+  is not yet available headless and remains a cockpit duty.
 - v0.17.2 is a non-mandatory Mainnet economic-integrity release. `model_multiplier`
   was an if/else cascade with no branch matching `glm`, so every GLM release fell
   through to the `0.9x` unknown-model floor. Across the final testnet those models

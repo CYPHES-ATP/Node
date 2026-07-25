@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use crate::events::EventSink;
 
 use crate::{
     audit_labor::{
@@ -282,7 +282,7 @@ pub async fn list_local_models(provider: &str) -> LocalModelList {
 }
 
 pub async fn run_local_audit_skill(
-    app: &AppHandle,
+    app: &EventSink,
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
     provider: &str,
@@ -531,7 +531,7 @@ fn client() -> Result<reqwest::Client, String> {
 }
 
 fn emit_progress(
-    app: &AppHandle,
+    app: &EventSink,
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
     phase: &str,
@@ -586,7 +586,7 @@ async fn list_ollama_models(endpoint: &str) -> Result<Vec<String>, String> {
 }
 
 async fn run_openai_compatible_chat(
-    app: &AppHandle,
+    app: &EventSink,
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
     client: &reqwest::Client,
@@ -688,7 +688,7 @@ async fn run_openai_compatible_chat(
 }
 
 async fn run_ollama_chat(
-    app: &AppHandle,
+    app: &EventSink,
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
     client: &reqwest::Client,
@@ -848,7 +848,7 @@ fn handle_ollama_stream_line(
 }
 
 fn maybe_emit_stream_progress(
-    app: &AppHandle,
+    app: &EventSink,
     campaign: &ProtocolAuditCampaign,
     work_unit: &AuditWorkUnit,
     content: &str,

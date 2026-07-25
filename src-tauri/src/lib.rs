@@ -4,6 +4,9 @@ pub mod audit_profile;
 mod audit_runtime;
 mod bundle;
 mod commands;
+mod autonomous;
+mod events;
+mod headless;
 mod github;
 mod p2p;
 mod state;
@@ -78,6 +81,18 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Branch before touching Tauri. Building the Tauri runtime initialises GTK,
+    // which requires a display; on a WSL2 or server node that is precisely what
+    // is unavailable, and the process would otherwise start and then idle
+    // forever with no window, no relay, and no work.
+    if headless::requested() {
+        if let Err(error) = headless::run() {
+            eprintln!("[HEADLESS] fatal: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let store = AtpStore::open_default().expect("failed to initialize ATP database");
     tauri::Builder::default()
         .manage(P2pState::default())

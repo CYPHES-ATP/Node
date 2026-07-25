@@ -14,7 +14,7 @@ use libp2p::{
     tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use crate::events::EventSink;
 use tokio::{select, sync::mpsc, time::MissedTickBehavior};
 
 use crate::{
@@ -639,7 +639,7 @@ pub fn load_or_create_identity() -> Result<identity::Keypair, String> {
 }
 
 pub async fn spawn_swarm(
-    app: AppHandle,
+    app: EventSink,
     state: P2pState,
     store: AtpStore,
     keypair: identity::Keypair,
@@ -891,7 +891,7 @@ pub async fn spawn_swarm(
 fn handle_swarm_event(
     event: SwarmEvent<AgentBehaviourEvent>,
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -2088,7 +2088,7 @@ fn handle_swarm_event(
 #[allow(clippy::too_many_arguments)]
 fn maybe_attest(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -2163,7 +2163,7 @@ fn maybe_attest(
     }
 }
 
-fn emit_bundle_export(app: &AppHandle, store: &AtpStore, transaction_id: &str) {
+fn emit_bundle_export(app: &EventSink, store: &AtpStore, transaction_id: &str) {
     match export_receipt_bundle(store, transaction_id) {
         Ok(path) => {
             let _ = app.emit(
@@ -2186,7 +2186,7 @@ fn emit_bundle_export(app: &AppHandle, store: &AtpStore, transaction_id: &str) {
 
 fn on_peer_connected(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     local_agent_id: &str,
@@ -2222,7 +2222,7 @@ fn on_peer_connected(
 
 fn sync_audit_labor_network(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -2302,7 +2302,7 @@ fn sync_audit_labor_network(
 #[allow(clippy::too_many_arguments)]
 fn recover_verifier_liveness_if_stale(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     local_agent_id: &str,
@@ -2363,7 +2363,7 @@ fn recover_verifier_liveness_if_stale(
 
 fn handle_labor_inventory_request(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -2667,7 +2667,7 @@ fn build_labor_object_bundle(store: &AtpStore, request: LaborObjectRequest) -> L
 }
 
 fn ingest_labor_object_bundle(
-    app: &AppHandle,
+    app: &EventSink,
     store: &AtpStore,
     peer_id: Option<&str>,
     bundle: LaborObjectBundle,
@@ -2931,7 +2931,7 @@ fn record_work_unit_claim_for_sync(
     }
 }
 
-fn retry_pending_labor_objects(app: &AppHandle, store: &AtpStore) {
+fn retry_pending_labor_objects(app: &EventSink, store: &AtpStore) {
     let mut settled_total = 0usize;
     let retry_at_ms = now_millis();
     for _ in 0..PENDING_LABOR_RETRY_PASSES {
@@ -3135,7 +3135,7 @@ fn request_labor_objects_from_peer(
 
 fn maybe_rescue_pending_settlement(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     local_agent_id: &str,
@@ -3246,7 +3246,7 @@ fn maybe_rescue_pending_settlement(
 #[allow(clippy::too_many_arguments)]
 fn handle_settlement_rescue_request(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -3343,7 +3343,7 @@ fn handle_settlement_rescue_request(
 
 fn handle_settlement_rescue_response(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     peer_id: PeerId,
@@ -3442,7 +3442,7 @@ fn settlement_status_counts(
 
 fn maybe_repair_stale_receipts(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     last_stale_receipt_repair_ms: &mut u64,
@@ -3535,7 +3535,7 @@ fn maybe_repair_stale_receipts(
 
 fn verify_network_contributions(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -3572,7 +3572,7 @@ fn verify_network_contributions(
 
 fn verify_network_contributions_by_id(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -3603,7 +3603,7 @@ fn verify_network_contributions_by_id(
 
 fn issue_network_verifications_for_candidates(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
@@ -4273,7 +4273,7 @@ fn infrastructure_activity_is_stale(state: &P2pState) -> bool {
 }
 
 fn record_dial_failure(
-    app: &AppHandle,
+    app: &EventSink,
     store: &AtpStore,
     event_kind: &str,
     peer_id: Option<PeerId>,
@@ -4307,7 +4307,7 @@ fn record_dial_failure(
 
 fn dial_with_telemetry(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     store: &AtpStore,
     event_kind: &str,
     peer_id: Option<PeerId>,
@@ -4358,7 +4358,7 @@ fn clear_local_relay_circuit_address(
 #[allow(clippy::too_many_arguments)]
 fn lose_relay_reservation(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     network: &NetworkBootstrap,
@@ -4413,7 +4413,7 @@ fn lose_relay_reservation(
 
 fn ensure_relay_reservation(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     network: &NetworkBootstrap,
@@ -4493,7 +4493,7 @@ fn ensure_relay_reservation(
 
 fn ensure_infrastructure_connections(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
     network: &NetworkBootstrap,
@@ -4692,7 +4692,7 @@ fn route_score(address: &Multiaddr) -> u8 {
 
 fn register_rendezvous(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
-    app: &AppHandle,
+    app: &EventSink,
     target: Option<&InfrastructureTarget>,
     namespace: &rendezvous::Namespace,
 ) -> bool {

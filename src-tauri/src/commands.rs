@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use crate::events::EventSink;
+use tauri::{AppHandle, State};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -271,6 +272,7 @@ pub async fn start_node(
     state: State<'_, P2pState>,
     store: State<'_, AtpStore>,
 ) -> Result<StartNodeResponse, String> {
+    let app = EventSink::tauri(app);
     {
         let inner = state.inner.lock().map_err(|error| error.to_string())?;
         if inner.started {
@@ -391,6 +393,7 @@ pub async fn create_protocol_campaign(
     store: State<'_, AtpStore>,
     request: ProtocolCampaignRequest,
 ) -> Result<ProtocolAuditCampaign, String> {
+    let app = EventSink::tauri(app);
     if request.repository.is_private {
         return Err("Private repositories are not supported".to_string());
     }
@@ -443,6 +446,7 @@ pub async fn record_campaign_contribution(
     work_unit_id: String,
     notes_markdown: String,
 ) -> Result<NodeContribution, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     let campaign = snapshot.campaign.clone();
@@ -520,6 +524,7 @@ pub async fn run_campaign_audit_skill(
     provider: String,
     model: String,
 ) -> Result<NodeContribution, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     let campaign = snapshot.campaign.clone();
@@ -576,10 +581,29 @@ pub async fn claim_campaign_work_unit(
     campaign_id: String,
     work_unit_id: String,
 ) -> Result<AuditWorkUnitClaim, String> {
-    let (keypair, sender) = node_runtime(&state)?;
+    claim_work_unit_headless(
+        &EventSink::tauri(app),
+        &state,
+        &store,
+        &campaign_id,
+        &work_unit_id,
+    )
+    .await
+}
+
+/// Claim a work unit. Shared by the cockpit command above and the headless
+/// autonomous loop so the two can never drift on claim gating.
+pub async fn claim_work_unit_headless(
+    app: &EventSink,
+    state: &P2pState,
+    store: &AtpStore,
+    campaign_id: &str,
+    work_unit_id: &str,
+) -> Result<AuditWorkUnitClaim, String> {
+    let (keypair, sender) = node_runtime(state)?;
     let worker_agent_id = agent_id(&keypair.public());
-    ensure_verification_pool_clear(&store, &worker_agent_id)?;
-    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    ensure_verification_pool_clear(store, &worker_agent_id)?;
+    let snapshot = store.campaign_report_snapshot(campaign_id)?;
     let work_unit = snapshot
         .work_units
         .iter()
@@ -612,10 +636,36 @@ pub async fn run_claimed_work_unit(
     model: String,
     max_runtime_seconds: Option<u64>,
 ) -> Result<NodeContribution, String> {
-    let (keypair, sender) = node_runtime(&state)?;
+    run_work_unit_headless(
+        &EventSink::tauri(app),
+        &state,
+        &store,
+        &campaign_id,
+        &work_unit_id,
+        &provider,
+        &model,
+        max_runtime_seconds,
+    )
+    .await
+}
+
+/// Run a claimed work unit end to end. Shared by the cockpit command above and
+/// the headless autonomous loop.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_work_unit_headless(
+    app: &EventSink,
+    state: &P2pState,
+    store: &AtpStore,
+    campaign_id: &str,
+    work_unit_id: &str,
+    provider: &str,
+    model: &str,
+    max_runtime_seconds: Option<u64>,
+) -> Result<NodeContribution, String> {
+    let (keypair, sender) = node_runtime(state)?;
     let worker_agent_id = agent_id(&keypair.public());
-    ensure_verification_pool_clear(&store, &worker_agent_id)?;
-    let snapshot = store.campaign_report_snapshot(&campaign_id)?;
+    ensure_verification_pool_clear(store, &worker_agent_id)?;
+    let snapshot = store.campaign_report_snapshot(campaign_id)?;
     let campaign = snapshot.campaign;
     let claim = snapshot
         .claims
@@ -631,18 +681,18 @@ pub async fn run_claimed_work_unit(
         .into_iter()
         .find(|unit| unit.work_unit_id == claim.work_unit_id)
         .ok_or_else(|| "Campaign work unit not found".to_string())?;
-    if store.release_claim_if_work_unit_settled(&campaign_id, &work_unit_id, &worker_agent_id)? {
+    if store.release_claim_if_work_unit_settled(campaign_id, work_unit_id, &worker_agent_id)? {
         let _ = app.emit("audit:labor_changed", ());
         return Err(
             "Work unit was already settled by the network; local claim released.".to_string(),
         );
     }
     let run = run_local_audit_skill(
-        &app,
+        app,
         &campaign,
         &work_unit,
-        &provider,
-        &model,
+        provider,
+        model,
         &snapshot.contributions,
     );
     let output = if let Some(seconds) = max_runtime_seconds.filter(|seconds| *seconds > 0) {
@@ -685,6 +735,7 @@ pub async fn run_campaign_audit_pipeline(
     provider: String,
     model: String,
 ) -> Result<Vec<NodeContribution>, String> {
+    let app = EventSink::tauri(app);
     let (keypair, _) = node_runtime(&state)?;
     let snapshot = store.campaign_report_snapshot(&campaign_id)?;
     let contributions =
@@ -703,6 +754,7 @@ pub async fn run_accepted_audit_skill(
     provider: String,
     model: String,
 ) -> Result<NodeContribution, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
     let job = store.get_job(&job_id)?;
@@ -801,6 +853,7 @@ pub async fn run_accepted_audit_pipeline(
     provider: String,
     model: String,
 ) -> Result<Vec<NodeContribution>, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
     let job = store.get_job(&job_id)?;
@@ -851,7 +904,7 @@ pub async fn run_accepted_audit_pipeline(
 }
 
 async fn run_professional_audit_pipeline(
-    app: &AppHandle,
+    app: &EventSink,
     store: &AtpStore,
     keypair: &libp2p::identity::Keypair,
     snapshot: CampaignReportSnapshot,
@@ -988,6 +1041,7 @@ pub async fn verify_campaign_contribution(
     reason_code: String,
     reason: String,
 ) -> Result<Vec<crate::audit_labor::CreditAllocation>, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let contribution = store.get_contribution(&contribution_id)?;
     let local_agent_id = agent_id(&keypair.public());
@@ -1033,7 +1087,18 @@ pub async fn verify_next_pending_contribution(
     state: State<'_, P2pState>,
     store: State<'_, AtpStore>,
 ) -> Result<Option<NetworkVerificationIssued>, String> {
-    let (keypair, sender) = node_runtime(&state)?;
+    verify_next_pending_headless(&EventSink::tauri(app), &state, &store).await
+}
+
+/// Verify one pending peer receipt. Shared by the cockpit command above and the
+/// headless autonomous loop; verifier duty is what unblocks network settlement,
+/// so a headless node must be able to perform it with no webview.
+pub async fn verify_next_pending_headless(
+    app: &EventSink,
+    state: &P2pState,
+    store: &AtpStore,
+) -> Result<Option<NetworkVerificationIssued>, String> {
+    let (keypair, sender) = node_runtime(state)?;
     let local_agent_id = agent_id(&keypair.public());
     let Some(contribution) = store
         .network_verification_candidates(&local_agent_id, 1)?
@@ -1045,7 +1110,7 @@ pub async fn verify_next_pending_contribution(
 
     let (verification, allocations) = issue_signed_network_verification(
         &keypair,
-        store.inner(),
+        store,
         &contribution,
         "accepted".to_string(),
         "AUTONOMOUS_FINALITY_ACCEPTED".to_string(),
@@ -1143,6 +1208,7 @@ pub async fn create_audit(
     attachment_text: Option<String>,
     custom_skill_text: Option<String>,
 ) -> Result<AuditJob, String> {
+    let app = EventSink::tauri(app);
     if repository.is_private {
         return Err("Private repositories are not supported".to_string());
     }
@@ -1212,6 +1278,7 @@ pub async fn offer_audit(
     store: State<'_, AtpStore>,
     job_id: String,
 ) -> Result<AuditJob, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
     let job = store.get_job(&job_id)?;
@@ -1267,6 +1334,7 @@ pub async fn accept_offer(
     store: State<'_, AtpStore>,
     job_id: String,
 ) -> Result<AuditJob, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let requester_agent_id = agent_id(&keypair.public());
     let job = store.get_job(&job_id)?;
@@ -1314,6 +1382,7 @@ pub async fn route_audit(
     store: State<'_, AtpStore>,
     job_id: String,
 ) -> Result<AuditJob, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let requester_agent_id = agent_id(&keypair.public());
     let job = store.get_job(&job_id)?;
@@ -1362,6 +1431,7 @@ pub async fn run_audit(
     store: State<'_, AtpStore>,
     job_id: String,
 ) -> Result<AuditJob, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let worker_agent_id = agent_id(&keypair.public());
     let job = store.get_job(&job_id)?;
@@ -1398,6 +1468,7 @@ pub async fn approve_result(
     store: State<'_, AtpStore>,
     job_id: String,
 ) -> Result<AuditJob, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let requester_agent_id = agent_id(&keypair.public());
     let job = store.get_job(&job_id)?;
@@ -1451,6 +1522,7 @@ pub async fn migrate_legacy_jobs(
     store: State<'_, AtpStore>,
     jobs: Vec<LegacyAuditJob>,
 ) -> Result<MigrationResult, String> {
+    let app = EventSink::tauri(app);
     let (keypair, sender) = node_runtime(&state)?;
     let peer_id = keypair.public().to_peer_id().to_string();
     let local_agent_id = agent_id(&keypair.public());
@@ -1588,7 +1660,7 @@ mod tests {
 }
 
 fn node_runtime(
-    state: &State<'_, P2pState>,
+    state: &P2pState,
 ) -> Result<
     (
         libp2p::identity::Keypair,
