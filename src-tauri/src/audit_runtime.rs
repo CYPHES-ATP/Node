@@ -1677,6 +1677,20 @@ fn is_placeholder_text(value: &str) -> bool {
         || normalized.contains("line 123")
         || normalized.contains("contract.sol")
         || normalized.contains("artifact hash: 0x")
+        // Strings lifted verbatim from the illustration in
+        // STRUCTURED_OUTPUT_CONTRACT and skill pack v0.5.
+        //
+        // v0.4 used obviously-fake placeholders, and weak models echoed them
+        // ("finding or security lead title" was the single most common finding
+        // title on the network). v0.5 replaced them with a realistic example to
+        // teach shape — and llama3.2:3b immediately began returning the new
+        // example verbatim instead. A realistic placeholder is worse than an
+        // obvious one: it looks like a genuine finding. Any model that returns
+        // the example is not reporting, so treat it as placeholder text.
+        || normalized.contains("withdraw() skips fee accrual")
+        || normalized.contains("early return before _accrue")
+        || normalized.contains("traced withdraw() call path")
+        || normalized.contains("markdown notes using the headings")
 }
 
 fn has_code_location_signal(value: &str) -> bool {
@@ -2165,6 +2179,26 @@ mod tests {
         assert!(model_multiplier("qwen2.5-32b") > model_multiplier("qwen2.5-14b"));
         assert!(model_multiplier("oss-20b") > model_multiplier("qwen2.5-7b"));
         assert!(model_multiplier("unknown-local") < 1.0);
+    }
+
+    #[test]
+    fn the_contract_example_is_rejected_when_a_model_echoes_it() {
+        // Observed live on v0.17.4: llama3.2:3b returned the v0.5 illustration
+        // verbatim as its finding. A realistic example is more dangerous than an
+        // obvious one because the echo looks like real work.
+        assert!(is_placeholder_text(
+            "withdraw() skips fee accrual when totalSupply is zero"
+        ));
+        assert!(is_placeholder_text(
+            "contracts/Vault.sol: withdraw(), line 214 - early return before _accrue()"
+        ));
+        assert!(is_placeholder_text(
+            "Traced withdraw() call path to _accrue() and compared against deposit()"
+        ));
+        // A genuine finding that merely mentions withdraw() must still pass.
+        assert!(!is_placeholder_text(
+            "actionKick silently skips RPL bond refund when vault has insufficient balance"
+        ));
     }
 
     #[test]
