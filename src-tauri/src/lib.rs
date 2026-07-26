@@ -2,12 +2,12 @@ mod atp;
 pub mod audit_labor;
 pub mod audit_profile;
 mod audit_runtime;
+mod autonomous;
 mod bundle;
 mod commands;
-mod autonomous;
 mod events;
-mod headless;
 mod github;
+mod headless;
 mod p2p;
 mod state;
 mod store;
@@ -19,11 +19,10 @@ use commands::{
     get_campaign_snapshot, get_credit_summary, get_github_access_status, get_network_dashboard,
     get_network_info, get_peers, inspect_github_repository, list_audits, list_benchmark_targets,
     list_guardian_targets, list_local_model_models, list_local_model_providers,
-    list_protocol_campaigns,
-    migrate_legacy_jobs, offer_audit, record_campaign_contribution, route_audit,
-    run_accepted_audit_pipeline, run_accepted_audit_skill, run_audit, run_campaign_audit_pipeline,
-    run_campaign_audit_skill, run_claimed_work_unit, start_node, verify_campaign_contribution,
-    verify_next_pending_contribution,
+    list_protocol_campaigns, migrate_legacy_jobs, offer_audit, record_campaign_contribution,
+    route_audit, run_accepted_audit_pipeline, run_accepted_audit_skill, run_audit,
+    run_campaign_audit_pipeline, run_campaign_audit_skill, run_claimed_work_unit, start_node,
+    verify_campaign_contribution, verify_next_pending_contribution,
 };
 use state::P2pState;
 use store::AtpStore;

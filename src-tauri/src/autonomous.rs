@@ -130,9 +130,7 @@ pub async fn tick(
 
     for campaign in campaigns {
         let campaign_id = campaign.campaign_id.clone();
-        let Some(work_unit_id) =
-            next_open_work_unit(store, &campaign_id, local_agent_id)
-        else {
+        let Some(work_unit_id) = next_open_work_unit(store, &campaign_id, local_agent_id) else {
             continue;
         };
 

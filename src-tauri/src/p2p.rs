@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use crate::events::EventSink;
 use futures::StreamExt;
 use libp2p::{
     core::transport::ListenerId,
@@ -14,7 +15,6 @@ use libp2p::{
     tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
 use serde::{Deserialize, Serialize};
-use crate::events::EventSink;
 use tokio::{select, sync::mpsc, time::MissedTickBehavior};
 
 use crate::{
@@ -422,11 +422,15 @@ impl PendingOutbound {
 fn send_wire_request_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
     request: WireRequest,
     pending: PendingOutbound,
 ) -> bool {
     let peer_id = pending.peer_id().clone();
+    if is_infrastructure_peer(network, peer_id) {
+        return false;
+    }
     // Cooldowns should block fresh dials, not silence a live connection that
     // can still carry settlement recovery traffic.
     let connected = swarm.is_connected(&peer_id);
@@ -757,15 +761,16 @@ pub async fn spawn_swarm(
                     };
                     match command {
                         SwarmCommand::SendEnvelope(envelope) => {
-                            send_envelope(&mut swarm, &state, envelope, &mut outbound);
+                            send_envelope(&mut swarm, &state, &network, envelope, &mut outbound);
                         }
                         SwarmCommand::SendCampaign(campaign) => {
-                            send_campaign(&mut swarm, &state, campaign, &mut outbound);
+                            send_campaign(&mut swarm, &state, &network, campaign, &mut outbound);
                         }
                         SwarmCommand::SendWorkUnitClaim { claim, audience } => {
                             send_work_unit_claim(
                                 &mut swarm,
                                 &state,
+                                &network,
                                 claim,
                                 &audience,
                                 false,
@@ -776,6 +781,7 @@ pub async fn spawn_swarm(
                             send_execution_result(
                                 &mut swarm,
                                 &state,
+                                &network,
                                 result,
                                 &audience,
                                 &mut outbound,
@@ -788,6 +794,7 @@ pub async fn spawn_swarm(
                             send_contribution(
                                 &mut swarm,
                                 &state,
+                                &network,
                                 contribution,
                                 &audience,
                                 &mut outbound,
@@ -801,6 +808,7 @@ pub async fn spawn_swarm(
                             send_verification_result(
                                 &mut swarm,
                                 &state,
+                                &network,
                                 verification,
                                 allocations,
                                 &audience,
@@ -929,6 +937,7 @@ fn handle_swarm_event(
                                         store,
                                         keypair,
                                         local_agent_id,
+                                        network,
                                         peer,
                                         &envelope,
                                         &ack,
@@ -1230,6 +1239,7 @@ fn handle_swarm_event(
                             store,
                             keypair,
                             local_agent_id,
+                            network,
                             peer,
                             inventory,
                             outbound,
@@ -1252,6 +1262,7 @@ fn handle_swarm_event(
                                 store,
                                 keypair,
                                 local_agent_id,
+                                network,
                                 outbound,
                             );
                         }
@@ -1266,6 +1277,7 @@ fn handle_swarm_event(
                             store,
                             keypair,
                             local_agent_id,
+                            network,
                             peer,
                             request,
                             outbound,
@@ -1429,6 +1441,7 @@ fn handle_swarm_event(
                             push_labor_objects_to_peer(
                                 swarm,
                                 state,
+                                network,
                                 store,
                                 &inventory_peer,
                                 &response.missing_campaigns,
@@ -1470,6 +1483,7 @@ fn handle_swarm_event(
                                 store,
                                 keypair,
                                 local_agent_id,
+                                network,
                                 outbound,
                             );
                         }
@@ -1516,6 +1530,7 @@ fn handle_swarm_event(
                             app,
                             state,
                             store,
+                            network,
                             peer,
                             pending.as_ref(),
                             response,
@@ -1678,7 +1693,16 @@ fn handle_swarm_event(
                 }
             }
             if !is_infrastructure_peer(network, peer_id) {
-                on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+                on_peer_connected(
+                    swarm,
+                    app,
+                    state,
+                    store,
+                    local_agent_id,
+                    network,
+                    peer_id,
+                    outbound,
+                );
             }
         }
         SwarmEvent::Behaviour(AgentBehaviourEvent::Ping(ping::Event { peer, result, .. })) => {
@@ -1886,7 +1910,16 @@ fn handle_swarm_event(
                 }
             }
             if !is_infrastructure_peer(network, peer_id) {
-                on_peer_connected(swarm, app, state, store, local_agent_id, peer_id, outbound);
+                on_peer_connected(
+                    swarm,
+                    app,
+                    state,
+                    store,
+                    local_agent_id,
+                    network,
+                    peer_id,
+                    outbound,
+                );
             }
         }
         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
@@ -2093,6 +2126,7 @@ fn maybe_attest(
     store: &AtpStore,
     keypair: &identity::Keypair,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
     peer: PeerId,
     envelope: &AtpEnvelope,
     ack: &AtpAck,
@@ -2145,6 +2179,7 @@ fn maybe_attest(
             send_wire_request_to_peer(
                 swarm,
                 state,
+                network,
                 outbound,
                 WireRequest::Envelope(attest),
                 PendingOutbound::Envelope {
@@ -2190,6 +2225,7 @@ fn on_peer_connected(
     state: &P2pState,
     store: &AtpStore,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
     peer_id: PeerId,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
@@ -2204,6 +2240,7 @@ fn on_peer_connected(
             send_wire_request_to_peer(
                 swarm,
                 state,
+                network,
                 outbound,
                 WireRequest::Envelope(envelope),
                 PendingOutbound::Envelope {
@@ -2213,7 +2250,15 @@ fn on_peer_connected(
             );
         }
     }
-    send_labor_inventory_to_peer(swarm, state, store, local_agent_id, &peer_id, outbound);
+    send_labor_inventory_to_peer(
+        swarm,
+        state,
+        network,
+        store,
+        local_agent_id,
+        &peer_id,
+        outbound,
+    );
     let _ = app.emit(
         "p2p:peer_connected",
         serde_json::json!({ "peerId": peer_id.to_string() }),
@@ -2235,7 +2280,7 @@ fn sync_audit_labor_network(
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     let has_peers =
-        swarm.connected_peers().next().is_some() || !target_peers(state, None).is_empty();
+        swarm.connected_peers().next().is_some() || !target_peers(network, state, None).is_empty();
 
     match store.expire_stale_claims(WORK_UNIT_CLAIM_TTL_MS) {
         Ok(expired) if expired > 0 => {
@@ -2280,6 +2325,7 @@ fn sync_audit_labor_network(
             state,
             store,
             local_agent_id,
+            network,
             last_settlement_rescue_ms,
             outbound,
         );
@@ -2288,15 +2334,25 @@ fn sync_audit_labor_network(
             app,
             state,
             store,
+            network,
             last_stale_receipt_repair_ms,
             outbound,
         );
         if outbound.len() < MAX_OUTBOUND_BULK_BACKLOG {
-            broadcast_labor_inventory(swarm, state, store, local_agent_id, outbound);
+            broadcast_labor_inventory(swarm, state, network, store, local_agent_id, outbound);
         }
     }
 
-    verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
+    verify_network_contributions(
+        swarm,
+        app,
+        state,
+        store,
+        keypair,
+        local_agent_id,
+        network,
+        outbound,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2356,7 +2412,7 @@ fn recover_verifier_liveness_if_stale(
             "pendingReceipts": pending_receipts,
             "oldestPendingAgeMs": oldest_pending_age_ms,
             "latestIndependentVerificationAgeMs": latest_independent_verification_age_ms,
-            "knownPeers": target_peers(state, None).len(),
+            "knownPeers": target_peers(network, state, None).len(),
         }),
     );
 }
@@ -2368,6 +2424,7 @@ fn handle_labor_inventory_request(
     store: &AtpStore,
     keypair: &identity::Keypair,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
     peer_id: PeerId,
     remote_inventory: LaborInventory,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
@@ -2491,7 +2548,16 @@ fn handle_labor_inventory_request(
     );
 
     if !remote_inventory.needs_verifier.is_empty() {
-        verify_network_contributions(swarm, app, state, store, keypair, local_agent_id, outbound);
+        verify_network_contributions(
+            swarm,
+            app,
+            state,
+            store,
+            keypair,
+            local_agent_id,
+            network,
+            outbound,
+        );
     }
 
     LaborInventoryResponse {
@@ -2534,6 +2600,7 @@ fn missing_from_remote(local_ids: &[String], remote_ids: &[String]) -> Vec<Strin
 fn send_labor_inventory_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     store: &AtpStore,
     local_agent_id: &str,
     peer_id: &PeerId,
@@ -2553,6 +2620,7 @@ fn send_labor_inventory_to_peer(
     send_wire_request_to_peer(
         swarm,
         state,
+        network,
         outbound,
         WireRequest::LaborInventory(inventory),
         PendingOutbound::LaborInventory {
@@ -2564,12 +2632,21 @@ fn send_labor_inventory_to_peer(
 fn broadcast_labor_inventory(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     store: &AtpStore,
     local_agent_id: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    for peer_id in broadcast_peers(swarm, state) {
-        send_labor_inventory_to_peer(swarm, state, store, local_agent_id, &peer_id, outbound);
+    for peer_id in broadcast_peers(swarm, network, state) {
+        send_labor_inventory_to_peer(
+            swarm,
+            state,
+            network,
+            store,
+            local_agent_id,
+            &peer_id,
+            outbound,
+        );
     }
 }
 
@@ -3035,6 +3112,7 @@ fn is_historical_claim_error(reason: &str) -> bool {
 fn push_labor_objects_to_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     store: &AtpStore,
     peer_id: &PeerId,
     campaign_ids: &[String],
@@ -3078,6 +3156,7 @@ fn push_labor_objects_to_peer(
     send_wire_request_to_peer(
         swarm,
         state,
+        network,
         outbound,
         WireRequest::LaborObjectBundle(bundle),
         PendingOutbound::LaborObjectBundle {
@@ -3090,6 +3169,7 @@ fn push_labor_objects_to_peer(
 fn request_labor_objects_from_peer(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     peer_id: &PeerId,
     campaign_ids: &[String],
     claim_ids: &[String],
@@ -3124,6 +3204,7 @@ fn request_labor_objects_from_peer(
     send_wire_request_to_peer(
         swarm,
         state,
+        network,
         outbound,
         WireRequest::LaborObjectRequest(request),
         PendingOutbound::LaborObjectRequest {
@@ -3139,6 +3220,7 @@ fn maybe_rescue_pending_settlement(
     state: &P2pState,
     store: &AtpStore,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
     last_settlement_rescue_ms: &mut u64,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) -> usize {
@@ -3189,7 +3271,7 @@ fn maybe_rescue_pending_settlement(
         .iter()
         .map(|receipt| receipt.contribution_id.clone())
         .collect::<Vec<_>>();
-    let peers = settlement_rescue_peers(swarm, state);
+    let peers = settlement_rescue_peers(swarm, network, state);
     if peers.is_empty() {
         let _ = store.record_labor_event(
             "settlement_rescue_waiting_for_peer",
@@ -3217,6 +3299,7 @@ fn maybe_rescue_pending_settlement(
         if send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::SettlementRescue(request),
             PendingOutbound::SettlementRescue {
@@ -3251,6 +3334,7 @@ fn handle_settlement_rescue_request(
     store: &AtpStore,
     keypair: &identity::Keypair,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
     peer_id: PeerId,
     request: SettlementRescueRequest,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
@@ -3299,6 +3383,7 @@ fn handle_settlement_rescue_request(
         store,
         keypair,
         local_agent_id,
+        network,
         &contribution_ids,
         outbound,
     );
@@ -3346,6 +3431,7 @@ fn handle_settlement_rescue_response(
     app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
+    network: &NetworkBootstrap,
     peer_id: PeerId,
     pending: Option<&PendingOutbound>,
     response: SettlementRescueResponse,
@@ -3386,6 +3472,7 @@ fn handle_settlement_rescue_response(
         push_labor_objects_to_peer(
             swarm,
             state,
+            network,
             store,
             &peer_id,
             &[],
@@ -3399,6 +3486,7 @@ fn handle_settlement_rescue_response(
         request_labor_objects_from_peer(
             swarm,
             state,
+            network,
             &peer_id,
             &[],
             &[],
@@ -3445,6 +3533,7 @@ fn maybe_repair_stale_receipts(
     app: &EventSink,
     state: &P2pState,
     store: &AtpStore,
+    network: &NetworkBootstrap,
     last_stale_receipt_repair_ms: &mut u64,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
@@ -3509,7 +3598,7 @@ fn maybe_repair_stale_receipts(
     }
     let claims = bundle.claims.len();
     let receipts = bundle.contributions.len();
-    let targets = broadcast_labor_object_bundle(swarm, state, bundle, true, outbound);
+    let targets = broadcast_labor_object_bundle(swarm, state, network, bundle, true, outbound);
     let _ = store.record_labor_event(
         "stale_receipts_rebroadcast",
         None,
@@ -3540,6 +3629,7 @@ fn verify_network_contributions(
     store: &AtpStore,
     keypair: &identity::Keypair,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
     let candidates =
@@ -3562,6 +3652,7 @@ fn verify_network_contributions(
         state,
         store,
         keypair,
+        network,
         candidates
             .into_iter()
             .take(LABOR_AUTO_VERIFY_LIMIT)
@@ -3577,6 +3668,7 @@ fn verify_network_contributions_by_id(
     store: &AtpStore,
     keypair: &identity::Keypair,
     local_agent_id: &str,
+    network: &NetworkBootstrap,
     contribution_ids: &[String],
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) -> usize {
@@ -3597,7 +3689,7 @@ fn verify_network_contributions_by_id(
         }
     };
     issue_network_verifications_for_candidates(
-        swarm, app, state, store, keypair, candidates, outbound,
+        swarm, app, state, store, keypair, network, candidates, outbound,
     )
 }
 
@@ -3607,6 +3699,7 @@ fn issue_network_verifications_for_candidates(
     state: &P2pState,
     store: &AtpStore,
     keypair: &identity::Keypair,
+    network: &NetworkBootstrap,
     candidates: Vec<NodeContribution>,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) -> usize {
@@ -3711,6 +3804,7 @@ fn issue_network_verifications_for_candidates(
         broadcast_verification_result(
             swarm,
             state,
+            network,
             verification.clone(),
             allocations,
             false,
@@ -3733,15 +3827,17 @@ fn issue_network_verifications_for_candidates(
 fn send_envelope(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     envelope: AtpEnvelope,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let peers = target_peers(state, envelope.audience.as_deref());
+    let peers = target_peers(network, state, envelope.audience.as_deref());
     let hash = crate::atp::event_hash(&envelope).unwrap_or_default();
     for peer_id in peers {
         send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::Envelope(envelope.clone()),
             PendingOutbound::Envelope {
@@ -3755,23 +3851,26 @@ fn send_envelope(
 fn send_campaign(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     campaign: ProtocolAuditCampaign,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    broadcast_campaign(swarm, state, campaign, false, outbound);
+    broadcast_campaign(swarm, state, network, campaign, false, outbound);
 }
 
 fn broadcast_campaign(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     campaign: ProtocolAuditCampaign,
     silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    for peer_id in target_peers(state, None) {
+    for peer_id in target_peers(network, state, None) {
         send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::Campaign(campaign.clone()),
             PendingOutbound::Campaign {
@@ -3786,15 +3885,17 @@ fn broadcast_campaign(
 fn send_work_unit_claim(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     claim: AuditWorkUnitClaim,
     audience: &str,
     silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    for peer_id in target_peers(state, Some(audience)) {
+    for peer_id in target_peers(network, state, Some(audience)) {
         send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::WorkUnitClaim(claim.clone()),
             PendingOutbound::WorkUnitClaim {
@@ -3811,15 +3912,17 @@ fn send_work_unit_claim(
 fn send_execution_result(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     result: SignedExecutionResult,
     audience: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let peers = target_peers(state, Some(audience));
+    let peers = target_peers(network, state, Some(audience));
     for peer_id in peers {
         send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::ExecutionResult(result.clone()),
             PendingOutbound::ExecutionResult {
@@ -3834,15 +3937,17 @@ fn send_execution_result(
 fn send_contribution(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     contribution: NodeContribution,
     audience: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let peers = target_peers(state, Some(audience));
+    let peers = target_peers(network, state, Some(audience));
     for peer_id in peers {
         send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::Contribution(contribution.clone()),
             PendingOutbound::Contribution {
@@ -3859,12 +3964,13 @@ fn send_contribution(
 fn send_verification_result(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     verification: VerificationResult,
     allocations: Vec<CreditAllocation>,
     audience: &str,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) {
-    let peers = target_peers(state, Some(audience));
+    let peers = target_peers(network, state, Some(audience));
     let credit_total = allocations
         .iter()
         .map(|allocation| allocation.total)
@@ -3873,6 +3979,7 @@ fn send_verification_result(
         send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::VerificationResult {
                 verification: verification.clone(),
@@ -3892,6 +3999,7 @@ fn send_verification_result(
 fn broadcast_verification_result(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     verification: VerificationResult,
     allocations: Vec<CreditAllocation>,
     silent: bool,
@@ -3901,10 +4009,11 @@ fn broadcast_verification_result(
         .iter()
         .map(|allocation| allocation.total)
         .sum::<u32>();
-    for peer_id in target_peers(state, None) {
+    for peer_id in target_peers(network, state, None) {
         send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::VerificationResult {
                 verification: verification.clone(),
@@ -3924,15 +4033,17 @@ fn broadcast_verification_result(
 fn broadcast_labor_object_bundle(
     swarm: &mut libp2p::Swarm<AgentBehaviour>,
     state: &P2pState,
+    network: &NetworkBootstrap,
     bundle: LaborObjectBundle,
     silent: bool,
     outbound: &mut HashMap<OutboundRequestId, PendingOutbound>,
 ) -> usize {
     let mut sent = 0usize;
-    for peer_id in broadcast_peers(swarm, state) {
+    for peer_id in broadcast_peers(swarm, network, state) {
         if send_wire_request_to_peer(
             swarm,
             state,
+            network,
             outbound,
             WireRequest::LaborObjectBundle(bundle.clone()),
             PendingOutbound::LaborObjectBundle { peer_id, silent },
@@ -3943,8 +4054,12 @@ fn broadcast_labor_object_bundle(
     sent
 }
 
-fn settlement_rescue_peers(swarm: &libp2p::Swarm<AgentBehaviour>, state: &P2pState) -> Vec<PeerId> {
-    broadcast_peers(swarm, state)
+fn settlement_rescue_peers(
+    swarm: &libp2p::Swarm<AgentBehaviour>,
+    network: &NetworkBootstrap,
+    state: &P2pState,
+) -> Vec<PeerId> {
+    broadcast_peers(swarm, network, state)
         .into_iter()
         .filter(|peer_id| {
             peer_supports_capability(state, peer_id, LABOR_CAPABILITY_SETTLEMENT_RESCUE)
@@ -3955,10 +4070,14 @@ fn settlement_rescue_peers(swarm: &libp2p::Swarm<AgentBehaviour>, state: &P2pSta
 /// Peers eligible for broadcast: the cooldown-filtered registry plus every
 /// peer with a live connection, so a previous dial failure cannot silence
 /// traffic that an established stream can still carry.
-fn broadcast_peers(swarm: &libp2p::Swarm<AgentBehaviour>, state: &P2pState) -> Vec<PeerId> {
-    let mut peers = target_peers(state, None);
+fn broadcast_peers(
+    swarm: &libp2p::Swarm<AgentBehaviour>,
+    network: &NetworkBootstrap,
+    state: &P2pState,
+) -> Vec<PeerId> {
+    let mut peers = target_peers(network, state, None);
     for peer_id in swarm.connected_peers() {
-        if !peers.contains(peer_id) {
+        if !is_infrastructure_peer(network, peer_id.clone()) && !peers.contains(peer_id) {
             peers.push(peer_id.clone());
         }
     }
@@ -3966,7 +4085,11 @@ fn broadcast_peers(swarm: &libp2p::Swarm<AgentBehaviour>, state: &P2pState) -> V
     peers
 }
 
-fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
+fn target_peers(
+    network: &NetworkBootstrap,
+    state: &P2pState,
+    audience: Option<&str>,
+) -> Vec<PeerId> {
     let now = now_millis();
     state
         .inner
@@ -3982,6 +4105,7 @@ fn target_peers(state: &P2pState, audience: Option<&str>) -> Vec<PeerId> {
                         .ok()
                         .map(|peer_id| (peer_id, peer.last_seen))
                 })
+                .filter(|(peer, _)| !is_infrastructure_peer(network, peer.clone()))
                 .filter(|(peer, _)| {
                     audience.is_none_or(|audience| audience == format!("urn:libp2p:{peer}"))
                 })
@@ -4907,6 +5031,41 @@ mod tests {
         let preferred = preferred_dial_candidates(&candidates);
 
         assert_eq!(preferred, vec![public_address]);
+    }
+
+    #[test]
+    fn target_peers_never_returns_infrastructure_peer() {
+        let relay_address = infrastructure_address();
+        let network =
+            build_network_bootstrap(Some(relay_address), None, None, Some("test".to_string()))
+                .expect("valid network");
+        let relay_peer_id = network.relay.as_ref().expect("relay").peer_id;
+        let app_peer_id = identity::Keypair::generate_ed25519().public().to_peer_id();
+        let now = now_millis();
+        let state = P2pState::default();
+        {
+            let mut inner = state.inner.lock().expect("state lock");
+            for peer_id in [relay_peer_id, app_peer_id] {
+                let peer_key = peer_id.to_string();
+                inner.peers.insert(
+                    peer_key.clone(),
+                    PeerInfo {
+                        peer_id: peer_key,
+                        last_seen: now,
+                        failure_streak: 0,
+                        cooldown_until: 0,
+                    },
+                );
+            }
+        }
+
+        assert_eq!(target_peers(&network, &state, None), vec![app_peer_id]);
+        assert!(target_peers(
+            &network,
+            &state,
+            Some(&format!("urn:libp2p:{relay_peer_id}"))
+        )
+        .is_empty());
     }
 
     #[test]

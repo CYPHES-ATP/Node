@@ -2307,7 +2307,11 @@ mod tests {
         }
     }
 
-    fn cloud_runtime(model: &str, multiplier: f64, tokens_per_second: Option<f64>) -> RuntimeDescriptor {
+    fn cloud_runtime(
+        model: &str,
+        multiplier: f64,
+        tokens_per_second: Option<f64>,
+    ) -> RuntimeDescriptor {
         let mut runtime = RuntimeDescriptor::deterministic_fixture();
         runtime.model = model.to_string();
         runtime.model_multiplier = multiplier;

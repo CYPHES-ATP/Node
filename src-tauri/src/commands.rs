@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use crate::events::EventSink;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tokio::sync::mpsc;
 
@@ -213,10 +213,9 @@ pub struct BenchmarkTarget {
 
 #[tauri::command]
 pub async fn list_benchmark_targets() -> Result<Vec<BenchmarkTarget>, String> {
-    let set: BenchmarkSet = serde_json::from_str(include_str!(
-        "../../protocol/targets/benchmark-set.v1.json"
-    ))
-    .map_err(|error| format!("invalid benchmark set: {error}"))?;
+    let set: BenchmarkSet =
+        serde_json::from_str(include_str!("../../protocol/targets/benchmark-set.v1.json"))
+            .map_err(|error| format!("invalid benchmark set: {error}"))?;
     Ok(set.targets)
 }
 
@@ -1653,8 +1652,14 @@ mod tests {
                 "{} is not commit-diff-active",
                 target.benchmark_id
             );
-            assert!(ids.insert(target.benchmark_id.clone()), "duplicate benchmark id");
-            assert!(repos.insert(target.repo_full_name.clone()), "duplicate repository");
+            assert!(
+                ids.insert(target.benchmark_id.clone()),
+                "duplicate benchmark id"
+            );
+            assert!(
+                repos.insert(target.repo_full_name.clone()),
+                "duplicate repository"
+            );
         }
     }
 }

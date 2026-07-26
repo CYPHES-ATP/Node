@@ -37,8 +37,7 @@ const TICK_INTERVAL: Duration = Duration::from_secs(12);
 /// Returns true when the process was asked to run without a UI, by either
 /// `CYPHES_HEADLESS=1` or a `--headless` argument.
 pub fn requested() -> bool {
-    truthy("CYPHES_HEADLESS")
-        || std::env::args().any(|argument| argument == "--headless")
+    truthy("CYPHES_HEADLESS") || std::env::args().any(|argument| argument == "--headless")
 }
 
 fn truthy(key: &str) -> bool {
@@ -128,9 +127,8 @@ impl HeadlessConfig {
 /// and a headless operator had no way to observe the node. Defaults to `info`
 /// for this crate when `RUST_LOG` is unset.
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new("cyphes_desktop_lib=info,cyphes_desktop=info")
-    });
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("cyphes_desktop_lib=info,cyphes_desktop=info"));
     // stderr, not stdout: stdout is block-buffered when redirected to a file or
     // captured by a supervisor, which swallows the log of a long-running daemon
     // until it exits. Operators need to see [HEADLESS] node started immediately.
@@ -294,7 +292,10 @@ mod tests {
     #[test]
     fn defaults_are_verifier_only_and_looping() {
         let config = HeadlessConfig::default();
-        assert!(!config.contribute, "must not spend inference without being asked");
+        assert!(
+            !config.contribute,
+            "must not spend inference without being asked"
+        );
         assert!(config.loop_forever);
     }
 }

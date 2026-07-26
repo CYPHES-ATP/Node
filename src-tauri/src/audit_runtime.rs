@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
+use crate::events::EventSink;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use crate::events::EventSink;
 
 use crate::{
     audit_labor::{
@@ -305,8 +305,12 @@ pub async fn run_local_audit_skill(
         18,
         None,
     );
-    let context = repository_context(&client, campaign, ContextBudget::for_runtime(provider, model))
-        .await?;
+    let context = repository_context(
+        &client,
+        campaign,
+        ContextBudget::for_runtime(provider, model),
+    )
+    .await?;
 
     emit_progress(app, campaign, work_unit, "Building model prompt", 32, None);
     let prompt = build_prompt(campaign, work_unit, &context, prior_contributions);
@@ -1036,9 +1040,7 @@ fn collect_referenced_symbols(content: &str, out: &mut Vec<String>) {
                 {
                     let name = base.split('(').next().unwrap_or(base).trim();
                     if !name.is_empty()
-                        && name
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
                     {
                         out.push(name.to_string());
                     }
@@ -1076,7 +1078,9 @@ fn resolve_symbol_to_path(
         let tail = needle.rsplit('/').next().unwrap_or(needle);
         if let Some(entry) = blobs
             .iter()
-            .find(|entry| entry.path.ends_with(needle) && size_ok(entry) && looks_textual(&entry.path))
+            .find(|entry| {
+                entry.path.ends_with(needle) && size_ok(entry) && looks_textual(&entry.path)
+            })
             .or_else(|| {
                 blobs.iter().find(|entry| {
                     entry
@@ -2276,9 +2280,7 @@ abstract contract FraxlendPairCore is FraxlendPairAccessControl, ERC20, Reentran
         let mut symbols = Vec::new();
         collect_referenced_symbols(source, &mut symbols);
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.ends_with("ReentrancyGuard.sol")));
+        assert!(symbols.iter().any(|s| s.ends_with("ReentrancyGuard.sol")));
         assert!(symbols.iter().any(|s| s.ends_with("IVault.sol")));
         assert!(symbols.iter().any(|s| s == "FraxlendPairAccessControl"));
         assert!(symbols.iter().any(|s| s == "ERC20"));
@@ -2321,9 +2323,9 @@ contract FraxlendPair is FraxlendPairCore {
 
         // Both the base contract carrying `nonReentrant` and the guard itself.
         assert!(deps.contains(&"src/contracts/FraxlendPairCore.sol".to_string()));
-        assert!(deps.contains(
-            &"lib/openzeppelin/contracts/security/ReentrancyGuard.sol".to_string()
-        ));
+        assert!(
+            deps.contains(&"lib/openzeppelin/contracts/security/ReentrancyGuard.sol".to_string())
+        );
         // Never re-fetch what is already in context.
         assert!(!deps.contains(&"src/contracts/FraxlendPair.sol".to_string()));
     }
