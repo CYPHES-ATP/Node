@@ -1906,6 +1906,13 @@ const MODEL_TIERS: &[(&str, f64)] = &[
     // Reserved top tier. Matched on the exact family so the bare "kimi" pattern
     // below cannot reach it.
     ("kimi-k3", 50.0),
+    // Earned tier. glm-5.2 is the best-measured model ever run on this network:
+    // 3.75 findings per pass at 53% unique titles and 81 tok/s across 102 passes,
+    // and it carried every pass it ever ran past the coverage-quality gate
+    // (102/102 with three or more evidence-backed coverage items). Matched on the
+    // exact minor version so a future glm-5.3 must earn the tier on its own data
+    // rather than inheriting it.
+    ("glm-5.2", 20.0),
     // Frontier-class, cloud-served.
     ("minimax-m3", 10.0),
     ("gpt-oss-120b", 10.0),
@@ -2157,11 +2164,24 @@ mod tests {
     }
 
     #[test]
+    fn glm_5_2_holds_its_earned_tier_without_widening_it() {
+        assert_eq!(model_multiplier("glm-5.2:cloud"), 20.0);
+        // Siblings must not inherit the earned tier.
+        assert_eq!(model_multiplier("glm-5.1:cloud"), 10.0);
+        assert_eq!(model_multiplier("glm-5.3:cloud"), 10.0);
+        assert_eq!(model_multiplier("glm-4.6"), 10.0);
+        // Above the unverified ceiling, so a relabelled local model claiming it
+        // still has to survive the throughput gate.
+        assert!(model_multiplier("glm-5.2:cloud") > UNVERIFIED_CLOUD_MULTIPLIER_CEILING);
+    }
+
+    #[test]
     fn glm_is_tiered_as_frontier_not_as_an_unknown_model() {
         // Regression: no branch matched "glm", so the two highest-quality models
         // on the final testnet were paid the 0.9 unknown-model floor — the same
         // rate as llama3.2:3b, which produced 1% unique finding titles.
-        assert_eq!(model_multiplier("glm-5.2:cloud"), 10.0);
+        // glm-5.2 carries its own earned tier; see the test above.
+        assert!(model_multiplier("glm-5.2:cloud") >= 10.0);
         assert_eq!(model_multiplier("glm-5.1:cloud"), 10.0);
         assert_eq!(model_multiplier("glm-4.6"), 10.0);
         assert!(model_multiplier("glm-5.2:cloud") > model_multiplier("llama3.2:3b"));

@@ -5,7 +5,7 @@
   <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.3 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.3_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.4 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.4_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,12 +17,19 @@
 
 ## Download
 
-The current active release is **CYPHES v0.17.3 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.17.4 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
+
+v0.17.4 is a non-mandatory model-scoring release. `glm-5.2` moves to a `20.0x`
+earned tier — it is the best-measured model ever run on this network, and the
+only one whose every pass cleared the output-quality gate. Matching is
+most-specific-first, so the tier does not widen to `glm-5.1` or a future
+`glm-5.3`; a new release earns its tier on its own data. The published scoring
+chart now states both gates that sit between a declared tier and what is paid.
 
 v0.17.3 is a non-mandatory headless-worker release. A node can now run with no
 display, no webview, and no Tauri runtime — the supported path for WSL2,
@@ -91,12 +98,12 @@ can still test the local loop, but it cannot mint earned ATP.
 
 macOS downloads:
 
-- [Download CYPHES v0.17.3 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.3/CYPHES_0.17.3_aarch64.dmg)
-- [Download CYPHES v0.17.3 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.3/CYPHES_0.17.3_x64.dmg)
+- [Download CYPHES v0.17.4 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.4/CYPHES_0.17.4_aarch64.dmg)
+- [Download CYPHES v0.17.4 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.4/CYPHES_0.17.4_x64.dmg)
 
 Windows download:
 
-- [Download CYPHES v0.17.3 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.3/CYPHES_0.17.3_x64-setup.exe)
+- [Download CYPHES v0.17.4 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.4/CYPHES_0.17.4_x64-setup.exe)
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
@@ -167,29 +174,42 @@ reproduction evidence before earning the bounty-grade path.
 Model economics are forward-only. The multiplier is signed into each new
 runtime receipt, so v0.17.0 does not rewrite or recompute older ATP allocations.
 
-| Model or declared tier | New receipt multiplier |
-| --- | ---: |
-| `kimi-k3` | `50.0x` |
-| `minimax-m3` | `10.0x` |
-| `gpt-oss-120b` | `10.0x` |
-| `glm-4` / `glm-5` and later | `10.0x` |
-| `kimi` (pre-K3), `qwen-max`, `claude`, `gpt-4`/`gpt-5`, `gemini`, `deepseek`, `llama-4`, `mistral-large`, frontier/cloud labels | `10.0x` |
-| `gpt-oss-20b` | `3.0x` |
-| `70b` / `72b` local models | `3.0x` |
-| `32b` / `34b` local models | `2.5x` |
-| `20b` / `22b` / `24b` local models | `2.0x` |
-| `13b` / `14b` local models | `1.6x` |
-| `7b` / `8b` local models | `1.0x` |
-| Unknown small/local models | `0.9x` |
+| Model or declared tier | New receipt multiplier | Basis |
+| --- | ---: | --- |
+| `kimi-k3` | `50.0x` | Reserved top tier. 2.8T parameters, 1M context. No network data yet |
+| `glm-5.2` | `20.0x` | **Earned.** Best-measured model on the network: 3.75 findings/pass, 53% unique titles, 81 tok/s, 102/102 passes cleared the coverage gate |
+| `minimax-m3` | `10.0x` | Frontier, cloud-served |
+| `gpt-oss-120b` | `10.0x` | Frontier |
+| `glm-5.1`, `glm-5.x`, `glm-4.x` | `10.0x` | Frontier |
+| `kimi` (pre-K3), `qwen-max`, `claude`, `gpt-4`/`gpt-5`, `gemini`, `deepseek`, `llama-4`, `mistral-large`, `405b`, `120b`, frontier/cloud labels | `10.0x` | Frontier |
+| `gpt-oss-20b` | `3.0x` | Large local. 21B MoE, ~3.6B active |
+| `70b` / `72b` local | `3.0x` | Large local |
+| `32b` / `34b` local | `2.5x` | |
+| `20b` / `22b` / `24b` local | `2.0x` | |
+| `13b` / `14b` local | `1.6x` | |
+| `7b` / `8b` local | `1.0x` | |
+| Unknown small/local | `0.9x` | Floor |
 
-Any multiplier above `3.0x` on a cloud-proxied runtime is gated on measured
-throughput. A contribution that declares the cloud tier but reports fewer than
-25 tokens/sec — or omits the measurement entirely — is credited at `3.0x`, the
-large-local ceiling. The gate is deliberately one-sided: large *local* models
-are legitimately slower than small ones, so low throughput is never held against
-a local claim. This raises the cost of relabelling a small local model from one
-shell command to a patched binary. Model identity is not cryptographically
-provable, so this is a filter, not a proof.
+Tiers are matched most-specific-first, so `glm-5.2` does not widen to every
+`glm-5.x`, `kimi-k3` does not widen to every `kimi`, and `gpt-oss-120b` never
+falls through to the generic `20b` rule. A new model release must earn its tier
+on its own measured output rather than inheriting a sibling's.
+
+**Two gates sit between the declared tier and what is actually paid.**
+
+*Throughput gate.* Any multiplier above `3.0x` on a cloud-proxied runtime
+requires measured throughput of at least 25 tokens/sec. A contribution that
+declares the cloud tier but reports less — or omits the measurement entirely —
+is credited at `3.0x`, the large-local ceiling. The gate is deliberately
+one-sided: large *local* models are legitimately slower than small ones, so low
+throughput is never held against a local claim. This raises the cost of
+relabelling a small local model from one shell command to a patched binary.
+Model identity is not cryptographically provable, so it is a filter, not a proof.
+
+*Output-quality gate.* The full multiplier applies only to a contribution with
+at least one reportable finding, or at least three evidence-backed coverage
+items. Anything less is capped at `1.0x` regardless of tier. A frontier model
+that returns thin output earns frontier rates on nothing.
 
 Parser fallback still earns the deterministic `0.10x` proof-quality tier, and
 low-evidence structured coverage earns the `0.20x` proof-quality tier. Strong
@@ -411,6 +431,15 @@ Artifact Two independently returns:
   count actual active peer links rather than local/self state. Rendezvous
   discovery dials now respect peer failure cooldowns, preventing stale peer
   records from repeatedly consuming relay circuit budget.
+- v0.17.4 is a non-mandatory Mainnet model-scoring release. `glm-5.2` earns a
+  `20.0x` tier on measured output: 3.75 findings per pass at 53% unique titles
+  and 81 tok/s across 102 passes, and 102/102 of those passes carried three or
+  more evidence-backed coverage items, so every one of them cleared the
+  output-quality gate. `glm-5.1` stays at `10.0x` and a future `glm-5.3` starts
+  at `10.0x`, because tiers are earned per release rather than inherited. The
+  README scoring chart now documents the throughput gate and the output-quality
+  gate alongside the tier table, since the declared tier alone has never been
+  what a contribution is actually paid.
 - v0.17.3 is a non-mandatory Mainnet headless-worker release. `CYPHES_HEADLESS=1`
   (or `--headless`) branches before Tauri is constructed, because building the
   Tauri runtime initialises GTK and requires a display. The headless path builds
