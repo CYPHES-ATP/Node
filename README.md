@@ -96,16 +96,17 @@ require a signed contribution, a signed acceptance from an independent verifier,
 and a deterministic allocation that matches the receipt data. Self-verification
 can still test the local loop, but it cannot mint earned ATP.
 
-macOS downloads:
+Downloads:
 
 - [Download CYPHES v0.17.4 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.4/CYPHES_0.17.4_aarch64.dmg)
 - [Download CYPHES v0.17.4 for Intel Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.4/CYPHES_0.17.4_x64.dmg)
+- [Download CYPHES v0.17.4 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.4/CYPHES_0.17.4_x64-setup.exe)
 
 Checksums and release notes: [`release/v0.17.4/`](release/v0.17.4/). Verify with
 `shasum -a 256 -c SHA256SUMS.txt` before installing.
 
-Linux nodes run headless from source — see **Headless nodes** below. No Windows
-build was cut for v0.17.4; Windows operators should stay on v0.17.0.
+Linux nodes run headless from source — see **Headless nodes** below. The Windows
+x64 setup build is unsigned; verify its checksum before installing.
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then

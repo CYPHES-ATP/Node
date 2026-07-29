@@ -79,11 +79,12 @@ CYPHES_HEADLESS=1 CYPHES_CONTRIBUTE=0 RUST_LOG=cyphes_desktop_lib=info \
 
 ## Assets
 
-macOS only this release. Linux nodes run headless from source; a Windows build
-was not cut.
+Linux nodes run headless from source. The Windows x64 setup build is unsigned;
+verify its checksum before installing.
 
 - `CYPHES_0.17.4_aarch64.dmg` — Apple Silicon
 - `CYPHES_0.17.4_x64.dmg` — Intel
+- `CYPHES_0.17.4_x64-setup.exe` — Windows x64
 - `SHA256SUMS.txt`
 
 ## Checksums
@@ -91,6 +92,7 @@ was not cut.
 ```text
 fc25d8cb74886b929ffd1b8472102f89bf274d1f769137c0cfcc3f8fab7a5fcd  CYPHES_0.17.4_aarch64.dmg
 31c9345ea16cfa052796ba5f054995547f94cd9df0bdc6c860e4fb9a3095b724  CYPHES_0.17.4_x64.dmg
+44347f5a796ff03c9158b744247dbcaa80e31f63135e54ae64b1d7478dfb0e82  CYPHES_0.17.4_x64-setup.exe
 ```
 
 Verify before installing:
@@ -99,6 +101,6 @@ Verify before installing:
 shasum -a 256 -c SHA256SUMS.txt
 ```
 
-Both builds are ad hoc signed and not Apple-notarized. After installing,
+The macOS builds are ad hoc signed and not Apple-notarized. After installing,
 Control-click the app and choose **Open**, or strip the quarantine attribute
-with `xattr -dr com.apple.quarantine`.
+with `xattr -dr com.apple.quarantine`. The Windows x64 setup build is unsigned.
