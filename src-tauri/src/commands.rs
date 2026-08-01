@@ -102,6 +102,7 @@ pub struct InspectedRepository {
     pub repository: RepositorySummary,
     pub focus_path: Option<String>,
     pub focus_ref: Option<String>,
+    pub archived: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +113,8 @@ struct GitHubRepositoryResponse {
     default_branch: String,
     stargazers_count: u64,
     private: bool,
+    #[serde(default)]
+    archived: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,6 +162,18 @@ pub struct GuardianTarget {
     pub contract_paths: Vec<String>,
     pub docs_url: Option<String>,
     pub security_url: Option<String>,
+    pub bounty_program_url: Option<String>,
+    pub bounty_scope_captured_at: Option<String>,
+    #[serde(default)]
+    pub repository_scope_status: String,
+    #[serde(default)]
+    pub implementation_status: String,
+    #[serde(default)]
+    pub review_class: String,
+    #[serde(default)]
+    pub impact_categories: Vec<String>,
+    #[serde(default)]
+    pub assumptions_out_of_scope: Vec<String>,
     pub in_scope_text: Option<String>,
     pub out_of_scope_text: Option<String>,
     pub last_audited_commit: Option<String>,
@@ -262,6 +277,7 @@ pub async fn inspect_github_repository(url: String) -> Result<InspectedRepositor
         },
         focus_path,
         focus_ref,
+        archived: repository.archived,
     })
 }
 
@@ -1598,10 +1614,49 @@ mod tests {
         ))
         .expect("guardian target index should parse");
 
-        assert!(index.targets.len() >= 142);
+        assert_eq!(index.targets.len(), 280);
+        let mut ids = HashSet::new();
+        let mut bounty_guided = 0;
+        let mut program_linked = 0;
         for target in index.targets {
+            assert!(
+                ids.insert(target.target_id.clone()),
+                "duplicate guardian target id"
+            );
             assert!(target.repo_url.starts_with("https://github.com/"));
             assert!(target.source.iter().any(|source| source == "github"));
+            if target.source.iter().any(|source| source == "bounty-guided") {
+                bounty_guided += 1;
+                assert!(!target
+                    .bounty_scope_captured_at
+                    .as_deref()
+                    .unwrap_or_default()
+                    .is_empty());
+                assert!(target
+                    .source
+                    .iter()
+                    .any(|source| source == "cantina" || source == "immunefi"));
+                assert!(target
+                    .security_url
+                    .as_deref()
+                    .is_some_and(|url| url.starts_with("https://cantina.xyz/bounties/")
+                        || url.starts_with("https://immunefi.com/bug-bounty/")));
+            }
+            if target
+                .source
+                .iter()
+                .any(|source| source == "program-linked")
+            {
+                program_linked += 1;
+                assert_eq!(
+                    target.repository_scope_status,
+                    "program-linked-needs-human-confirmation"
+                );
+                assert!(target.impact_categories.is_empty());
+            }
+            assert!(!target.implementation_status.trim().is_empty());
+            assert!(!target.review_class.trim().is_empty());
+            assert!(!target.assumptions_out_of_scope.is_empty());
             assert!(!target.category.trim().is_empty());
             assert!(target.tvl_risk_rank > 0);
             assert!(target.contract_criticality > 0);
@@ -1611,6 +1666,8 @@ mod tests {
             assert!(!target.audit_brief.to_lowercase().contains("immunefi"));
             assert!(target.audit_brief.contains("Do not submit externally"));
         }
+        assert_eq!(bounty_guided, 115);
+        assert_eq!(program_linked, 75);
     }
 
     #[test]

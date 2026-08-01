@@ -26,6 +26,7 @@ export interface InspectedRepository {
   repository: RepositorySummary;
   focusPath?: string;
   focusRef?: string;
+  archived?: boolean;
 }
 
 export interface RepositoryTarget {
@@ -352,6 +353,13 @@ export interface GuardianTarget {
   contractPaths: string[];
   docsUrl?: string;
   securityUrl?: string;
+  bountyProgramUrl?: string | null;
+  bountyScopeCapturedAt?: string | null;
+  repositoryScopeStatus: string;
+  implementationStatus: string;
+  reviewClass: string;
+  impactCategories: string[];
+  assumptionsOutOfScope: string[];
   inScopeText?: string;
   outOfScopeText?: string;
   lastAuditedCommit?: string | null;

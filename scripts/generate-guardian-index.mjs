@@ -79,6 +79,175 @@ const protocols = [
   ["Forge Std", "Testing Library", ["Ethereum"], 71, "https://github.com/foundry-rs/forge-std", [], "https://book.getfoundry.sh/forge/forge-std", "https://github.com/foundry-rs/forge-std/security"],
   ["Ethereum Execution Specs", "Protocol", ["Ethereum"], 72, "https://github.com/ethereum/execution-specs", [], "https://ethereum.github.io/execution-specs/", "https://github.com/ethereum/execution-specs/security"],
   ["Reth", "Execution Client", ["Ethereum"], 73, "https://github.com/paradigmxyz/reth", [], "https://reth.rs/", "https://github.com/paradigmxyz/reth/security"],
+  // Current public-bounty repositories, used as a relevance guide for broad
+  // guardian coverage. A repository appearing here is not a claim that every
+  // file or impact is bounty-eligible; human triage still checks live scope.
+  ["Euler Vault Kit", "Lending", ["Ethereum"], 74, "https://github.com/euler-xyz/euler-vault-kit", [], "https://docs.euler.finance/", "https://cantina.xyz/bounties/4d285eee-602e-440a-845e-25e155cec26a", ["cantina", "github", "bounty-guided"]],
+  ["Euler EVC", "Lending Infrastructure", ["Ethereum"], 75, "https://github.com/euler-xyz/ethereum-vault-connector", [], "https://docs.euler.finance/", "https://cantina.xyz/bounties/4d285eee-602e-440a-845e-25e155cec26a", ["cantina", "github", "bounty-guided"]],
+  ["Euler Price Oracle", "Oracle", ["Ethereum"], 76, "https://github.com/euler-xyz/euler-price-oracle", [], "https://docs.euler.finance/", "https://cantina.xyz/bounties/4d285eee-602e-440a-845e-25e155cec26a", ["cantina", "github", "bounty-guided"]],
+  ["EulerSwap", "DEX", ["Ethereum"], 77, "https://github.com/euler-xyz/euler-swap", [], "https://docs.euler.finance/", "https://cantina.xyz/bounties/4d285eee-602e-440a-845e-25e155cec26a", ["cantina", "github", "bounty-guided"]],
+  ["Euler Earn", "Yield", ["Ethereum"], 78, "https://github.com/euler-xyz/euler-earn", [], "https://docs.euler.finance/", "https://cantina.xyz/bounties/4d285eee-602e-440a-845e-25e155cec26a", ["cantina", "github", "bounty-guided"]],
+  ["Euler Fee Flow", "Auction", ["Ethereum"], 79, "https://github.com/euler-xyz/fee-flow", [], "https://docs.euler.finance/", "https://cantina.xyz/bounties/4d285eee-602e-440a-845e-25e155cec26a", ["cantina", "github", "bounty-guided"]],
+  ["Euler Reward Streams", "Rewards", ["Ethereum"], 80, "https://github.com/euler-xyz/reward-streams", [], "https://docs.euler.finance/", "https://cantina.xyz/bounties/4d285eee-602e-440a-845e-25e155cec26a", ["cantina", "github", "bounty-guided"]],
+  ["MetaMorpho", "Lending", ["Ethereum", "Base"], 81, "https://github.com/morpho-org/metamorpho", [], "https://docs.morpho.org/", "https://cantina.xyz/bounties/35a5f0a1-2ffd-432c-8f3b-77d169add8c3", ["cantina", "github", "bounty-guided"]],
+  ["Morpho Vault V2", "Lending", ["Ethereum", "Base"], 82, "https://github.com/morpho-org/vault-v2", [], "https://docs.morpho.org/", "https://cantina.xyz/bounties/35a5f0a1-2ffd-432c-8f3b-77d169add8c3", ["cantina", "github", "bounty-guided"]],
+  ["Morpho Bundler3", "Lending Infrastructure", ["Ethereum", "Base"], 83, "https://github.com/morpho-org/bundler3", [], "https://docs.morpho.org/", "https://cantina.xyz/bounties/35a5f0a1-2ffd-432c-8f3b-77d169add8c3", ["cantina", "github", "bounty-guided"]],
+  ["Morpho Pre-liquidation", "Liquidation", ["Ethereum", "Base"], 84, "https://github.com/morpho-org/pre-liquidation", [], "https://docs.morpho.org/", "https://cantina.xyz/bounties/35a5f0a1-2ffd-432c-8f3b-77d169add8c3", ["cantina", "github", "bounty-guided"]],
+  ["Morpho Public Allocator", "Lending Infrastructure", ["Ethereum", "Base"], 85, "https://github.com/morpho-org/public-allocator", [], "https://docs.morpho.org/", "https://cantina.xyz/bounties/35a5f0a1-2ffd-432c-8f3b-77d169add8c3", ["cantina", "github", "bounty-guided"]],
+  ["Morpho Blue Oracles", "Oracle", ["Ethereum", "Base"], 86, "https://github.com/morpho-org/morpho-blue-oracles", [], "https://docs.morpho.org/", "https://cantina.xyz/bounties/35a5f0a1-2ffd-432c-8f3b-77d169add8c3", ["cantina", "github", "bounty-guided"]],
+  ["Reserve Protocol", "Asset-backed Token", ["Ethereum", "Base"], 87, "https://github.com/reserve-protocol/protocol", [], "https://reserve.org/protocol/", "https://cantina.xyz/bounties/3709ca85-4050-407e-9b36-51f5d5ea9b00", ["cantina", "github", "bounty-guided"]],
+  ["Reserve Index DTF", "Index", ["Ethereum", "Base"], 88, "https://github.com/reserve-protocol/reserve-index-dtf", [], "https://reserve.org/protocol/", "https://cantina.xyz/bounties/3709ca85-4050-407e-9b36-51f5d5ea9b00", ["cantina", "github", "bounty-guided"]],
+  ["Polymarket Contract Security", "Prediction Markets", ["Polygon"], 89, "https://github.com/Polymarket/contract-security", [], "https://docs.polymarket.com/", "https://cantina.xyz/bounties/ff945ca2-2a6e-4b83-b1b6-7a0cd3b94bea", ["cantina", "github", "bounty-guided"]],
+  ["Polymarket CTF Exchange V2", "Prediction Markets", ["Polygon"], 90, "https://github.com/Polymarket/ctf-exchange-v2", [], "https://docs.polymarket.com/", "https://cantina.xyz/bounties/ff945ca2-2a6e-4b83-b1b6-7a0cd3b94bea", ["cantina", "github", "bounty-guided"]],
+  ["Paxos PYUSD", "Stablecoin", ["Ethereum", "Solana"], 91, "https://github.com/paxosglobal/pyusd-contract", [], "https://docs.paxos.com/", "https://cantina.xyz/bounties/6a6ef71c-383d-4357-85c1-a0d1dbb6659b", ["cantina", "github", "bounty-guided"]],
+  ["Paxos USDG", "Stablecoin", ["Ethereum"], 92, "https://github.com/paxosglobal/usdg-contract", [], "https://docs.paxos.com/", "https://cantina.xyz/bounties/6a6ef71c-383d-4357-85c1-a0d1dbb6659b", ["cantina", "github", "bounty-guided"]],
+  ["Paxos Cross-chain", "Bridge", ["Ethereum", "Solana"], 93, "https://github.com/paxosglobal/cross-chain-contracts", [], "https://docs.paxos.com/", "https://cantina.xyz/bounties/6a6ef71c-383d-4357-85c1-a0d1dbb6659b", ["cantina", "github", "bounty-guided"]],
+  ["UniswapX", "DEX Aggregator", ["Ethereum", "Unichain"], 94, "https://github.com/Uniswap/UniswapX", [], "https://docs.uniswap.org/", "https://cantina.xyz/bounties/f9df94db-c7b1-434b-bb06-d1360abdd1be", ["cantina", "github", "bounty-guided"]],
+  ["Uniswap Protocol Fees", "DEX", ["Ethereum", "Unichain"], 95, "https://github.com/Uniswap/protocol-fees", [], "https://docs.uniswap.org/", "https://cantina.xyz/bounties/f9df94db-c7b1-434b-bb06-d1360abdd1be", ["cantina", "github", "bounty-guided"]],
+  ["LI.FI Contracts", "Bridge Aggregator", ["Ethereum", "Arbitrum", "Base"], 96, "https://github.com/lifinance/contracts", [], "https://docs.li.fi/", "https://cantina.xyz/bounties/260585d8-a3e8-4d70-8077-b6f3f5f0391b", ["cantina", "github", "bounty-guided"]],
+  ["Centrifuge Protocol", "RWA", ["Ethereum", "Base"], 97, "https://github.com/centrifuge/protocol", [], "https://docs.centrifuge.io/", "https://cantina.xyz/bounties/6cc9d51a-ac1e-4385-a88a-a3924e40c00e", ["cantina", "github", "bounty-guided"]],
+  ["Alchemy Modular Account", "Smart Account", ["Ethereum", "Base"], 98, "https://github.com/alchemyplatform/modular-account", [], "https://accountkit.alchemy.com/", "https://cantina.xyz/bounties/246de4d3-e138-4340-bdfc-fc4c95951491", ["cantina", "github", "bounty-guided"]],
+  ["Ethena Public Assets", "Stablecoin", ["Ethereum"], 99, "https://github.com/ethena-labs/bbp-public-assets", [], "https://docs.ethena.fi/", "https://immunefi.com/bug-bounty/ethena/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Ether.fi Smart Contracts", "Liquid Restaking", ["Ethereum"], 100, "https://github.com/etherfi-protocol/smart-contracts", [], "https://etherfi.gitbook.io/etherfi/", "https://immunefi.com/bug-bounty/etherfi/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Ether.fi Cash V3", "Smart Account", ["Ethereum"], 101, "https://github.com/etherfi-protocol/cash-v3", [], "https://etherfi.gitbook.io/etherfi/", "https://immunefi.com/bug-bounty/etherfi/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Babylon", "Bitcoin Staking", ["Bitcoin", "Cosmos"], 102, "https://github.com/babylonlabs-io/babylon", [], "https://docs.babylonlabs.io/", "https://immunefi.com/bug-bounty/babylon-labs/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Berachain Contracts", "L1", ["Berachain"], 103, "https://github.com/berachain/contracts", [], "https://docs.berachain.com/", "https://immunefi.com/bug-bounty/berachain/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Berachain Beacon Kit", "Consensus", ["Berachain"], 104, "https://github.com/berachain/beacon-kit", [], "https://docs.berachain.com/", "https://immunefi.com/bug-bounty/berachain/information/", ["immunefi", "github", "bounty-guided"]],
+  ["deBridge", "Bridge", ["Ethereum", "Solana"], 105, "https://github.com/debridge-finance/debridge-contracts-v1", [], "https://docs.debridge.com/", "https://immunefi.com/bug-bounty/debridge/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Celer SGN V2", "Bridge", ["Ethereum", "BNB Chain"], 106, "https://github.com/celer-network/sgn-v2-contracts", [], "https://cbridge-docs.celer.network/", "https://immunefi.com/bug-bounty/celer/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Enzyme Protocol", "Asset Management", ["Ethereum"], 107, "https://github.com/enzymefinance/protocol", [], "https://docs.enzyme.finance/", "https://immunefi.com/bug-bounty/enzymefinance/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Kamino Lending", "Lending", ["Solana"], 108, "https://github.com/Kamino-Finance/klend", [], "https://docs.kamino.finance/", "https://immunefi.com/bug-bounty/kamino/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Kamino Vault", "Yield", ["Solana"], 109, "https://github.com/Kamino-Finance/kvault", [], "https://docs.kamino.finance/", "https://immunefi.com/bug-bounty/kamino/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Jito Restaking", "Restaking", ["Solana"], 110, "https://github.com/jito-foundation/restaking", [], "https://docs.jito.network/", "https://immunefi.com/bug-bounty/jito/information/", ["immunefi", "github", "bounty-guided"]],
+  ["SSV Network", "Validator Infrastructure", ["Ethereum"], 111, "https://github.com/ssvlabs/ssv-network", [], "https://docs.ssv.network/", "https://immunefi.com/bug-bounty/ssvnetwork/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Lombard EVM Contracts", "Bitcoin LST", ["Ethereum"], 112, "https://github.com/lombard-finance/evm-smart-contracts", [], "https://docs.lombard.finance/", "https://immunefi.com/bug-bounty/lombard-finance/information/", ["immunefi", "github", "bounty-guided"]],
+  ["Zest Protocol V2", "Bitcoin Lending", ["Stacks"], 113, "https://github.com/Zest-Protocol/zest-v2-contracts", [], "https://docs.zestprotocol.com/", "https://immunefi.com/bug-bounty/zest-protocol-v2/information/", ["immunefi", "github", "bounty-guided"]],
+];
+
+// Second-pass expansion from the full live Immunefi program directory. These
+// repositories are linked by the program, but CYPHES deliberately records them
+// as `program-linked` until a human confirms the exact current asset/path scope.
+// That keeps the discovery surface broad without turning a repository link into
+// an automatic bounty-eligibility claim.
+const bountyExpansion = [
+  ["0x Settler", "DEX Aggregator", ["Ethereum"], "https://github.com/0xProject/0x-settler", "0x"],
+  ["Aave V3 Origin", "Lending", ["Ethereum"], "https://github.com/aave-dao/aave-v3-origin", "aave"],
+  ["Aave GHO Origin", "Stablecoin", ["Ethereum"], "https://github.com/aave-dao/gho-origin", "aave"],
+  ["Aave Governance V3", "Governance", ["Ethereum"], "https://github.com/bgd-labs/aave-governance-v3", "aave"],
+  ["Aave Stake Token", "Staking", ["Ethereum"], "https://github.com/bgd-labs/stake-token", "aave"],
+  ["Aera", "Treasury", ["Ethereum"], "https://github.com/aera-finance/aera-contracts-public", "aera"],
+  ["Arbitrum Governance", "Governance", ["Arbitrum"], "https://github.com/ArbitrumFoundation/governance", "arbitrum"],
+  ["Arbitrum Nitro Contracts", "L2", ["Ethereum", "Arbitrum"], "https://github.com/OffchainLabs/nitro-contracts", "arbitrum"],
+  ["Arbitrum Token Bridge", "Bridge", ["Ethereum", "Arbitrum"], "https://github.com/OffchainLabs/token-bridge-contracts", "arbitrum"],
+  ["Axelar CGP", "Bridge", ["Ethereum", "Cosmos"], "https://github.com/axelarnetwork/axelar-cgp-solidity", "axelarnetwork"],
+  ["Axelar Core", "Bridge", ["Cosmos"], "https://github.com/axelarnetwork/axelar-core", "axelarnetwork"],
+  ["Axelar Interchain Token Service", "Bridge", ["Ethereum", "Cosmos"], "https://github.com/axelarnetwork/interchain-token-service", "axelarnetwork"],
+  ["Beanstalk", "Stablecoin", ["Ethereum"], "https://github.com/BeanstalkFarms/Beanstalk", "beanstalk"],
+  ["Beanstalk Basin", "DEX", ["Ethereum"], "https://github.com/BeanstalkFarms/Basin", "beanstalk"],
+  ["Beanstalk Pipeline", "Execution", ["Ethereum"], "https://github.com/BeanstalkFarms/Pipeline", "beanstalk"],
+  ["Capyfi", "Lending", ["Ethereum"], "https://github.com/Capyfi/capyfi-smart-contracts", "capyfi"],
+  ["Chainlink CCIP", "Bridge", ["Ethereum", "Solana"], "https://github.com/smartcontractkit/chainlink-ccip", "chainlink"],
+  ["Chainlink EVM", "Oracle", ["Ethereum"], "https://github.com/smartcontractkit/chainlink-evm", "chainlink"],
+  ["Chainlink Solana", "Oracle", ["Solana"], "https://github.com/smartcontractkit/chainlink-solana", "chainlink"],
+  ["Chainlink Sui", "Oracle", ["Sui"], "https://github.com/smartcontractkit/chainlink-sui", "chainlink"],
+  ["Chainlink libocr", "Oracle", ["Ethereum"], "https://github.com/smartcontractkit/libocr", "chainlink"],
+  ["Cosmos SDK", "L1", ["Cosmos"], "https://github.com/cosmos/cosmos-sdk", "cosmos"],
+  ["Cosmos EVM", "L1", ["Cosmos", "Ethereum"], "https://github.com/cosmos/evm", "cosmos"],
+  ["Cosmos Gaia", "L1", ["Cosmos"], "https://github.com/cosmos/gaia", "cosmos"],
+  ["IBC Go", "Bridge", ["Cosmos"], "https://github.com/cosmos/ibc-go", "cosmos"],
+  ["CosmWasm", "Smart Contract Runtime", ["Cosmos"], "https://github.com/CosmWasm/cosmwasm", "cosmos"],
+  ["CosmWasm wasmd", "Smart Contract Runtime", ["Cosmos"], "https://github.com/CosmWasm/wasmd", "cosmos"],
+  ["CosmWasm wasmvm", "Smart Contract Runtime", ["Cosmos"], "https://github.com/CosmWasm/wasmvm", "cosmos"],
+  ["IBC Hermes", "Bridge", ["Cosmos"], "https://github.com/informalsystems/hermes", "cosmos"],
+  ["CoW GPv2", "DEX Aggregator", ["Ethereum"], "https://github.com/gnosis/gp-v2-contracts", "cowprotocol"],
+  ["DeFi Saver V3", "Automation", ["Ethereum"], "https://github.com/defisaver/defisaver-v3-contracts", "defisaver"],
+  ["DeXe Protocol", "DAO", ["Ethereum", "BNB Chain"], "https://github.com/dexe-network/DeXe-Protocol", "dexeprotocol"],
+  ["Flux Finance", "Lending", ["Ethereum"], "https://github.com/flux-finance/contracts", "fluxfinance"],
+  ["GMX Synthetics", "Derivatives", ["Arbitrum", "Avalanche"], "https://github.com/gmx-io/gmx-synthetics", "gmx"],
+  ["Gnosis OmniBridge", "Bridge", ["Ethereum", "Gnosis"], "https://github.com/gnosischain/omnibridge", "gnosischain"],
+  ["Gnosis Token Bridge", "Bridge", ["Ethereum", "Gnosis"], "https://github.com/gnosischain/tokenbridge-contracts", "gnosischain"],
+  ["Immutable Contracts", "L2", ["Ethereum", "Immutable"], "https://github.com/immutable/contracts", "immutable"],
+  ["Immutable zkEVM Bridge", "Bridge", ["Ethereum", "Immutable"], "https://github.com/immutable/zkevm-bridge-contracts", "immutable"],
+  ["Instadapp Avocado", "Smart Account", ["Ethereum"], "https://github.com/Instadapp/avocado-contracts-public", "instadapp"],
+  ["Instadapp DSA", "Smart Account", ["Ethereum"], "https://github.com/Instadapp/dsa-contracts", "instadapp"],
+  ["Instadapp Fluid", "Lending", ["Ethereum"], "https://github.com/Instadapp/fluid-contracts-public", "instadapp"],
+  ["Kiln Deposit Batch", "Staking", ["Ethereum"], "https://github.com/kilnfi/deposit-batch-contract", "kiln"],
+  ["LayerZero Devtools", "Bridge", ["Ethereum", "Solana"], "https://github.com/LayerZero-Labs/devtools", "layerzero"],
+  ["LayerZero Legacy", "Bridge", ["Ethereum"], "https://github.com/LayerZero-Labs/LayerZero", "layerzero"],
+  ["Lido Community Staking Module", "Liquid Staking", ["Ethereum"], "https://github.com/lidofinance/community-staking-module", "lido"],
+  ["Lido Dual Governance", "Governance", ["Ethereum"], "https://github.com/lidofinance/dual-governance", "lido"],
+  ["Lido Easy Track", "Governance", ["Ethereum"], "https://github.com/lidofinance/easy-track", "lido"],
+  ["Lido L2", "Liquid Staking", ["Ethereum", "Optimism"], "https://github.com/lidofinance/lido-l2", "lido"],
+  ["Lido Oracle", "Oracle", ["Ethereum"], "https://github.com/lidofinance/lido-oracle", "lido"],
+  ["Lista Token", "Stablecoin", ["BNB Chain"], "https://github.com/lista-dao/lista-token", "listadao"],
+  ["Lista Moolah", "Lending", ["BNB Chain"], "https://github.com/lista-dao/moolah", "listadao"],
+  ["Olympus", "Treasury", ["Ethereum"], "https://github.com/OlympusDAO/olympus-contracts", "olympus"],
+  ["Orca Whirlpools", "DEX", ["Solana"], "https://github.com/orca-so/whirlpools", "orca"],
+  ["xOrca", "DEX", ["Solana"], "https://github.com/orca-so/xorca", "orca"],
+  ["Origin ARM OETH", "Yield", ["Ethereum"], "https://github.com/OriginProtocol/arm-oeth", "originprotocol"],
+  ["PancakeSwap Infinity Core", "DEX", ["BNB Chain", "Ethereum"], "https://github.com/pancakeswap/infinity-core", "pancakeswap"],
+  ["PancakeSwap Infinity Periphery", "DEX", ["BNB Chain", "Ethereum"], "https://github.com/pancakeswap/infinity-periphery", "pancakeswap"],
+  ["PancakeSwap Infinity Router", "DEX", ["BNB Chain", "Ethereum"], "https://github.com/pancakeswap/infinity-universal-router", "pancakeswap"],
+  ["Raydium AMM", "DEX", ["Solana"], "https://github.com/raydium-io/raydium-amm", "raydium"],
+  ["Raydium CLMM", "DEX", ["Solana"], "https://github.com/raydium-io/raydium-amm-v3", "raydium"],
+  ["Raydium CPMM", "DEX", ["Solana"], "https://github.com/raydium-io/raydium-cp-swap", "raydium"],
+  ["Rhino.fi Contracts", "Bridge", ["Ethereum", "Starknet"], "https://github.com/rhinofi/contracts_public", "rhinofi"],
+  ["Sei Chain", "L1", ["Sei"], "https://github.com/sei-protocol/sei-chain", "sei"],
+  ["Sky DSS", "CDP", ["Ethereum"], "https://github.com/sky-ecosystem/dss", "sky"],
+  ["Sky Lite PSM", "Stablecoin", ["Ethereum"], "https://github.com/sky-ecosystem/dss-lite-psm", "sky"],
+  ["Sky Flash", "Flash Mint", ["Ethereum"], "https://github.com/sky-ecosystem/dss-flash", "sky"],
+  ["Sky Lockstake", "Staking", ["Ethereum"], "https://github.com/sky-ecosystem/lockstake", "sky"],
+  ["Sky USDS", "Stablecoin", ["Ethereum"], "https://github.com/sky-ecosystem/usds", "sky"],
+  ["Spark ALM Controller", "Treasury", ["Ethereum"], "https://github.com/sparkdotfi/spark-alm-controller", "sparklend"],
+  ["Spark PSM", "Stablecoin", ["Ethereum"], "https://github.com/sparkdotfi/spark-psm", "sparklend"],
+  ["Spark ALM Controller", "Asset Management", ["Ethereum"], "https://github.com/sparkdotfi/spark-alm-controller", "sparklend"],
+  ["Spark Vaults V2", "Yield", ["Ethereum"], "https://github.com/sparkdotfi/spark-vaults-v2", "sparklend"],
+  ["Stader ETHx", "Liquid Staking", ["Ethereum"], "https://github.com/stader-labs/ethx", "staderforeth"],
+  ["Veda Boring Vault", "Vault", ["Ethereum"], "https://github.com/Veda-Labs/boring-vault", "veda"],
+  ["Wormhole Native Token Transfers", "Bridge", ["Ethereum", "Solana"], "https://github.com/wormhole-foundation/native-token-transfers", "wormhole"],
+];
+
+for (const [index, [name, category, chains, repoUrl, programSlug]] of bountyExpansion.entries()) {
+  protocols.push([
+    name,
+    category,
+    chains,
+    114 + index,
+    repoUrl,
+    [],
+    `https://immunefi.com/bug-bounty/${programSlug}/information/`,
+    `https://immunefi.com/bug-bounty/${programSlug}/information/`,
+    ["immunefi", "github", "bounty-guided", "program-linked"],
+  ]);
+}
+
+const historicalRepositories = new Set([
+  "https://github.com/compound-finance/compound-protocol",
+  "https://github.com/euler-xyz/euler-contracts",
+  "https://github.com/liquity/dev",
+  "https://github.com/ribbon-finance/ribbon-v2",
+  "https://github.com/yearn/yearn-vaults",
+].map((url) => url.toLowerCase()));
+
+const supersededRepositories = new Set([
+  "https://github.com/compound-finance/compound-protocol",
+  "https://github.com/euler-xyz/euler-contracts",
+  "https://github.com/liquity/dev",
+  "https://github.com/ribbon-finance/ribbon-v2",
+].map((url) => url.toLowerCase()));
+
+const financialImpactCategories = [
+  "Direct theft or loss of user funds",
+  "Permanent or temporary freezing of funds",
+  "Protocol insolvency or materially incorrect accounting",
+  "Governance result manipulation",
+  "Griefing with measurable protocol or user impact",
+];
+
+const scopeAssumptions = [
+  "Unsupported, fee-on-transfer, rebasing, or malicious tokens are not assumed in scope unless the program explicitly permits them or the attacker creates the condition.",
+  "Privileged, governance, or administrator behavior is not assumed malicious unless the attacker can obtain or alter that privilege through the reported exploit.",
+  "CI and configuration hardening is tracked separately from smart-contract bounty eligibility.",
 ];
 
 function slug(value) {
@@ -93,8 +262,23 @@ function creditBudget(rank, criticality) {
 }
 
 const targets = [];
-for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securityUrl] of protocols) {
+for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securityUrl, sources = sourceMix] of protocols) {
   const baseCriticality = Math.max(1, 6 - Math.floor((tvlRiskRank - 1) / 10));
+  const bountyGuided = sources.includes("bounty-guided");
+  const repositoryScopeStatus = bountyGuided
+    ? sources.includes("program-linked")
+      ? "program-linked-needs-human-confirmation"
+      : "explicit-program-repository"
+    : "guardian-curated-needs-human-confirmation";
+  const normalizedRepoUrl = repoUrl.toLowerCase();
+  const implementationStatus = supersededRepositories.has(normalizedRepoUrl)
+    ? "superseded"
+    : historicalRepositories.has(normalizedRepoUrl)
+      ? "historical"
+      : "current-at-snapshot";
+  const reviewClass = ["Compiler", "Execution Client", "Protocol", "Consensus", "L1", "Validator Infrastructure", "Smart Contract Runtime"].includes(category)
+    ? "protocol-code"
+    : "smart-contract";
   const selected = ["", ...(paths.length > 0 ? paths : [])];
   for (const [index, path] of selected.entries()) {
     const pathLabel = path || "repository";
@@ -103,7 +287,7 @@ for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securi
     targets.push({
       targetId,
       protocolName: name,
-      source: sourceMix,
+      source: sources,
       category,
       chains,
       tvlRiskRank,
@@ -112,6 +296,15 @@ for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securi
       contractPaths: path ? [path] : [],
       docsUrl,
       securityUrl,
+      bountyProgramUrl: bountyGuided ? securityUrl : null,
+      bountyScopeCapturedAt: bountyGuided ? "2026-08-01T16:00:00Z" : null,
+      repositoryScopeStatus,
+      implementationStatus,
+      reviewClass,
+      impactCategories: repositoryScopeStatus === "explicit-program-repository"
+        ? financialImpactCategories
+        : [],
+      assumptionsOutOfScope: scopeAssumptions,
       inScopeText: path
         ? `Public read-only review of ${path} at the pinned commit.`
         : "Public read-only review of repository security posture at the pinned commit.",
@@ -147,13 +340,15 @@ for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securi
 targets.sort((a, b) => b.priorityScore - a.priorityScore || a.tvlRiskRank - b.tvlRiskRank);
 
 const index = {
-  version: "0.15.1",
+  version: "0.17.6",
   label: "CYPHES Guardian Index v2",
-  generatedAt: "2026-07-05T16:20:35Z",
+  generatedAt: "2026-08-01T16:00:00Z",
   policy,
   notes: [
     "Bundled static seed for autonomous public guardian coverage.",
     "DeFiLlama is used as a risk-ranking source signal only; GitHub targets are manually curated and resolved to pinned commits by the app before work is created.",
+    "Immunefi and Cantina public programs guide additional repository selection; live bounty scope and eligibility still require human review.",
+    "Every bounty-guided target records a dated scope status; program-linked repositories remain discovery-only until a human confirms exact current asset and path scope.",
     "No external bounty submission or protocol contact occurs in auto mode.",
   ],
   targets,

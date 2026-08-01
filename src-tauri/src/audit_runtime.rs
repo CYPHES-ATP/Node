@@ -76,8 +76,9 @@ Rules:
 - Use an empty findings array when no vulnerability is found.
 - Coverage must be non-empty and evidence-backed. Name the files and functions
   you reviewed; do not restate the area label as its own evidence.
-- reportable:true requires concrete file/function/line, exploit path, impact,
-  reproduction steps, and a passing Exploitability Gate.
+- Models do not decide reportability. Emit status:candidate for a lead worth
+  validating and keep reportable:false. CYPHES may promote it only during the
+  dedicated finding-validation work unit after scope and exploitability gates.
 - A no-issue result is valid only when coverage explains what was checked.
 - Do not invent line numbers, tools, commands, or findings.
 "#;
@@ -312,6 +313,18 @@ pub async fn run_local_audit_skill(
     )
     .await?;
 
+    if scoped_target_source_absent(campaign, &context) {
+        emit_progress(
+            app,
+            campaign,
+            work_unit,
+            "Target source absent; recording successful abstention",
+            100,
+            None,
+        );
+        return target_source_absent_run(campaign, work_unit, provider, model, &context);
+    }
+
     emit_progress(app, campaign, work_unit, "Building model prompt", 32, None);
     let prompt = build_prompt(campaign, work_unit, &context, prior_contributions);
     let input_hash = sha256_ref(prompt.as_bytes());
@@ -425,6 +438,7 @@ pub async fn run_local_audit_skill(
             }
         }
     }
+    apply_validation_reportability(&mut parsed, campaign, work_unit);
     if parsed.parser_fallback {
         emit_progress(
             app,
@@ -979,6 +993,114 @@ async fn repository_context(
     })
 }
 
+fn scoped_target_source_absent(
+    campaign: &ProtocolAuditCampaign,
+    context: &RepositoryContext,
+) -> bool {
+    let scoped_paths = scoped_paths_from_campaign(campaign);
+    !scoped_paths.is_empty()
+        && scoped_paths.iter().all(|scoped| {
+            !context
+                .inventory
+                .iter()
+                .any(|path| path == scoped || path.starts_with(&format!("{scoped}/")))
+        })
+}
+
+fn target_source_absent_run(
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
+    provider: &str,
+    model: &str,
+    context: &RepositoryContext,
+) -> Result<LocalAuditSkillRun, String> {
+    let scoped_paths = scoped_paths_from_campaign(campaign);
+    let notes_markdown = format!(
+        "# Target source absent\n\nCYPHES abstained successfully: the requested target path{} {} not present in the pinned repository tree at `{}`. No vulnerability was inferred from missing source.",
+        if scoped_paths.len() == 1 { "" } else { "s" },
+        scoped_paths
+            .iter()
+            .map(|path| format!("`{path}`"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        campaign.repository.commit_sha
+    );
+    let findings: Vec<AuditFinding> = Vec::new();
+    let coverage = vec![CoverageItem {
+        area: "target source availability".to_string(),
+        status: "abstained_source_absent".to_string(),
+        evidence: vec![format!(
+            "Pinned tree inventoried {} files; requested target source absent: {}",
+            context.inventory.len(),
+            scoped_paths.join(", ")
+        )],
+    }];
+    let commands = vec![
+        "Compared requested scoped paths against the pinned GitHub tree and abstained without inventing a finding."
+            .to_string(),
+    ];
+    let findings_json = serde_json::to_vec_pretty(&findings).map_err(|error| error.to_string())?;
+    let coverage_json = serde_json::to_vec_pretty(&coverage).map_err(|error| error.to_string())?;
+    let runtime_json = serde_json::to_vec_pretty(&json!({
+        "provider": provider,
+        "model": model,
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "workUnitId": work_unit.work_unit_id,
+        "targetSourceAbsent": true,
+        "requestedPaths": scoped_paths,
+        "treeFilesInventoried": context.inventory.len(),
+        "creditQualityMultiplier": 1.0,
+        "abstentionPenalty": 0.0,
+    }))
+    .map_err(|error| error.to_string())?;
+    let artifacts = vec![
+        artifact(
+            "audit-skill-output.md",
+            "text/markdown",
+            notes_markdown.as_bytes(),
+        ),
+        artifact("findings.json", "application/json", &findings_json),
+        artifact("coverage.json", "application/json", &coverage_json),
+        artifact("runtime.json", "application/json", &runtime_json),
+    ];
+    let input_hash = sha256_ref(
+        format!(
+            "{}:{}:{}",
+            campaign.campaign_id, work_unit.work_unit_id, campaign.repository.commit_sha
+        )
+        .as_bytes(),
+    );
+    Ok(LocalAuditSkillRun {
+        runtime: RuntimeDescriptor {
+            operator: "CYPHES source-availability guard".to_string(),
+            adapter: provider_adapter(provider).to_string(),
+            model: model.to_string(),
+            model_multiplier: model_multiplier(model),
+            tool_policy: vec![
+                "github-read-only-pinned-commit".to_string(),
+                "target-source-availability-check".to_string(),
+                "successful-abstention-no-hallucination-penalty".to_string(),
+            ],
+            connected: true,
+            endpoint_class: Some("local".to_string()),
+            provider_class: Some(provider_class(provider, model).to_string()),
+            declared_parameter_tier: Some(declared_parameter_tier(model)),
+            context_window_tokens: declared_context_window_tokens(model),
+            app_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            worker_mode: Some("verifier-and-worker".to_string()),
+            skill_hash: Some(sha256_ref(effective_skill_text(campaign).as_bytes())),
+            input_hash: Some(input_hash),
+            output_hash: Some(sha256_ref(notes_markdown.as_bytes())),
+            tokens_per_second: None,
+        },
+        notes_markdown,
+        findings,
+        artifacts,
+        coverage,
+        commands,
+    })
+}
+
 /// Resolve files referenced by already-selected sources: Solidity/Vyper imports,
 /// inherited base contracts, and `implements:` declarations. Returns repository
 /// paths that are present in the tree and not already selected.
@@ -1249,6 +1371,8 @@ fn normalize_scoped_path(value: &str) -> Option<String> {
         .trim_start_matches('/')
         .trim();
     if path.is_empty()
+        || path.eq_ignore_ascii_case("repository root")
+        || path.eq_ignore_ascii_case("repository source tree")
         || path.contains("://")
         || path == "."
         || path.split('/').any(|segment| segment == "..")
@@ -1625,15 +1749,125 @@ fn value_to_finding((index, value): (usize, &Value), commands: &[String]) -> Aud
             .and_then(Value::as_str)
             .map(ToString::to_string),
         evidence: string_array(value, "evidence"),
-        reportable: requested_reportable,
+        // The model's boolean is advisory input only. Reportability is derived
+        // later from a dedicated validation work unit plus campaign scope.
+        reportable: false,
     };
     if requested_reportable && !finding_has_bounty_grade_evidence(&finding, commands) {
-        finding.reportable = false;
         if finding.status == "candidate" {
             finding.status = "needs_reproduction".to_string();
         }
     }
     finding
+}
+
+fn apply_validation_reportability(
+    output: &mut ParsedModelOutput,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
+) {
+    let scope_ready = campaign_scope_allows_reportability(campaign);
+    for finding in &mut output.findings {
+        finding.reportable = false;
+        if finding.status != "candidate" {
+            continue;
+        }
+        let evidence_ready = finding_has_bounty_grade_evidence(finding, &output.commands);
+        let assumptions_ready = finding_assumptions_are_eligible(finding);
+        let review_class_ready = finding_matches_campaign_review_class(finding, campaign);
+        if work_unit.kind == "finding-validation"
+            && scope_ready
+            && evidence_ready
+            && assumptions_ready
+            && review_class_ready
+        {
+            finding.reportable = true;
+        } else if !evidence_ready {
+            finding.status = "needs_reproduction".to_string();
+        } else {
+            finding.status = "needs_review".to_string();
+        }
+    }
+}
+
+fn campaign_scope_allows_reportability(campaign: &ProtocolAuditCampaign) -> bool {
+    let scope = campaign.scope_text.to_ascii_lowercase();
+    campaign.bounty_url.is_some()
+        && !campaign.impacts_in_scope.is_empty()
+        && scope.contains("repository scope status: explicit-program-repository")
+        && scope.contains("contract scope:")
+        && !scope.contains("contract scope: repository-root-needs-human-confirmation")
+        && scope.contains("implementation status: current-at-snapshot")
+        && scope.contains("repository archived: false")
+}
+
+fn finding_assumptions_are_eligible(finding: &AuditFinding) -> bool {
+    let combined = format!(
+        "{}\n{}\n{}",
+        finding.title,
+        finding.impact.as_deref().unwrap_or_default(),
+        finding.evidence.join("\n")
+    )
+    .to_ascii_lowercase();
+    let unsupported_token_assumption = [
+        "fee-on-transfer",
+        "deflationary token",
+        "rebasing token",
+        "malicious token",
+        "unsupported token",
+    ]
+    .iter()
+    .any(|marker| combined.contains(marker));
+    let token_scope_proven = [
+        "token is supported",
+        "asset is supported",
+        "listing permits",
+        "program explicitly permits",
+        "attacker creates the token condition",
+    ]
+    .iter()
+    .any(|marker| combined.contains(marker));
+    let privileged_assumption = [
+        "privileged address",
+        "malicious admin",
+        "malicious governance",
+        "trusted role",
+        "only owner",
+        "only governance",
+    ]
+    .iter()
+    .any(|marker| combined.contains(marker));
+    let privilege_created_by_exploit = [
+        "unprivileged attacker",
+        "attacker obtains",
+        "attacker escalates",
+        "attacker can become",
+        "privilege escalation",
+        "bypass the privileged",
+    ]
+    .iter()
+    .any(|marker| combined.contains(marker));
+    (!unsupported_token_assumption || token_scope_proven)
+        && (!privileged_assumption || privilege_created_by_exploit)
+}
+
+fn finding_matches_campaign_review_class(
+    finding: &AuditFinding,
+    campaign: &ProtocolAuditCampaign,
+) -> bool {
+    let combined =
+        format!("{}\n{}", finding.title, finding.evidence.join("\n")).to_ascii_lowercase();
+    let is_ci_or_config = [
+        ".github/workflows",
+        "github actions",
+        "workflow permissions",
+        "ci.yml",
+        "ci.yaml",
+        "configuration hardening",
+    ]
+    .iter()
+    .any(|marker| combined.contains(marker));
+    !is_ci_or_config || campaign.scope_text.contains("Review class: ci-config")
 }
 
 fn finding_has_bounty_grade_evidence(finding: &AuditFinding, commands: &[String]) -> bool {
@@ -1941,6 +2175,11 @@ const MODEL_TIERS: &[(&str, f64)] = &[
     ("gpt-5", 10.0),
     ("gpt-4", 10.0),
     ("gemini", 10.0),
+    // DeepSeek V4 Flash is priced as an exact-family earned tier. The first
+    // live sample combined low inference cost with useful lead generation and
+    // self-correction during validation. Keep this ahead of older DeepSeek
+    // patterns so they retain their existing 10x tier.
+    ("deepseek-v4-flash", 17.5),
     ("deepseek-r1", 10.0),
     ("deepseek-v3", 10.0),
     ("glm-5", 10.0),
@@ -2013,6 +2252,47 @@ fn truncate_bytes(value: &str, max_bytes: usize) -> String {
 mod tests {
     use super::*;
 
+    fn scoped_campaign(extra_scope: &str) -> ProtocolAuditCampaign {
+        ProtocolAuditCampaign::new(
+            "Example Protocol".to_string(),
+            RepositoryTarget {
+                full_name: "example/protocol".to_string(),
+                url: "https://github.com/example/protocol".to_string(),
+                commit_sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            },
+            format!(
+                "Repository scope status: explicit-program-repository\nContract scope: contracts/Vault.sol\nImplementation status: current-at-snapshot\nRepository archived: false\nReview class: smart-contract\n{extra_scope}"
+            ),
+            Some("https://immunefi.com/bug-bounty/example/information/".to_string()),
+            vec!["Direct theft of user funds".to_string()],
+            vec!["Unsupported-token assumptions".to_string()],
+            None,
+            None,
+            Vec::new(),
+            None,
+            "agent_example".to_string(),
+        )
+        .expect("campaign fixture")
+    }
+
+    fn validation_work_unit(campaign: &ProtocolAuditCampaign) -> AuditWorkUnit {
+        AuditWorkUnit {
+            profile: "cyphes.audit-work-unit/0.1".to_string(),
+            profile_version: "0.1".to_string(),
+            work_unit_id: "work-validation".to_string(),
+            campaign_id: campaign.campaign_id.clone(),
+            kind: "finding-validation".to_string(),
+            title: "Finding validation".to_string(),
+            instructions: "Validate scope and reproduce the exploit.".to_string(),
+            expected_artifacts: vec!["findings.json".to_string()],
+            status: "open".to_string(),
+            claimed_by_agent_id: None,
+            claim_id: None,
+            claimed_at: None,
+            created_at: "2026-08-01T16:00:00Z".to_string(),
+        }
+    }
+
     #[test]
     fn parses_structured_model_output() {
         let output = parse_model_output(
@@ -2052,7 +2332,7 @@ mod tests {
     }
 
     #[test]
-    fn bounty_gate_preserves_reproducible_concrete_findings() {
+    fn model_cannot_self_select_reportability() {
         let output = parse_model_output(
             r#"{
               "summaryMarkdown": "Reproduced a concrete withdrawal ordering issue.",
@@ -2070,8 +2350,94 @@ mod tests {
             }"#,
         );
         assert_eq!(output.findings.len(), 1);
+        assert!(!output.findings[0].reportable);
+        assert_eq!(output.findings[0].status, "candidate");
+    }
+
+    #[test]
+    fn validation_promotes_only_scope_eligible_reproduced_findings() {
+        let campaign = scoped_campaign("");
+        let work_unit = validation_work_unit(&campaign);
+        let mut output = parse_model_output(
+            r#"{
+              "summaryMarkdown": "Independent validation reproduced the withdrawal issue.",
+              "findings": [{
+                "id":"X", "title":"Reentrant withdrawal before accounting update",
+                "severity":"high", "status":"candidate",
+                "impact":"An unprivileged attacker can reenter withdraw and cause direct loss of user funds.",
+                "evidence":["contracts/Vault.sol:128 withdraw() transfers before accounting; exploit path: callback reenters; reproduction: forge test --match-test testReentrantWithdraw"],
+                "reportable":true
+              }],
+              "coverage":[{"area":"withdraw","status":"completed","evidence":["contracts/Vault.sol:128"]}],
+              "commands":["forge test --match-test testReentrantWithdraw"]
+            }"#,
+        );
+        assert!(!output.findings[0].reportable);
+        apply_validation_reportability(&mut output, &campaign, &work_unit);
         assert!(output.findings[0].reportable);
         assert_eq!(output.findings[0].status, "candidate");
+    }
+
+    #[test]
+    fn validation_withholds_unsupported_token_and_ci_assumptions() {
+        let campaign = scoped_campaign("");
+        let work_unit = validation_work_unit(&campaign);
+        let mut token_output = parse_model_output(
+            r#"{
+              "summaryMarkdown":"Validated token accounting lead.",
+              "findings":[{"id":"T","title":"Fee-on-transfer accounting mismatch","severity":"high","status":"candidate","impact":"A fee-on-transfer unsupported token causes loss of funds.","evidence":["contracts/Vault.sol:55 deposit(); exploit path uses fee-on-transfer token; reproduction: forge test --match-test testFeeToken"],"reportable":true}],
+              "coverage":[{"area":"tokens","status":"completed","evidence":["contracts/Vault.sol:55"]}],
+              "commands":["forge test --match-test testFeeToken"]
+            }"#,
+        );
+        apply_validation_reportability(&mut token_output, &campaign, &work_unit);
+        assert!(!token_output.findings[0].reportable);
+        assert!(matches!(
+            token_output.findings[0].status.as_str(),
+            "needs_review" | "needs_reproduction"
+        ));
+
+        let mut ci_output = parse_model_output(
+            r#"{
+              "summaryMarkdown":"Validated mutable action lead.",
+              "findings":[{"id":"C","title":"GitHub Actions token exposure","severity":"high","status":"candidate","impact":"An unprivileged attacker can steal a workflow token and cause loss of funds.","evidence":[".github/workflows/ci.yml:20 uses mutable action; exploit path poisons logs; reproduction: workflow fixture test"],"reportable":true}],
+              "coverage":[{"area":"CI","status":"completed","evidence":[".github/workflows/ci.yml:20"]}],
+              "commands":["workflow fixture test"]
+            }"#,
+        );
+        apply_validation_reportability(&mut ci_output, &campaign, &work_unit);
+        assert!(!ci_output.findings[0].reportable);
+        assert!(matches!(
+            ci_output.findings[0].status.as_str(),
+            "needs_review" | "needs_reproduction"
+        ));
+    }
+
+    #[test]
+    fn missing_scoped_source_is_a_successful_abstention() {
+        let campaign = scoped_campaign("Focused path: contracts/Missing.sol");
+        let work_unit = validation_work_unit(&campaign);
+        let context = RepositoryContext {
+            inventory: vec!["contracts/Vault.sol".to_string(), "README.md".to_string()],
+            selected_files: Vec::new(),
+            truncated: false,
+        };
+        assert!(scoped_target_source_absent(&campaign, &context));
+        let run = target_source_absent_run(
+            &campaign,
+            &work_unit,
+            "ollama",
+            "deepseek-v4-flash",
+            &context,
+        )
+        .expect("abstention run");
+        assert!(run.findings.is_empty());
+        assert_eq!(run.coverage[0].status, "abstained_source_absent");
+        assert!(run.notes_markdown.contains("No vulnerability was inferred"));
+        assert!(run
+            .runtime
+            .tool_policy
+            .contains(&"successful-abstention-no-hallucination-penalty".to_string()));
     }
 
     #[test]
@@ -2211,6 +2577,17 @@ mod tests {
         // Above the unverified ceiling, so a relabelled local model claiming it
         // still has to survive the throughput gate.
         assert!(model_multiplier("glm-5.2:cloud") > UNVERIFIED_CLOUD_MULTIPLIER_CEILING);
+    }
+
+    #[test]
+    fn deepseek_v4_flash_holds_its_earned_tier_without_widening_it() {
+        assert_eq!(model_multiplier("deepseek-v4-flash:0731-cloud"), 17.5);
+        assert_eq!(model_multiplier("deepseek-v3:cloud"), 10.0);
+        assert_eq!(model_multiplier("deepseek-r1:cloud"), 10.0);
+        assert_eq!(
+            model_multiplier("deepseek-v4:cloud"),
+            UNKNOWN_MODEL_MULTIPLIER
+        );
     }
 
     #[test]
@@ -2372,5 +2749,6 @@ contract FraxlendPair is FraxlendPairCore {
         );
         assert_eq!(normalize_scoped_path("https://github.com/x/y"), None);
         assert_eq!(normalize_scoped_path("../secret"), None);
+        assert_eq!(normalize_scoped_path("repository root"), None);
     }
 }

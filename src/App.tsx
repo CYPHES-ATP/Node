@@ -65,7 +65,7 @@ const MAX_AUTO_CAMPAIGNS_PER_DAY = 9600;
 const MAX_SELF_PENDING_CONTRIBUTIONS = 25;
 const PENDING_CONTRIBUTION_BASE_CREDIT = 35;
 const PARSER_FALLBACK_PENDING_MULTIPLIER = 0.10;
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.17.4";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.17.6";
 const RUNTIME_PROVIDER_OPTIONS = ["lmstudio", "ollama"];
 
 interface GitHubRepository {
@@ -76,6 +76,7 @@ interface GitHubRepository {
   default_branch: string;
   stargazers_count: number;
   private: boolean;
+  archived?: boolean;
   message?: string;
 }
 
@@ -97,6 +98,7 @@ interface InspectedRepository {
   scopeText: string;
   focusPath?: string;
   focusRef?: string;
+  archived?: boolean;
 }
 
 interface CockpitEvent {
@@ -975,6 +977,7 @@ function AppContent() {
         ),
         focusPath: inspected.focusPath,
         focusRef: inspected.focusRef,
+        archived: inspected.archived,
       };
     }
 
@@ -1012,6 +1015,7 @@ function AppContent() {
       ),
       focusPath: resolved.focusPath,
       focusRef: resolved.focusRef,
+      archived: Boolean(repository.archived),
     };
   }
 
@@ -1065,10 +1069,47 @@ function AppContent() {
       pushAutoPulse(`${target.protocolName} unchanged at ${shortCommit(inspected.repository.commitSha)}`, "info");
       return false;
     }
+    const repositoryArchived = Boolean(inspected.archived);
+    const implementationStatus = repositoryArchived
+      ? "historical-archived"
+      : target.implementationStatus;
+    const contractScope = target.contractPaths.length > 0
+      ? target.contractPaths.join(", ")
+      : target.repositoryScopeStatus === "explicit-program-repository"
+        ? "repository-source-tree-explicit"
+        : "repository-root-needs-human-confirmation";
+    const scopeSnapshot = {
+      profile: "cyphes.bounty-scope-snapshot/0.1",
+      capturedAt: target.bountyScopeCapturedAt || new Date().toISOString(),
+      targetId: target.targetId,
+      protocolName: target.protocolName,
+      bountyProgramUrl: target.bountyProgramUrl || target.securityUrl || null,
+      repository: inspected.repository.fullName,
+      commitSha: inspected.repository.commitSha,
+      repositoryScopeStatus: target.repositoryScopeStatus,
+      contractScope,
+      implementationStatus,
+      repositoryArchived,
+      reviewClass: target.reviewClass,
+      impactCategories: target.impactCategories,
+      assumptionsOutOfScope: target.assumptionsOutOfScope,
+      humanConfirmationRequired:
+        target.repositoryScopeStatus !== "explicit-program-repository" ||
+        contractScope.includes("needs-human-confirmation") ||
+        implementationStatus !== "current-at-snapshot",
+    };
+    const scopeMarkers = [
+      `Bounty scope captured at: ${scopeSnapshot.capturedAt}`,
+      `Repository scope status: ${scopeSnapshot.repositoryScopeStatus}`,
+      `Contract scope: ${scopeSnapshot.contractScope}`,
+      `Implementation status: ${scopeSnapshot.implementationStatus}`,
+      `Repository archived: ${scopeSnapshot.repositoryArchived}`,
+      `Review class: ${scopeSnapshot.reviewClass}`,
+    ];
     const campaign = await p2p.createProtocolCampaign(
       inspected.repository,
       target.protocolName,
-      [target.scopeText, epochScopeLine].join("\n\n"),
+      [target.scopeText, ...scopeMarkers, epochScopeLine].join("\n\n"),
       target.creditBudget.toString(),
       [
         `Guardian target: ${target.targetId}`,
@@ -1087,8 +1128,22 @@ function AppContent() {
         target.securityUrl ? `Security reference: ${target.securityUrl}` : "",
         target.inScopeText ? `In scope: ${target.inScopeText}` : "",
         target.outOfScopeText ? `Out of scope: ${target.outOfScopeText}` : "",
+        "",
+        "# Dated Bounty Scope Snapshot",
+        "```json",
+        JSON.stringify(scopeSnapshot, null, 2),
+        "```",
       ].filter(Boolean).join("\n"),
       "",
+      {
+        bountyUrl: target.bountyProgramUrl || target.securityUrl || "",
+        impactsInScope: target.impactCategories,
+        outOfScope: [
+          ...target.assumptionsOutOfScope,
+          target.outOfScopeText || "",
+          "Program-linked repositories require human confirmation before any finding can be reportable.",
+        ].filter(Boolean),
+      },
     );
     const nextLedger = recordGuardianObservation(
       guardianLedger,

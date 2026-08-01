@@ -218,6 +218,11 @@ export function useP2P() {
     auditBriefText = "",
     attachmentText = "",
     customSkillText = "",
+    campaignPolicy?: {
+      bountyUrl?: string;
+      impactsInScope?: string[];
+      outOfScope?: string[];
+    },
   ) {
     if (!isTauriRuntime()) {
       throw new Error("Protocol campaigns can only be created in the native CYPHES app.");
@@ -227,12 +232,12 @@ export function useP2P() {
         protocolName,
         repository,
         scopeText,
-        bountyUrl: "",
-        impactsInScope: [
+        bountyUrl: campaignPolicy?.bountyUrl || "",
+        impactsInScope: campaignPolicy?.impactsInScope ?? [
           "Evidence-backed repository risk",
           "Reportable security impact if proven",
         ],
-        outOfScope: [
+        outOfScope: campaignPolicy?.outOfScope ?? [
           "Best-practice-only notes",
           "Claims without reproducible evidence",
           "Production testing or unauthorized external interaction",
