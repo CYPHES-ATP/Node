@@ -15,12 +15,18 @@
 //! Seeding new campaigns is intentionally not implemented here yet; see the
 //! module note in `headless.rs` and the v0.17.3 release notes.
 
+use std::collections::HashMap;
+
 use crate::{
+    audit_labor::WORK_UNIT_CLAIM_TTL_MS,
     commands::{claim_work_unit_headless, run_work_unit_headless, verify_next_pending_headless},
     events::EventSink,
     state::P2pState,
     store::{AtpStore, MAX_PENDING_CONTRIBUTIONS_PER_WORKER},
 };
+
+const WORK_UNIT_RETRY_DELAY_MS: u64 = 60_000;
+const MAX_RUN_ATTEMPTS_PER_CLAIM: u8 = 2;
 
 #[derive(Debug, Clone)]
 pub struct AutonomousConfig {
@@ -41,6 +47,13 @@ pub struct AutonomousConfig {
 pub struct AutonomousState {
     work_units_today: u32,
     day: Option<i64>,
+    failed_work_units: HashMap<String, WorkUnitFailure>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WorkUnitFailure {
+    attempts: u8,
+    retry_after_ms: u64,
 }
 
 impl AutonomousState {
@@ -54,6 +67,59 @@ impl AutonomousState {
 
     fn at_daily_cap(&self, config: &AutonomousConfig) -> bool {
         config.max_daily_work_units > 0 && self.work_units_today >= config.max_daily_work_units
+    }
+
+    fn failure_key(campaign_id: &str, work_unit_id: &str) -> String {
+        format!("{campaign_id}:{work_unit_id}")
+    }
+
+    fn retry_ready(&self, campaign_id: &str, work_unit_id: &str, now_ms: u64) -> bool {
+        self.failed_work_units
+            .get(&Self::failure_key(campaign_id, work_unit_id))
+            .is_none_or(|failure| now_ms >= failure.retry_after_ms)
+    }
+
+    fn clear_failure(&mut self, campaign_id: &str, work_unit_id: &str) {
+        self.failed_work_units
+            .remove(&Self::failure_key(campaign_id, work_unit_id));
+    }
+
+    fn record_failure(
+        &mut self,
+        campaign_id: &str,
+        work_unit_id: &str,
+        now_ms: u64,
+    ) -> WorkUnitFailure {
+        let key = Self::failure_key(campaign_id, work_unit_id);
+        let attempts = self
+            .failed_work_units
+            .get(&key)
+            .map_or(1, |failure| failure.attempts.saturating_add(1));
+        let delay_ms = if attempts >= MAX_RUN_ATTEMPTS_PER_CLAIM {
+            WORK_UNIT_CLAIM_TTL_MS
+        } else {
+            WORK_UNIT_RETRY_DELAY_MS
+        };
+        let failure = WorkUnitFailure {
+            attempts,
+            retry_after_ms: now_ms.saturating_add(delay_ms),
+        };
+        self.failed_work_units.insert(key, failure);
+        failure
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorkUnitSelection {
+    ResumeExistingClaim(String),
+    ClaimOpenUnit(String),
+}
+
+impl WorkUnitSelection {
+    fn work_unit_id(&self) -> &str {
+        match self {
+            Self::ResumeExistingClaim(id) | Self::ClaimOpenUnit(id) => id,
+        }
     }
 }
 
@@ -130,20 +196,43 @@ pub async fn tick(
 
     for campaign in campaigns {
         let campaign_id = campaign.campaign_id.clone();
-        let Some(work_unit_id) = next_open_work_unit(store, &campaign_id, local_agent_id) else {
+        let Some(selection) = next_open_work_unit(store, &campaign_id, local_agent_id) else {
             continue;
         };
+        let work_unit_id = selection.work_unit_id().to_string();
+        let now_ms = crate::store::now_millis();
 
-        if let Err(error) =
-            claim_work_unit_headless(events, state, store, &campaign_id, &work_unit_id).await
+        if matches!(selection, WorkUnitSelection::ResumeExistingClaim(_))
+            && !counters.retry_ready(&campaign_id, &work_unit_id, now_ms)
         {
             tracing::debug!(
                 campaign = %campaign_id,
                 work_unit = %work_unit_id,
-                %error,
-                "claim rejected, trying the next campaign"
+                "claimed work unit is cooling down after a failed run"
             );
             continue;
+        }
+
+        if matches!(selection, WorkUnitSelection::ClaimOpenUnit(_)) {
+            counters.clear_failure(&campaign_id, &work_unit_id);
+            if let Err(error) =
+                claim_work_unit_headless(events, state, store, &campaign_id, &work_unit_id).await
+            {
+                tracing::debug!(
+                    campaign = %campaign_id,
+                    work_unit = %work_unit_id,
+                    %error,
+                    "claim rejected, trying the next campaign"
+                );
+                continue;
+            }
+        } else {
+            tracing::info!(
+                campaign = %campaign_id,
+                work_unit = %work_unit_id,
+                model = %config.model,
+                "[CONTRIBUTE] resuming existing work unit claim"
+            );
         }
 
         tracing::info!(
@@ -166,6 +255,7 @@ pub async fn tick(
         .await
         {
             Ok(contribution) => {
+                counters.clear_failure(&campaign_id, &work_unit_id);
                 counters.work_units_today += 1;
                 tracing::info!(
                     campaign = %campaign_id,
@@ -175,9 +265,18 @@ pub async fn tick(
                 );
             }
             Err(error) => {
+                let failure = counters.record_failure(
+                    &campaign_id,
+                    &work_unit_id,
+                    crate::store::now_millis(),
+                );
                 tracing::warn!(
                     campaign = %campaign_id,
                     work_unit = %work_unit_id,
+                    attempt = failure.attempts,
+                    max_attempts_per_claim = MAX_RUN_ATTEMPTS_PER_CLAIM,
+                    retry_after_ms = failure.retry_after_ms,
+                    claim_ttl_ms = WORK_UNIT_CLAIM_TTL_MS,
                     %error,
                     "[CONTRIBUTE] work unit failed"
                 );
@@ -196,7 +295,7 @@ fn next_open_work_unit(
     store: &AtpStore,
     campaign_id: &str,
     local_agent_id: &str,
-) -> Option<String> {
+) -> Option<WorkUnitSelection> {
     let snapshot = store.campaign_report_snapshot(campaign_id).ok()?;
 
     let has_contribution = |work_unit_id: &str| {
@@ -213,14 +312,16 @@ fn next_open_work_unit(
             && claim.status == "claimed"
             && !has_contribution(&claim.work_unit_id)
     }) {
-        return Some(claim.work_unit_id.clone());
+        return Some(WorkUnitSelection::ResumeExistingClaim(
+            claim.work_unit_id.clone(),
+        ));
     }
 
     snapshot
         .work_units
         .iter()
         .find(|unit| unit.status == "open" && !has_contribution(&unit.work_unit_id))
-        .map(|unit| unit.work_unit_id.clone())
+        .map(|unit| WorkUnitSelection::ClaimOpenUnit(unit.work_unit_id.clone()))
 }
 
 #[cfg(test)]
@@ -272,5 +373,31 @@ mod tests {
         counters.roll_day(day_one + 86_400_000);
         assert_eq!(counters.work_units_today, 0);
         assert!(!counters.at_daily_cap(&config(500)));
+    }
+
+    #[test]
+    fn failed_work_units_cool_down_and_stop_after_two_runs_per_claim() {
+        let mut counters = AutonomousState::default();
+        let first = counters.record_failure("campaign", "unit", 1_000);
+        assert_eq!(first.attempts, 1);
+        assert_eq!(first.retry_after_ms, 1_000 + WORK_UNIT_RETRY_DELAY_MS);
+        assert!(!counters.retry_ready("campaign", "unit", first.retry_after_ms - 1));
+        assert!(counters.retry_ready("campaign", "unit", first.retry_after_ms));
+
+        let second = counters.record_failure("campaign", "unit", first.retry_after_ms);
+        assert_eq!(second.attempts, 2);
+        assert_eq!(
+            second.retry_after_ms,
+            first.retry_after_ms + WORK_UNIT_CLAIM_TTL_MS
+        );
+        assert!(!counters.retry_ready("campaign", "unit", second.retry_after_ms - 1));
+    }
+
+    #[test]
+    fn a_newly_open_unit_clears_prior_failure_state() {
+        let mut counters = AutonomousState::default();
+        counters.record_failure("campaign", "unit", 1_000);
+        counters.clear_failure("campaign", "unit");
+        assert!(counters.retry_ready("campaign", "unit", 1_000));
     }
 }

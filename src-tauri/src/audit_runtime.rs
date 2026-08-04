@@ -28,6 +28,8 @@ const CLOUD_MAX_CONTEXT_BYTES: usize = 700_000;
 /// Cap on files pulled in purely because a seed file referenced them.
 const MAX_DEPENDENCY_FILES: usize = 24;
 const MAX_MODEL_OUTPUT_TOKENS: u32 = 6_500;
+const OLLAMA_MAX_ATTEMPTS: u8 = 3;
+const OLLAMA_RETRY_DELAYS_MS: [u64; 2] = [750, 2_000];
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT: &str = "You are CYPHES Audit Skill. Return exactly one valid JSON object that matches the CYPHES Cognition Proof schema. Do not include prose, markdown fences, or commentary outside JSON.";
 const STRUCTURED_OUTPUT_CONTRACT: &str = r#"
 # Required Cognition Proof Output
@@ -214,7 +216,10 @@ struct OpenAiUsage {
 
 #[derive(Debug, Deserialize)]
 struct OllamaMessage {
+    #[serde(default)]
     content: String,
+    #[serde(default, alias = "reasoning")]
+    thinking: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,6 +232,8 @@ struct OllamaStreamChunk {
     eval_count: Option<u64>,
     #[serde(default)]
     eval_duration: Option<u64>,
+    #[serde(default)]
+    done_reason: Option<String>,
 }
 
 pub fn local_model_providers() -> Vec<LocalModelList> {
@@ -714,32 +721,139 @@ async fn run_ollama_chat(
     model: &str,
     prompt: &str,
 ) -> Result<ModelOutput, String> {
+    for attempt in 1..=OLLAMA_MAX_ATTEMPTS {
+        match run_ollama_chat_once(app, campaign, work_unit, client, endpoint, model, prompt).await
+        {
+            Ok(output) => return Ok(output),
+            Err(error) if error.retryable && attempt < OLLAMA_MAX_ATTEMPTS => {
+                let delay_ms = ollama_retry_delay_ms(attempt);
+                tracing::warn!(
+                    campaign = %campaign.campaign_id,
+                    work_unit = %work_unit.work_unit_id,
+                    model,
+                    attempt,
+                    max_attempts = OLLAMA_MAX_ATTEMPTS,
+                    delay_ms,
+                    error = %error.message,
+                    "Ollama response failed; retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+            Err(error) => {
+                return Err(if attempt > 1 {
+                    format!(
+                        "{} (Ollama request failed after {attempt} attempts)",
+                        error.message
+                    )
+                } else {
+                    error.message
+                });
+            }
+        }
+    }
+    unreachable!("bounded Ollama retry loop always returns")
+}
+
+fn ollama_retry_delay_ms(attempt: u8) -> u64 {
+    #[cfg(test)]
+    {
+        let _ = attempt;
+        1
+    }
+    #[cfg(not(test))]
+    {
+        OLLAMA_RETRY_DELAYS_MS[(attempt - 1) as usize]
+    }
+}
+
+#[derive(Debug)]
+struct OllamaRequestError {
+    message: String,
+    retryable: bool,
+}
+
+impl OllamaRequestError {
+    fn retryable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retryable: true,
+        }
+    }
+
+    fn terminal(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            retryable: false,
+        }
+    }
+}
+
+fn ollama_cloud_model(model: &str) -> bool {
+    model
+        .rsplit_once(':')
+        .is_some_and(|(_, tag)| tag.to_ascii_lowercase().contains("cloud"))
+}
+
+fn ollama_request_body(model: &str, prompt: &str) -> Value {
+    let mut body = json!({
+        "model": model,
+        "stream": true,
+        "options": {
+            "temperature": 0.0,
+            "num_predict": MAX_MODEL_OUTPUT_TOKENS
+        },
+        "messages": [
+            {
+                "role": "system",
+                "content": STRUCTURED_OUTPUT_SYSTEM_PROMPT
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    });
+    // Ollama Cloud does not currently support structured-output constraints.
+    // Keep the strict prompt and validate/repair the returned JSON locally.
+    if !ollama_cloud_model(model) {
+        body["format"] = Value::String("json".to_string());
+    }
+    body
+}
+
+async fn run_ollama_chat_once(
+    app: &EventSink,
+    campaign: &ProtocolAuditCampaign,
+    work_unit: &AuditWorkUnit,
+    client: &reqwest::Client,
+    endpoint: &str,
+    model: &str,
+    prompt: &str,
+) -> Result<ModelOutput, OllamaRequestError> {
     let response = client
         .post(format!("{endpoint}/api/chat"))
-        .json(&json!({
-            "model": model,
-            "stream": true,
-            "format": "json",
-            "options": {
-                "temperature": 0.0,
-                "num_predict": MAX_MODEL_OUTPUT_TOKENS
-            },
-            "messages": [
-                {
-                    "role": "system",
-                    "content": STRUCTURED_OUTPUT_SYSTEM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        }))
+        .json(&ollama_request_body(model, prompt))
         .send()
         .await
-        .map_err(|error| format!("Ollama audit request failed: {error}"))?;
+        .map_err(|error| {
+            OllamaRequestError::retryable(format!("Ollama audit request failed: {error}"))
+        })?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
     if !response.status().is_success() {
-        return Err(format!("Ollama returned {}", response.status()));
+        let error = format!("Ollama returned {status}");
+        return Err(
+            if status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error() {
+                OllamaRequestError::retryable(error)
+            } else {
+                OllamaRequestError::terminal(error)
+            },
+        );
     }
     let started = Instant::now();
     let mut last_emit = Instant::now() - Duration::from_millis(250);
@@ -749,8 +863,18 @@ async fn run_ollama_chat(
     let mut eval_count = None;
     let mut eval_duration = None;
     let mut tokens_per_second = None;
+    let mut raw_bytes = 0usize;
+    let mut stream_chunks = 0usize;
+    let mut parsed_lines = 0usize;
+    let mut thinking_bytes = 0usize;
+    let mut done_reason = None;
+    let mut done_seen = false;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| format!("Ollama stream failed: {error}"))?;
+        let chunk = chunk.map_err(|error| {
+            OllamaRequestError::retryable(format!("Ollama stream failed: {error}"))
+        })?;
+        raw_bytes += chunk.len();
+        stream_chunks += 1;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(index) = buffer.find('\n') {
             let line = buffer.drain(..=index).collect::<String>();
@@ -760,7 +884,13 @@ async fn run_ollama_chat(
                 &mut content,
                 &mut eval_count,
                 &mut eval_duration,
-            )?;
+                &mut thinking_bytes,
+                &mut done_reason,
+            )
+            .map_err(OllamaRequestError::retryable)?;
+            if !line.trim().is_empty() {
+                parsed_lines += 1;
+            }
             if content.len() != before {
                 tokens_per_second = maybe_emit_stream_progress(
                     app,
@@ -773,14 +903,24 @@ async fn run_ollama_chat(
                 );
             }
             if chunk_done {
+                done_seen = true;
                 break;
             }
         }
     }
     if !buffer.trim().is_empty() {
         let before = content.len();
-        let _ =
-            handle_ollama_stream_line(&buffer, &mut content, &mut eval_count, &mut eval_duration)?;
+        let chunk_done = handle_ollama_stream_line(
+            &buffer,
+            &mut content,
+            &mut eval_count,
+            &mut eval_duration,
+            &mut thinking_bytes,
+            &mut done_reason,
+        )
+        .map_err(OllamaRequestError::retryable)?;
+        parsed_lines += 1;
+        done_seen |= chunk_done;
         if content.len() != before {
             tokens_per_second = maybe_emit_stream_progress(
                 app,
@@ -794,8 +934,42 @@ async fn run_ollama_chat(
         }
     }
     if content.trim().is_empty() {
-        return Err("Ollama returned an empty streamed response".to_string());
+        tracing::warn!(
+            campaign = %campaign.campaign_id,
+            work_unit = %work_unit.work_unit_id,
+            model,
+            status = %status,
+            content_type,
+            raw_bytes,
+            stream_chunks,
+            parsed_lines,
+            thinking_bytes,
+            done_seen,
+            done_reason = done_reason.as_deref().unwrap_or("unknown"),
+            eval_count,
+            "Ollama returned no assembled response content"
+        );
+        return Err(OllamaRequestError::retryable(
+            "Ollama returned an empty streamed response",
+        ));
     }
+    tracing::debug!(
+        campaign = %campaign.campaign_id,
+        work_unit = %work_unit.work_unit_id,
+        model,
+        status = %status,
+        content_type,
+        raw_bytes,
+        stream_chunks,
+        parsed_lines,
+        content_bytes = content.len(),
+        thinking_bytes,
+        done_seen,
+        done_reason = done_reason.as_deref().unwrap_or("unknown"),
+        eval_count,
+        elapsed_ms = started.elapsed().as_millis(),
+        "Ollama stream completed"
+    );
     let tokens_per_second = match (eval_count, eval_duration) {
         (Some(count), Some(duration)) if duration > 0 => {
             Some((count as f64) / ((duration as f64) / 1_000_000_000.0))
@@ -846,6 +1020,8 @@ fn handle_ollama_stream_line(
     content: &mut String,
     eval_count: &mut Option<u64>,
     eval_duration: &mut Option<u64>,
+    thinking_bytes: &mut usize,
+    done_reason: &mut Option<String>,
 ) -> Result<bool, String> {
     let line = line.trim();
     if line.is_empty() {
@@ -855,12 +1031,16 @@ fn handle_ollama_stream_line(
         .map_err(|error| format!("Ollama stream line was not valid JSON. {error}"))?;
     if let Some(message) = chunk.message {
         content.push_str(&message.content);
+        *thinking_bytes += message.thinking.len();
     }
     if chunk.eval_count.is_some() {
         *eval_count = chunk.eval_count;
     }
     if chunk.eval_duration.is_some() {
         *eval_duration = chunk.eval_duration;
+    }
+    if chunk.done_reason.is_some() {
+        *done_reason = chunk.done_reason;
     }
     Ok(chunk.done)
 }
@@ -2513,25 +2693,107 @@ mod tests {
         let mut content = String::new();
         let mut eval_count = None;
         let mut eval_duration = None;
+        let mut thinking_bytes = 0;
+        let mut done_reason = None;
         let done = handle_ollama_stream_line(
-            r#"{"message":{"content":"{\"summaryMarkdown\":\""},"done":false}"#,
+            r#"{"message":{"content":"{\"summaryMarkdown\":\"","thinking":"trace"},"done":false}"#,
             &mut content,
             &mut eval_count,
             &mut eval_duration,
+            &mut thinking_bytes,
+            &mut done_reason,
         )
         .unwrap();
         assert!(!done);
         let done = handle_ollama_stream_line(
-            r#"{"message":{"content":"streamed\"}"},"done":true,"eval_count":24,"eval_duration":1200000000}"#,
+            r#"{"message":{"content":"streamed\"}"},"done":true,"done_reason":"stop","eval_count":24,"eval_duration":1200000000}"#,
             &mut content,
             &mut eval_count,
             &mut eval_duration,
+            &mut thinking_bytes,
+            &mut done_reason,
         )
         .unwrap();
         assert!(done);
         assert_eq!(eval_count, Some(24));
         assert_eq!(eval_duration, Some(1_200_000_000));
+        assert_eq!(thinking_bytes, 5);
+        assert_eq!(done_reason.as_deref(), Some("stop"));
         assert_eq!(content, r#"{"summaryMarkdown":"streamed"}"#);
+    }
+
+    #[test]
+    fn ollama_cloud_requests_omit_unsupported_structured_output_format() {
+        let cloud = ollama_request_body("deepseek-v4-flash:0731-cloud", "prompt");
+        assert!(cloud.get("format").is_none());
+        assert_eq!(cloud["stream"], true);
+
+        let local = ollama_request_body("deepseek-r1:32b", "prompt");
+        assert_eq!(local["format"], "json");
+    }
+
+    #[test]
+    fn ollama_retry_policy_is_bounded() {
+        assert_eq!(OLLAMA_MAX_ATTEMPTS, 3);
+        assert_eq!(
+            OLLAMA_RETRY_DELAYS_MS.len(),
+            OLLAMA_MAX_ATTEMPTS as usize - 1
+        );
+        assert!(OllamaRequestError::retryable("empty").retryable);
+        assert!(!OllamaRequestError::terminal("bad request").retryable);
+    }
+
+    #[tokio::test]
+    async fn ollama_empty_stream_is_retried_and_can_recover() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let server = tokio::spawn(async move {
+            let bodies = [
+                r#"{"message":{"content":""},"done":true,"done_reason":"stop"}"#,
+                r#"{"message":{"content":"{\"summaryMarkdown\":\"recovered\"}"},"done":true,"done_reason":"stop","eval_count":12,"eval_duration":1000000000}"#,
+            ];
+            for body in bodies {
+                let (mut socket, _) = listener.accept().await.expect("accept request");
+                let mut request = vec![0u8; 16_384];
+                let _ = socket.read(&mut request).await.expect("read request");
+                let body = format!("{body}\n");
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                socket
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("write response");
+            }
+        });
+
+        let campaign = scoped_campaign("");
+        let work_unit = validation_work_unit(&campaign);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .expect("client");
+        let output = run_ollama_chat(
+            &EventSink::headless(),
+            &campaign,
+            &work_unit,
+            &client,
+            &format!("http://{address}"),
+            "deepseek-v4-flash:0731-cloud",
+            "prompt",
+        )
+        .await
+        .expect("second response should recover");
+
+        assert_eq!(output.content, r#"{"summaryMarkdown":"recovered"}"#);
+        assert_eq!(output.generated_tokens, Some(12));
+        server.await.expect("test server completed");
     }
 
     #[test]

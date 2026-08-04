@@ -340,7 +340,7 @@ for (const [name, category, chains, tvlRiskRank, repoUrl, paths, docsUrl, securi
 targets.sort((a, b) => b.priorityScore - a.priorityScore || a.tvlRiskRank - b.tvlRiskRank);
 
 const index = {
-  version: "0.17.6",
+  version: "0.17.7",
   label: "CYPHES Guardian Index v2",
   generatedAt: "2026-08-01T16:00:00Z",
   policy,
