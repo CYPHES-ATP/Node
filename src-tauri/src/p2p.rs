@@ -3009,6 +3009,22 @@ fn record_work_unit_claim_for_sync(
 }
 
 fn retry_pending_labor_objects(app: &EventSink, store: &AtpStore) {
+    // Retire dependencies that are never going to arrive before spending any
+    // retry budget. Without this the queue has no exit from `needs_dependency`
+    // other than success, so unresolvable objects accumulate permanently and
+    // crowd the per-pass limit.
+    match store.abandon_exhausted_pending_labor_objects() {
+        Ok(abandoned) if abandoned > 0 => {
+            let _ = app.emit(
+                "audit:labor_pending_objects_abandoned",
+                serde_json::json!({ "abandoned": abandoned }),
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(%error, "could not retire exhausted pending labor objects");
+        }
+    }
     let mut settled_total = 0usize;
     let retry_at_ms = now_millis();
     for _ in 0..PENDING_LABOR_RETRY_PASSES {

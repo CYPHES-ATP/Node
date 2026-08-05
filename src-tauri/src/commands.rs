@@ -234,6 +234,34 @@ pub async fn list_benchmark_targets() -> Result<Vec<BenchmarkTarget>, String> {
     Ok(set.targets)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingLaborQueueRow {
+    pub object_kind: String,
+    pub status: String,
+    pub count: u32,
+}
+
+/// Depth of the local dependency-retry queue, by kind and status.
+///
+/// A node holding many `needs_dependency` objects is spending its retry budget
+/// on receipts whose dependency never arrived; `abandoned` counts those that
+/// have been retired and are no longer retried.
+#[tauri::command]
+pub async fn get_pending_labor_queue(
+    store: State<'_, AtpStore>,
+) -> Result<Vec<PendingLaborQueueRow>, String> {
+    Ok(store
+        .pending_labor_queue_summary()?
+        .into_iter()
+        .map(|(object_kind, status, count)| PendingLaborQueueRow {
+            object_kind,
+            status,
+            count,
+        })
+        .collect())
+}
+
 #[tauri::command]
 pub async fn list_local_model_providers() -> Result<Vec<LocalModelList>, String> {
     Ok(local_model_providers())

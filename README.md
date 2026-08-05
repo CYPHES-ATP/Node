@@ -5,7 +5,7 @@
   <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.7 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.7_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.8 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.8_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,12 +17,23 @@
 
 ## Download
 
-The current active release is **CYPHES v0.17.7 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.17.8 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
+
+v0.17.8 is a non-mandatory dependency-queue recovery release. A node that
+receives a verification for a contribution it never received was retrying that
+dependency forever: `needs_dependency` had no terminal state, and backoff
+saturated at 256 seconds after eight failures. On a live node this had grown to
+1,995 permanently unresolvable objects and 8.16 million retry attempts, which
+also caused settlement rescue to report no capable verifier and elevated relay
+reservation churn. v0.17.8 adds a reversible `abandoned` state, raises the
+backoff ceiling to 4 hours, and exposes queue depth via
+`get_pending_labor_queue`. Existing nodes converge on first run with no manual
+cleanup. See [the v0.17.8 release notes](release/v0.17.8/README.md).
 
 v0.17.7 is a non-mandatory Ollama Cloud/headless-worker reliability release. It
 adds bounded retries for empty and transient Ollama responses, resumes claims
@@ -98,15 +109,21 @@ can still test the local loop, but it cannot mint earned ATP.
 
 Downloads:
 
-- [Download CYPHES v0.17.7 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.7/CYPHES_0.17.7_aarch64.dmg)
-- [Download CYPHES v0.17.7 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.7/CYPHES_0.17.7_x64.dmg)
-- [Download CYPHES v0.17.7 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.7/CYPHES_0.17.7_x64-setup.exe)
+- [Download CYPHES v0.17.8 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.8/CYPHES_0.17.8_aarch64.dmg)
+- [Download CYPHES v0.17.8 for Intel Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.8/CYPHES_0.17.8_x64.dmg)
 
-Checksums and release notes: [`release/v0.17.7/`](release/v0.17.7/). Verify with
+Checksums and release notes: [`release/v0.17.8/`](release/v0.17.8/). Verify with
 `shasum -a 256 -c SHA256SUMS.txt` before installing.
 
-Linux nodes run headless from source — see **Headless nodes** below. The Windows
-x64 setup build is unsigned; verify its checksum before installing.
+```text
+2143091cfcc0ba53973e8963fbb2f4e1cb7eafcdba12d82a4bf6dcd5098ef940  CYPHES_0.17.8_aarch64.dmg
+d6991363e8ca5ccca1cfba2f45674482bddd2921f6a2af932805f2bc0befe48e  CYPHES_0.17.8_x64.dmg
+```
+
+macOS only for v0.17.8. Linux nodes run headless from source — see **Headless
+nodes** below. Windows operators should stay on
+[v0.17.7](release/v0.17.7/README.md), which ships a signed-checksum x64
+installer.
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then

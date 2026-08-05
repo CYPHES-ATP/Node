@@ -290,8 +290,24 @@ const STORE_META_SCHEMA_KEY: &str = "schema";
 const STORE_SCHEMA_VERSION: &str = "audit-labor-v1";
 const CLAIM_CONTRIBUTION_CLOCK_SKEW_MS: i64 = 60_000;
 const PENDING_LABOR_RETRY_BASE_MS: i64 = 1_000;
-const PENDING_LABOR_RETRY_MAX_BACKOFF_MS: i64 = 256_000;
-const PENDING_LABOR_RETRY_MAX_EXPONENT: i64 = 8;
+/// Ceiling on retry backoff. Previously 256s, which an object reached after 8
+/// failures and then held forever. On the live network 1,995 verification
+/// objects sat in `needs_dependency` referencing contributions this node had
+/// never received — every one unresolvable locally, the oldest 26 days old —
+/// grinding at roughly 8 dependency requests per second in aggregate. Four
+/// minutes is far too aggressive for a dependency that may need a peer to come
+/// back online.
+const PENDING_LABOR_RETRY_MAX_BACKOFF_MS: i64 = 4 * 60 * 60 * 1_000;
+const PENDING_LABOR_RETRY_MAX_EXPONENT: i64 = 14;
+/// Retry bounds after which a dependency is treated as permanently unavailable.
+///
+/// Relay circuits are capped at 10 minutes and 64 MiB by design, so a
+/// contribution bundle can be lost mid-transfer while its verification arrives
+/// intact. The node is then holding a verification that points at nothing. That
+/// state was previously unrepresentable: `needs_dependency` had no exit other
+/// than success, so the queue could only grow.
+const PENDING_LABOR_ABANDON_ATTEMPTS: i64 = 500;
+const PENDING_LABOR_ABANDON_AGE_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const LABOR_TELEMETRY_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const LABOR_TELEMETRY_MAX_ROWS: i64 = 50_000;
 
@@ -2526,6 +2542,8 @@ impl AtpStore {
                  FROM audit_labor_pending_objects
                  WHERE status = 'needs_dependency'
                    AND object_kind = ?1
+                   AND attempts < ?7
+                   AND created_at > ?2 - ?8
                    AND updated_at <= ?2 - MIN(
                     ?3,
                     (1 << MIN(attempts, ?4)) * ?5
@@ -2542,7 +2560,9 @@ impl AtpStore {
                     PENDING_LABOR_RETRY_MAX_BACKOFF_MS,
                     PENDING_LABOR_RETRY_MAX_EXPONENT,
                     PENDING_LABOR_RETRY_BASE_MS,
-                    limit as i64
+                    limit as i64,
+                    PENDING_LABOR_ABANDON_ATTEMPTS,
+                    PENDING_LABOR_ABANDON_AGE_MS
                 ],
                 |row| {
                     Ok(PendingLaborObject {
@@ -2552,6 +2572,58 @@ impl AtpStore {
                     })
                 },
             )
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| row.map_err(|error| error.to_string()))
+            .collect()
+    }
+
+    /// Move dependency-blocked objects past their retry bounds into a terminal
+    /// `abandoned` state.
+    ///
+    /// Rows are kept rather than deleted: an abandoned object is evidence that a
+    /// receipt was seen but its dependency never arrived, which is worth being
+    /// able to inspect. It is simply no longer selected for retry, so the queue
+    /// stops growing without number and the relay stops carrying doomed
+    /// dependency traffic.
+    ///
+    /// Local bookkeeping only. Abandoning changes no consensus state, mints no
+    /// credit, and is reversible — a later `record_pending_labor_object` for the
+    /// same key resets it to `needs_dependency` with a fresh attempt count.
+    pub fn abandon_exhausted_pending_labor_objects(&self) -> Result<usize, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let now = now_millis() as i64;
+        let changed = connection
+            .execute(
+                "UPDATE audit_labor_pending_objects
+                 SET status = 'abandoned', updated_at = ?1,
+                     reason = COALESCE(reason, '') ||
+                        ' [abandoned after ' || attempts || ' attempts]'
+                 WHERE status = 'needs_dependency'
+                   AND (attempts >= ?2 OR created_at <= ?1 - ?3)",
+                params![
+                    now,
+                    PENDING_LABOR_ABANDON_ATTEMPTS,
+                    PENDING_LABOR_ABANDON_AGE_MS
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(changed)
+    }
+
+    /// Queue depth by status, for the cockpit and for operators diagnosing a
+    /// node that is spending its time on unresolvable dependencies.
+    pub fn pending_labor_queue_summary(&self) -> Result<Vec<(String, String, u32)>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT object_kind, status, COUNT(*)
+                 FROM audit_labor_pending_objects
+                 GROUP BY object_kind, status
+                 ORDER BY COUNT(*) DESC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .map_err(|error| error.to_string())?;
         rows.map(|row| row.map_err(|error| error.to_string()))
             .collect()
@@ -7487,6 +7559,89 @@ mod tests {
         assert_eq!(contributions.len(), 1);
         assert_eq!(contributions[0].object_id, "repairable-contribution");
         assert_eq!(verifications.len(), 64);
+    }
+
+    #[test]
+    fn unresolvable_dependencies_are_retired_instead_of_retried_forever() {
+        // On the live network 1,995 verification objects sat in
+        // `needs_dependency` referencing contributions the node had never
+        // received, the oldest 26 days old, one at 72,200 attempts. There was no
+        // exit from `needs_dependency` other than success, so the queue could
+        // only grow and the relay carried doomed dependency traffic indefinitely.
+        let store = test_store();
+        let now = now_millis() as i64;
+
+        store
+            .queue_pending_labor_object("verification", "fresh", "{}", "Query returned no rows")
+            .unwrap();
+        store
+            .queue_pending_labor_object("verification", "worn", "{}", "Query returned no rows")
+            .unwrap();
+        store
+            .queue_pending_labor_object("verification", "ancient", "{}", "Query returned no rows")
+            .unwrap();
+
+        {
+            let connection = store.connection.lock().unwrap();
+            // Past the attempt bound.
+            connection
+                .execute(
+                    "UPDATE audit_labor_pending_objects SET attempts = ?1 WHERE object_id = 'worn'",
+                    params![PENDING_LABOR_ABANDON_ATTEMPTS],
+                )
+                .unwrap();
+            // Past the age bound, but with few attempts.
+            connection
+                .execute(
+                    "UPDATE audit_labor_pending_objects
+                     SET created_at = ?1, attempts = 3 WHERE object_id = 'ancient'",
+                    params![now - PENDING_LABOR_ABANDON_AGE_MS - 1],
+                )
+                .unwrap();
+        }
+
+        let abandoned = store.abandon_exhausted_pending_labor_objects().unwrap();
+        assert_eq!(abandoned, 2, "both bounds should retire an object");
+
+        // Retired objects must never be selected for retry again.
+        let selected = store
+            .pending_labor_objects_for_kind("verification", now_millis() + 1, 64)
+            .unwrap();
+        let ids: Vec<_> = selected.iter().map(|o| o.object_id.as_str()).collect();
+        assert!(!ids.contains(&"worn"));
+        assert!(!ids.contains(&"ancient"));
+
+        // Rows are kept as evidence, not deleted.
+        let summary = store.pending_labor_queue_summary().unwrap();
+        let abandoned_rows: u32 = summary
+            .iter()
+            .filter(|(_, status, _)| status == "abandoned")
+            .map(|(_, _, count)| *count)
+            .sum();
+        assert_eq!(abandoned_rows, 2);
+
+        // A dependency that later arrives resets the object to retryable.
+        store
+            .queue_pending_labor_object("verification", "worn", "{}", "Query returned no rows")
+            .unwrap();
+        let revived = store.pending_labor_queue_summary().unwrap();
+        let still_abandoned: u32 = revived
+            .iter()
+            .filter(|(_, status, _)| status == "abandoned")
+            .map(|(_, _, count)| *count)
+            .sum();
+        assert_eq!(still_abandoned, 1, "re-recording should revive the object");
+    }
+
+    #[test]
+    fn retry_backoff_ceiling_is_hours_not_minutes() {
+        // The old ceiling was 256s, reached after 8 failures and held forever.
+        assert!(PENDING_LABOR_RETRY_MAX_BACKOFF_MS >= 60 * 60 * 1_000);
+        let saturated = (1i64 << PENDING_LABOR_RETRY_MAX_EXPONENT) * PENDING_LABOR_RETRY_BASE_MS;
+        assert!(
+            saturated >= PENDING_LABOR_RETRY_MAX_BACKOFF_MS,
+            "the exponent must be able to reach the ceiling"
+        );
     }
 
     #[test]

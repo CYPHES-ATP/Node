@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "cyphes-desktop"
-version = "0.17.7"
+version = "0.17.8"
 dependencies = [
  "base64 0.22.1",
  "chrono",
