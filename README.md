@@ -109,23 +109,17 @@ can still test the local loop, but it cannot mint earned ATP.
 
 Downloads:
 
-- [Download CYPHES v0.17.8 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.8/CYPHES_0.17.8_aarch64.dmg)
-- [Download CYPHES v0.17.8 for Intel Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.8/CYPHES_0.17.8_x64.dmg)
+- [Download CYPHES v0.17.8 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.8/CYPHES_0.17.8_aarch64.dmg)
+- [Download CYPHES v0.17.8 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.8/CYPHES_0.17.8_x64.dmg)
+- [Download CYPHES v0.17.8 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.8/CYPHES_0.17.8_x64-setup.exe)
 
 Checksums and release notes: [`release/v0.17.8/`](release/v0.17.8/). Verify with
 `shasum -a 256 -c SHA256SUMS.txt` before installing.
 
-```text
-2143091cfcc0ba53973e8963fbb2f4e1cb7eafcdba12d82a4bf6dcd5098ef940  CYPHES_0.17.8_aarch64.dmg
-d6991363e8ca5ccca1cfba2f45674482bddd2921f6a2af932805f2bc0befe48e  CYPHES_0.17.8_x64.dmg
-```
-
-The v0.17.8 Windows x64 installer is not yet published — it builds on CI rather
-than on the macOS host that cut these images. v0.17.7 remains fully compatible
-in the meantime: v0.17.8 changes only local queue hygiene, so a v0.17.7 node
-settles, verifies and earns identically. It will keep accumulating the stuck
-dependency backlog until it updates, which costs that node CPU and relay traffic
-but affects nothing on the network.
+The attached `SHA256SUMS.txt` covers every published binary. v0.17.7 remains
+fully compatible: v0.17.8 changes only local queue hygiene, so a v0.17.7 node
+settles, verifies and earns identically while it accumulates the dependency
+backlog until it updates.
 
 Linux has no prebuilt binary and is built from source — the normal cockpit on a
 desktop session, or **Headless nodes** below on a server or WSL2.

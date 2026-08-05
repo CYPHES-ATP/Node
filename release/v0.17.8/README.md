@@ -69,25 +69,25 @@ the backoff ceiling is measured in hours rather than minutes.
 
 ## Assets
 
-macOS images were cut on an Apple Silicon host, so the Windows x64 installer is
-not included here — it builds on CI. v0.17.7 remains fully compatible until it
-lands: this release changes only local queue hygiene, so a v0.17.7 node settles,
-verifies and earns identically, it simply keeps accumulating the stuck
-dependency backlog.
+The macOS and Windows installers were built by the v0.17.8 GitHub Actions
+release workflow on clean runners. v0.17.7 remains fully compatible: this
+release changes only local queue hygiene, so a v0.17.7 node settles, verifies
+and earns identically, it simply keeps accumulating the stuck dependency
+backlog.
 
 Linux has no prebuilt binary and is built from source: the normal cockpit on a
 desktop session, headless on a server or WSL2.
 
 - `CYPHES_0.17.8_aarch64.dmg` — Apple Silicon
 - `CYPHES_0.17.8_x64.dmg` — Intel
-- `SHA256SUMS.txt`
+- `CYPHES_0.17.8_x64-setup.exe` — Windows x64 NSIS installer
+- `CYPHES_0.17.8_x64_en-US.msi` — Windows x64 MSI installer
+- `CYPHES_aarch64.app.tar.gz` and `CYPHES_x64.app.tar.gz` — macOS app archives
+- `SHA256SUMS.txt` — checksums for every published binary
 
 ## Checksums
 
-```text
-2143091cfcc0ba53973e8963fbb2f4e1cb7eafcdba12d82a4bf6dcd5098ef940  CYPHES_0.17.8_aarch64.dmg
-d6991363e8ca5ccca1cfba2f45674482bddd2921f6a2af932805f2bc0befe48e  CYPHES_0.17.8_x64.dmg
-```
+The attached `SHA256SUMS.txt` covers every published binary.
 
 Verify before installing:
 
