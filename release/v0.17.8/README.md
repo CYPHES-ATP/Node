@@ -69,8 +69,14 @@ the backoff ceiling is measured in hours rather than minutes.
 
 ## Assets
 
-macOS only this release. Linux nodes run headless from source. No Windows build
-was cut; Windows operators should stay on v0.17.7.
+macOS images were cut on an Apple Silicon host, so the Windows x64 installer is
+not included here — it builds on CI. v0.17.7 remains fully compatible until it
+lands: this release changes only local queue hygiene, so a v0.17.7 node settles,
+verifies and earns identically, it simply keeps accumulating the stuck
+dependency backlog.
+
+Linux has no prebuilt binary and is built from source: the normal cockpit on a
+desktop session, headless on a server or WSL2.
 
 - `CYPHES_0.17.8_aarch64.dmg` — Apple Silicon
 - `CYPHES_0.17.8_x64.dmg` — Intel

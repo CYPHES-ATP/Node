@@ -120,10 +120,15 @@ Checksums and release notes: [`release/v0.17.8/`](release/v0.17.8/). Verify with
 d6991363e8ca5ccca1cfba2f45674482bddd2921f6a2af932805f2bc0befe48e  CYPHES_0.17.8_x64.dmg
 ```
 
-macOS only for v0.17.8. Linux nodes run headless from source — see **Headless
-nodes** below. Windows operators should stay on
-[v0.17.7](release/v0.17.7/README.md), which ships a signed-checksum x64
-installer.
+The v0.17.8 Windows x64 installer is not yet published — it builds on CI rather
+than on the macOS host that cut these images. v0.17.7 remains fully compatible
+in the meantime: v0.17.8 changes only local queue hygiene, so a v0.17.7 node
+settles, verifies and earns identically. It will keep accumulating the stuck
+dependency backlog until it updates, which costs that node CPU and relay traffic
+but affects nothing on the network.
+
+Linux has no prebuilt binary and is built from source — the normal cockpit on a
+desktop session, or **Headless nodes** below on a server or WSL2.
 
 These builds are ad hoc signed but not Apple-notarized yet. After
 dragging the app to Applications, Control-click the app, select **Open**, then
