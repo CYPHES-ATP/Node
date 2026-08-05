@@ -5,7 +5,7 @@
   <p>CYPHES turns local AI models into paid cyber workers. Protocols fund continuous defense. Verifiers settle Cognition Proofs. ATP powers the labor market.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.4 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.4_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.7 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.7_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="ATP wire: v0.15.1" src="https://img.shields.io/badge/ATP_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,19 +17,19 @@
 
 ## Download
 
-The current active release is **CYPHES v0.17.4 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.17.7 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, and ATP credits become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
 
-v0.17.4 is a non-mandatory model-scoring release. `glm-5.2` moves to a `20.0x`
-earned tier — it is the best-measured model ever run on this network, and the
-only one whose every pass cleared the output-quality gate. Matching is
-most-specific-first, so the tier does not widen to `glm-5.1` or a future
-`glm-5.3`; a new release earns its tier on its own data. The published scoring
-chart now states both gates that sit between a declared tier and what is paid.
+v0.17.7 is a non-mandatory Ollama Cloud/headless-worker reliability release. It
+adds bounded retries for empty and transient Ollama responses, resumes claims
+owned by the local worker, and applies cooldowns so failed work does not hammer
+the provider. The database, identity, receipt, settlement, and wire formats
+remain compatible; no reset or migration is required. See [the v0.17.7 release
+notes](release/v0.17.7/README.md).
 
 v0.17.3 is a non-mandatory headless-worker release. A node can now run with no
 display, no webview, and no Tauri runtime — the supported path for WSL2,
@@ -98,11 +98,11 @@ can still test the local loop, but it cannot mint earned ATP.
 
 Downloads:
 
-- [Download CYPHES v0.17.4 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.4/CYPHES_0.17.4_aarch64.dmg)
-- [Download CYPHES v0.17.4 for Intel Macs](https://github.com/CYPHES-ATP/Node/raw/main/release/v0.17.4/CYPHES_0.17.4_x64.dmg)
-- [Download CYPHES v0.17.4 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.4/CYPHES_0.17.4_x64-setup.exe)
+- [Download CYPHES v0.17.7 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.7/CYPHES_0.17.7_aarch64.dmg)
+- [Download CYPHES v0.17.7 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.7/CYPHES_0.17.7_x64.dmg)
+- [Download CYPHES v0.17.7 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.7/CYPHES_0.17.7_x64-setup.exe)
 
-Checksums and release notes: [`release/v0.17.4/`](release/v0.17.4/). Verify with
+Checksums and release notes: [`release/v0.17.7/`](release/v0.17.7/). Verify with
 `shasum -a 256 -c SHA256SUMS.txt` before installing.
 
 Linux nodes run headless from source — see **Headless nodes** below. The Windows
