@@ -41,8 +41,11 @@ settlement rules. No reset or migration is required.
 - Bounded retry-policy regression test.
 - Ollama stream metadata parsing regression test.
 - Headless cooldown and retry-ceiling regression tests.
-- Full frontend and Rust validation results are recorded with the published
-  release assets.
+- `npm run build`
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --check`
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` (110 passed, 1 ignored)
+- Windows x64 installer built successfully from release commit `7d1aef6` in
+  GitHub Actions run `30961401436`.
 
 ## Assets
 
