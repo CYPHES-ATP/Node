@@ -2422,6 +2422,12 @@ const MODEL_TIERS: &[(&str, f64)] = &[
     // self-correction during validation. Keep this ahead of older DeepSeek
     // patterns so they retain their existing 10x tier.
     ("deepseek-v4-flash", 17.5),
+    // DeepSeek V4.1 Flash: reserved-tier listing pending network data. Vendor
+    // benchmarks (CyberGym 88.1, SEC-Bench Pro 62.8, Terminal-Bench 2.1 90.6)
+    // are the strongest on this registry; the tier stays subject to the same
+    // throughput gate as every other cloud claim. Exact-family match so a
+    // future V4.2 must earn its own tier rather than inheriting it.
+    ("deepseek-v4.1-flash", 25.0),
     ("deepseek-r1", 10.0),
     ("deepseek-v3", 10.0),
     ("glm-5", 10.0),
@@ -2980,6 +2986,23 @@ mod tests {
         // past and future Kimi release inherits 50x by accident.
         assert_eq!(model_multiplier("kimi-k2"), 10.0);
         assert_eq!(model_multiplier("moonshot-kimi"), 10.0);
+    }
+
+    #[test]
+    fn deepseek_v4_1_flash_holds_its_tier_without_widening_it() {
+        assert_eq!(model_multiplier("deepseek-v4.1-flash"), 25.0);
+        assert_eq!(model_multiplier("deepseek-v4.1-flash:cloud"), 25.0);
+        // The exact-family match must not widen across the DeepSeek line:
+        // V4 Flash keeps its earned 17.5x, older patterns keep 10.0, and a
+        // future V4.2 must earn its own tier rather than inheriting this one.
+        assert_eq!(model_multiplier("deepseek-v4-flash"), 17.5);
+        assert_eq!(model_multiplier("deepseek-v4-flash:0731-cloud"), 17.5);
+        assert_eq!(model_multiplier("deepseek-v4-pro"), 0.9);
+        assert_eq!(model_multiplier("deepseek-v4.2-flash"), 0.9);
+        assert_eq!(model_multiplier("deepseek-r1"), 10.0);
+        assert_eq!(model_multiplier("deepseek-v3"), 10.0);
+        // Classification is case-insensitive, like every other tier.
+        assert_eq!(model_multiplier("DeepSeek-V4.1-Flash:Cloud"), 25.0);
     }
 
     #[test]
