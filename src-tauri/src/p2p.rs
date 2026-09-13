@@ -4374,6 +4374,11 @@ fn mark_infrastructure_activity(state: &P2pState, network: &NetworkBootstrap, pe
             .as_ref()
             .is_some_and(|relay| relay.peer_id == peer_id)
         {
+            // Log the transition, not every activity mark, or this fires on
+            // every keepalive.
+            if !inner.relay_connected {
+                tracing::info!(peer = %peer_id, "[NETWORK] relay connected");
+            }
             inner.relay_connected = true;
         }
     }
@@ -4390,6 +4395,12 @@ fn clear_infrastructure_connection_state(
             .as_ref()
             .is_some_and(|relay| relay.peer_id == peer_id)
         {
+            if inner.relay_connected {
+                tracing::info!(
+                    peer = %peer_id,
+                    "[NETWORK] relay disconnected; node cannot see new work until it reconnects"
+                );
+            }
             inner.relay_connected = false;
             inner.rendezvous_registered = false;
         }
@@ -4518,6 +4529,11 @@ fn lose_relay_reservation(
     *rendezvous_cookie = None;
     clear_local_relay_circuit_address(swarm, state, network, local_peer_id);
     if let Ok(mut inner) = state.inner.lock() {
+        if inner.relay_connected {
+            tracing::info!(
+                "[NETWORK] relay reservation lost; node cannot see new work until it reconnects"
+            );
+        }
         inner.relay_connected = false;
         inner.rendezvous_registered = false;
     }

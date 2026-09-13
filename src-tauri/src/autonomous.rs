@@ -35,6 +35,12 @@ const MAX_RUN_ATTEMPTS_PER_CLAIM: u8 = 2;
 /// local only: the unit stays open for other workers, who may well have a
 /// model or a context window that succeeds where this node failed.
 const MAX_TOTAL_ATTEMPTS_BEFORE_ABANDON: u32 = 6;
+/// How often an otherwise-silent verifier reports that it is alive.
+///
+/// The tick runs every 12s; logging idleness every tick would bury real events.
+/// Five minutes is frequent enough that an operator tailing logs sees the node
+/// is breathing, and rare enough to stay readable in `journalctl`.
+const VERIFIER_IDLE_LOG_INTERVAL_MS: u64 = 300_000;
 
 #[derive(Debug, Clone)]
 pub struct AutonomousConfig {
@@ -56,6 +62,7 @@ pub struct AutonomousState {
     work_units_today: u32,
     day: Option<i64>,
     failed_work_units: HashMap<String, WorkUnitFailure>,
+    last_idle_log_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -92,6 +99,17 @@ impl AutonomousState {
         self.failed_work_units
             .get(&Self::failure_key(campaign_id, work_unit_id))
             .is_none_or(|failure| now_ms >= failure.retry_after_ms)
+    }
+
+    /// True at most once per `VERIFIER_IDLE_LOG_INTERVAL_MS`.
+    fn should_log_idle(&mut self, now_ms: u64) -> bool {
+        let due = self
+            .last_idle_log_ms
+            .is_none_or(|last| now_ms.saturating_sub(last) >= VERIFIER_IDLE_LOG_INTERVAL_MS);
+        if due {
+            self.last_idle_log_ms = Some(now_ms);
+        }
+        due
     }
 
     fn is_abandoned(&self, campaign_id: &str, work_unit_id: &str) -> bool {
@@ -260,7 +278,29 @@ pub async fn tick(
     }
 
     if !config.contribute {
-        tracing::debug!("[CONTRIBUTE] verifier-only tick, nothing to verify");
+        // This used to be a `debug!`, which meant a healthy idle verifier and a
+        // node that had silently lost its relay produced identical output at
+        // the default log level: nothing at all. Report the connectivity state
+        // that distinguishes them, throttled so it stays readable.
+        if counters.should_log_idle(crate::store::now_millis()) {
+            let (peers, relay_connected, rendezvous_registered) = state
+                .inner
+                .lock()
+                .map(|inner| {
+                    (
+                        inner.active_peer_links.len(),
+                        inner.relay_connected,
+                        inner.rendezvous_registered,
+                    )
+                })
+                .unwrap_or((0, false, false));
+            tracing::info!(
+                connected_peers = peers,
+                relay_connected,
+                rendezvous_registered,
+                "[VERIFIER] idle: nothing pending to verify"
+            );
+        }
         return;
     }
 
@@ -470,6 +510,27 @@ mod tests {
 
     fn empty_store() -> AtpStore {
         AtpStore::in_memory_for_tests()
+    }
+
+    #[test]
+    fn the_idle_heartbeat_is_throttled_not_per_tick() {
+        // The tick runs every 12s. Logging idleness every tick would bury the
+        // events an operator actually needs to see.
+        let mut counters = AutonomousState::default();
+        assert!(counters.should_log_idle(0), "first idle tick reports");
+        assert!(!counters.should_log_idle(12_000), "next tick stays quiet");
+        assert!(
+            !counters.should_log_idle(VERIFIER_IDLE_LOG_INTERVAL_MS - 1),
+            "still quiet just before the interval"
+        );
+        assert!(
+            counters.should_log_idle(VERIFIER_IDLE_LOG_INTERVAL_MS),
+            "reports again once the interval elapses"
+        );
+        assert!(
+            !counters.should_log_idle(VERIFIER_IDLE_LOG_INTERVAL_MS + 12_000),
+            "and the throttle re-arms from the last report"
+        );
     }
 
     #[test]
