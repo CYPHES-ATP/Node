@@ -335,6 +335,20 @@ pub fn campaign_id_for_transaction(transaction_id: &str) -> String {
 }
 
 impl AtpStore {
+    /// In-memory store for unit tests in sibling modules. The fields are
+    /// private to this module, so tests elsewhere in the crate cannot build one
+    /// by hand.
+    #[cfg(test)]
+    pub(crate) fn in_memory_for_tests() -> Self {
+        let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        let store = Self {
+            connection: Arc::new(Mutex::new(connection)),
+            credit_summary_cache: Arc::new(Mutex::new(HashMap::new())),
+        };
+        store.initialize().expect("initialize in-memory store");
+        store
+    }
+
     pub fn open_default() -> Result<Self, String> {
         let path = database_path()?;
         if let Some(parent) = path.parent() {
@@ -1809,6 +1823,98 @@ impl AtpStore {
             )
             .map_err(|error| error.to_string())?;
         Ok(count.max(0) as usize)
+    }
+
+    /// Local-only worker backoff state for work units whose runs keep failing.
+    ///
+    /// This is deliberately *not* protocol state: it never leaves the node, is
+    /// never signed, and is never gossiped. It exists so a work unit that fails
+    /// deterministically stops being retried across restarts, which an
+    /// in-process map cannot do.
+    pub fn load_worker_work_unit_failures(
+        &self,
+    ) -> Result<Vec<(String, String, u8, u32, u64, bool)>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT campaign_id, work_unit_id, claim_attempts, total_attempts,
+                        retry_after_ms, abandoned
+                 FROM worker_work_unit_failures",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u8,
+                    row.get::<_, i64>(3)? as u32,
+                    row.get::<_, i64>(4)? as u64,
+                    row.get::<_, i64>(5)? != 0,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|error| error.to_string())?);
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_worker_work_unit_failure(
+        &self,
+        campaign_id: &str,
+        work_unit_id: &str,
+        claim_attempts: u8,
+        total_attempts: u32,
+        retry_after_ms: u64,
+        abandoned: bool,
+        last_error: Option<&str>,
+    ) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let now = now_millis() as i64;
+        connection
+            .execute(
+                "INSERT INTO worker_work_unit_failures (
+                    campaign_id, work_unit_id, claim_attempts, total_attempts,
+                    retry_after_ms, abandoned, last_error, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                 ON CONFLICT(campaign_id, work_unit_id) DO UPDATE SET
+                    claim_attempts = excluded.claim_attempts,
+                    total_attempts = excluded.total_attempts,
+                    retry_after_ms = excluded.retry_after_ms,
+                    abandoned = excluded.abandoned,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at",
+                params![
+                    campaign_id,
+                    work_unit_id,
+                    claim_attempts as i64,
+                    total_attempts as i64,
+                    retry_after_ms as i64,
+                    if abandoned { 1_i64 } else { 0_i64 },
+                    last_error,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn clear_worker_work_unit_failure(
+        &self,
+        campaign_id: &str,
+        work_unit_id: &str,
+    ) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        connection
+            .execute(
+                "DELETE FROM worker_work_unit_failures
+                 WHERE campaign_id = ?1 AND work_unit_id = ?2",
+                params![campaign_id, work_unit_id],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     pub fn pending_contribution_count_for_worker(
@@ -3399,6 +3505,20 @@ impl AtpStore {
                     ON audit_labor_events(event_kind, created_at);
                  CREATE INDEX IF NOT EXISTS audit_labor_events_peer_created
                     ON audit_labor_events(peer_id, created_at);
+                 CREATE TABLE IF NOT EXISTS worker_work_unit_failures (
+                    campaign_id TEXT NOT NULL,
+                    work_unit_id TEXT NOT NULL,
+                    claim_attempts INTEGER NOT NULL DEFAULT 0,
+                    total_attempts INTEGER NOT NULL DEFAULT 0,
+                    retry_after_ms INTEGER NOT NULL DEFAULT 0,
+                    abandoned INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY(campaign_id, work_unit_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS worker_work_unit_failures_abandoned
+                    ON worker_work_unit_failures(abandoned, updated_at);
                  CREATE INDEX IF NOT EXISTS deliveries_transaction_updated
                     ON deliveries(transaction_id, updated_at);
                  CREATE INDEX IF NOT EXISTS protocol_audit_campaigns_requester_created

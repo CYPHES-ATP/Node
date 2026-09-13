@@ -191,6 +191,9 @@ pub fn run() -> Result<(), String> {
 
         let autonomous_config = config.as_autonomous();
         let mut counters = AutonomousState::default();
+        // Restore give-up decisions from the store. Without this a restart
+        // resurrects every work unit this node has already abandoned.
+        counters.hydrate(&store);
         if !config.loop_forever {
             autonomous::tick(
                 &events,
