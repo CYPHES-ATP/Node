@@ -27,6 +27,14 @@ use crate::{
 
 const WORK_UNIT_RETRY_DELAY_MS: u64 = 60_000;
 const MAX_RUN_ATTEMPTS_PER_CLAIM: u8 = 2;
+/// Total failed runs, across *all* claims and restarts, after which this node
+/// stops attempting a work unit. A unit that fails deterministically -- an
+/// oversized repository, a model that cannot emit a parseable answer -- would
+/// otherwise be retried forever, because a re-claim resets the per-claim
+/// counter and a restart used to drop the backoff entirely. Abandonment is
+/// local only: the unit stays open for other workers, who may well have a
+/// model or a context window that succeeds where this node failed.
+const MAX_TOTAL_ATTEMPTS_BEFORE_ABANDON: u32 = 6;
 
 #[derive(Debug, Clone)]
 pub struct AutonomousConfig {
@@ -50,10 +58,17 @@ pub struct AutonomousState {
     failed_work_units: HashMap<String, WorkUnitFailure>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct WorkUnitFailure {
+    /// Failures under the current claim. Reset when a fresh claim is taken, so
+    /// the short retry delay stays per-claim as before.
     attempts: u8,
+    /// Failures over the lifetime of this work unit on this node. Never reset
+    /// except on success, and persisted, so it survives both re-claims and
+    /// restarts. This is what bounds the retry loop.
+    total_attempts: u32,
     retry_after_ms: u64,
+    abandoned: bool,
 }
 
 impl AutonomousState {
@@ -79,22 +94,98 @@ impl AutonomousState {
             .is_none_or(|failure| now_ms >= failure.retry_after_ms)
     }
 
-    fn clear_failure(&mut self, campaign_id: &str, work_unit_id: &str) {
+    fn is_abandoned(&self, campaign_id: &str, work_unit_id: &str) -> bool {
         self.failed_work_units
-            .remove(&Self::failure_key(campaign_id, work_unit_id));
+            .get(&Self::failure_key(campaign_id, work_unit_id))
+            .is_some_and(|failure| failure.abandoned)
+    }
+
+    /// Load persisted backoff state. Called once at startup; without it a
+    /// restart clears every give-up decision this node has made.
+    pub fn hydrate(&mut self, store: &AtpStore) {
+        match store.load_worker_work_unit_failures() {
+            Ok(rows) => {
+                let abandoned = rows.iter().filter(|row| row.5).count();
+                for (campaign_id, work_unit_id, attempts, total_attempts, retry_after_ms, is_ab) in
+                    rows
+                {
+                    self.failed_work_units.insert(
+                        Self::failure_key(&campaign_id, &work_unit_id),
+                        WorkUnitFailure {
+                            attempts,
+                            total_attempts,
+                            retry_after_ms,
+                            abandoned: is_ab,
+                        },
+                    );
+                }
+                if !self.failed_work_units.is_empty() {
+                    tracing::info!(
+                        tracked = self.failed_work_units.len(),
+                        abandoned,
+                        "[CONTRIBUTE] restored work unit backoff state"
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not restore work unit backoff state");
+            }
+        }
+    }
+
+    /// Clear all failure state for a unit. Only correct after a *successful*
+    /// run -- clearing on re-claim is what previously made the attempt budget
+    /// unbounded.
+    fn clear_failure(&mut self, store: &AtpStore, campaign_id: &str, work_unit_id: &str) {
+        if self
+            .failed_work_units
+            .remove(&Self::failure_key(campaign_id, work_unit_id))
+            .is_some()
+        {
+            if let Err(error) = store.clear_worker_work_unit_failure(campaign_id, work_unit_id) {
+                tracing::warn!(%error, "could not clear persisted work unit backoff");
+            }
+        }
+    }
+
+    /// Reset only the per-claim attempt counter, preserving the lifetime total.
+    fn reset_claim_attempts(&mut self, store: &AtpStore, campaign_id: &str, work_unit_id: &str) {
+        let key = Self::failure_key(campaign_id, work_unit_id);
+        let Some(failure) = self.failed_work_units.get_mut(&key) else {
+            return;
+        };
+        failure.attempts = 0;
+        let failure = *failure;
+        if let Err(error) = store.upsert_worker_work_unit_failure(
+            campaign_id,
+            work_unit_id,
+            failure.attempts,
+            failure.total_attempts,
+            failure.retry_after_ms,
+            failure.abandoned,
+            None,
+        ) {
+            tracing::warn!(%error, "could not persist work unit backoff");
+        }
     }
 
     fn record_failure(
         &mut self,
+        store: &AtpStore,
         campaign_id: &str,
         work_unit_id: &str,
         now_ms: u64,
+        error_text: &str,
     ) -> WorkUnitFailure {
         let key = Self::failure_key(campaign_id, work_unit_id);
-        let attempts = self
+        let previous = self
             .failed_work_units
             .get(&key)
-            .map_or(1, |failure| failure.attempts.saturating_add(1));
+            .copied()
+            .unwrap_or_default();
+        let attempts = previous.attempts.saturating_add(1);
+        let total_attempts = previous.total_attempts.saturating_add(1);
+        let abandoned = total_attempts >= MAX_TOTAL_ATTEMPTS_BEFORE_ABANDON;
         let delay_ms = if attempts >= MAX_RUN_ATTEMPTS_PER_CLAIM {
             WORK_UNIT_CLAIM_TTL_MS
         } else {
@@ -102,9 +193,22 @@ impl AutonomousState {
         };
         let failure = WorkUnitFailure {
             attempts,
+            total_attempts,
             retry_after_ms: now_ms.saturating_add(delay_ms),
+            abandoned,
         };
         self.failed_work_units.insert(key, failure);
+        if let Err(error) = store.upsert_worker_work_unit_failure(
+            campaign_id,
+            work_unit_id,
+            failure.attempts,
+            failure.total_attempts,
+            failure.retry_after_ms,
+            failure.abandoned,
+            Some(error_text),
+        ) {
+            tracing::warn!(%error, "could not persist work unit backoff");
+        }
         failure
     }
 }
@@ -196,7 +300,8 @@ pub async fn tick(
 
     for campaign in campaigns {
         let campaign_id = campaign.campaign_id.clone();
-        let Some(selection) = next_open_work_unit(store, &campaign_id, local_agent_id) else {
+        let Some(selection) = next_open_work_unit(store, &campaign_id, local_agent_id, counters)
+        else {
             continue;
         };
         let work_unit_id = selection.work_unit_id().to_string();
@@ -214,7 +319,7 @@ pub async fn tick(
         }
 
         if matches!(selection, WorkUnitSelection::ClaimOpenUnit(_)) {
-            counters.clear_failure(&campaign_id, &work_unit_id);
+            counters.reset_claim_attempts(store, &campaign_id, &work_unit_id);
             if let Err(error) =
                 claim_work_unit_headless(events, state, store, &campaign_id, &work_unit_id).await
             {
@@ -255,7 +360,7 @@ pub async fn tick(
         .await
         {
             Ok(contribution) => {
-                counters.clear_failure(&campaign_id, &work_unit_id);
+                counters.clear_failure(store, &campaign_id, &work_unit_id);
                 counters.work_units_today += 1;
                 tracing::info!(
                     campaign = %campaign_id,
@@ -266,20 +371,33 @@ pub async fn tick(
             }
             Err(error) => {
                 let failure = counters.record_failure(
+                    store,
                     &campaign_id,
                     &work_unit_id,
                     crate::store::now_millis(),
+                    &error,
                 );
                 tracing::warn!(
                     campaign = %campaign_id,
                     work_unit = %work_unit_id,
                     attempt = failure.attempts,
                     max_attempts_per_claim = MAX_RUN_ATTEMPTS_PER_CLAIM,
+                    total_attempts = failure.total_attempts,
+                    max_total_attempts = MAX_TOTAL_ATTEMPTS_BEFORE_ABANDON,
                     retry_after_ms = failure.retry_after_ms,
                     claim_ttl_ms = WORK_UNIT_CLAIM_TTL_MS,
                     %error,
                     "[CONTRIBUTE] work unit failed"
                 );
+                if failure.abandoned {
+                    tracing::info!(
+                        campaign = %campaign_id,
+                        work_unit = %work_unit_id,
+                        total_attempts = failure.total_attempts,
+                        "[CONTRIBUTE] abandoning work unit on this node after repeated failures; \
+                         it stays open for other workers"
+                    );
+                }
             }
         }
         // One unit per tick, so verification keeps getting a turn.
@@ -295,6 +413,7 @@ fn next_open_work_unit(
     store: &AtpStore,
     campaign_id: &str,
     local_agent_id: &str,
+    counters: &AutonomousState,
 ) -> Option<WorkUnitSelection> {
     let snapshot = store.campaign_report_snapshot(campaign_id).ok()?;
 
@@ -304,6 +423,9 @@ fn next_open_work_unit(
                 && contribution.worker_agent_id == local_agent_id
         })
     };
+    // A unit this node has given up on must not be selected again, or the
+    // abandonment is decorative.
+    let abandoned = |work_unit_id: &str| counters.is_abandoned(campaign_id, work_unit_id);
 
     // Resume an existing claim before taking a new one, or the claim expires
     // unfulfilled and the work unit churns.
@@ -311,22 +433,30 @@ fn next_open_work_unit(
         claim.worker_agent_id == local_agent_id
             && claim.status == "claimed"
             && !has_contribution(&claim.work_unit_id)
+            && !abandoned(&claim.work_unit_id)
     }) {
         return Some(WorkUnitSelection::ResumeExistingClaim(
             claim.work_unit_id.clone(),
         ));
     }
 
+    // Scan past abandoned units rather than giving up on the whole campaign:
+    // one poisoned unit must not hide the rest of the campaign's work.
     snapshot
         .work_units
         .iter()
-        .find(|unit| unit.status == "open" && !has_contribution(&unit.work_unit_id))
+        .find(|unit| {
+            unit.status == "open"
+                && !has_contribution(&unit.work_unit_id)
+                && !abandoned(&unit.work_unit_id)
+        })
         .map(|unit| WorkUnitSelection::ClaimOpenUnit(unit.work_unit_id.clone()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::AtpStore;
 
     fn config(cap: u32) -> AutonomousConfig {
         AutonomousConfig {
@@ -336,6 +466,95 @@ mod tests {
             max_runtime_seconds: Some(1800),
             max_daily_work_units: cap,
         }
+    }
+
+    fn empty_store() -> AtpStore {
+        AtpStore::in_memory_for_tests()
+    }
+
+    #[test]
+    fn a_reclaim_resets_per_claim_attempts_but_not_the_lifetime_total() {
+        // The regression: clearing all failure state on re-claim made the
+        // attempt budget unbounded, so a work unit whose claim kept expiring
+        // was retried forever.
+        let store = empty_store();
+        let mut counters = AutonomousState::default();
+        for _ in 0..MAX_RUN_ATTEMPTS_PER_CLAIM {
+            counters.record_failure(&store, "c1", "w1", 0, "boom");
+        }
+        counters.reset_claim_attempts(&store, "c1", "w1");
+        let key = AutonomousState::failure_key("c1", "w1");
+        let failure = counters.failed_work_units.get(&key).copied().unwrap();
+        assert_eq!(failure.attempts, 0, "per-claim counter resets");
+        assert_eq!(
+            failure.total_attempts, MAX_RUN_ATTEMPTS_PER_CLAIM as u32,
+            "lifetime total survives the re-claim"
+        );
+        assert!(!failure.abandoned);
+    }
+
+    #[test]
+    fn a_work_unit_is_abandoned_once_the_lifetime_budget_is_spent() {
+        let store = empty_store();
+        let mut counters = AutonomousState::default();
+        for attempt in 1..MAX_TOTAL_ATTEMPTS_BEFORE_ABANDON {
+            let failure = counters.record_failure(&store, "c1", "w1", 0, "boom");
+            assert!(!failure.abandoned, "not abandoned at attempt {attempt}");
+            assert!(!counters.is_abandoned("c1", "w1"));
+            // A re-claim between attempts must not extend the budget.
+            counters.reset_claim_attempts(&store, "c1", "w1");
+        }
+        let failure = counters.record_failure(&store, "c1", "w1", 0, "boom");
+        assert!(failure.abandoned);
+        assert_eq!(failure.total_attempts, MAX_TOTAL_ATTEMPTS_BEFORE_ABANDON);
+        assert!(counters.is_abandoned("c1", "w1"));
+        // Abandonment is per work unit, never campaign-wide.
+        assert!(!counters.is_abandoned("c1", "w2"));
+    }
+
+    #[test]
+    fn backoff_and_abandonment_survive_a_restart() {
+        // The reported bug: closing the app dropped every give-up decision, so
+        // a poisoned work unit came straight back after a restart.
+        let store = empty_store();
+        let mut counters = AutonomousState::default();
+        for _ in 0..MAX_TOTAL_ATTEMPTS_BEFORE_ABANDON {
+            counters.record_failure(&store, "c1", "w1", 1_000, "boom");
+            counters.reset_claim_attempts(&store, "c1", "w1");
+        }
+        assert!(counters.is_abandoned("c1", "w1"));
+
+        let mut restarted = AutonomousState::default();
+        assert!(
+            !restarted.is_abandoned("c1", "w1"),
+            "a fresh process starts empty"
+        );
+        restarted.hydrate(&store);
+        assert!(
+            restarted.is_abandoned("c1", "w1"),
+            "hydrate restores the give-up decision"
+        );
+        assert!(
+            !restarted.retry_ready("c1", "w1", 0),
+            "backoff also restored"
+        );
+    }
+
+    #[test]
+    fn a_successful_run_clears_the_record_everywhere() {
+        let store = empty_store();
+        let mut counters = AutonomousState::default();
+        counters.record_failure(&store, "c1", "w1", 0, "boom");
+        counters.clear_failure(&store, "c1", "w1");
+        assert!(counters.retry_ready("c1", "w1", 0));
+        assert!(!counters.is_abandoned("c1", "w1"));
+
+        let mut restarted = AutonomousState::default();
+        restarted.hydrate(&store);
+        assert!(
+            restarted.retry_ready("c1", "w1", 0),
+            "the row is gone from the store too, not just memory"
+        );
     }
 
     #[test]
@@ -377,27 +596,21 @@ mod tests {
 
     #[test]
     fn failed_work_units_cool_down_and_stop_after_two_runs_per_claim() {
+        let store = empty_store();
         let mut counters = AutonomousState::default();
-        let first = counters.record_failure("campaign", "unit", 1_000);
+        let first = counters.record_failure(&store, "campaign", "unit", 1_000, "boom");
         assert_eq!(first.attempts, 1);
         assert_eq!(first.retry_after_ms, 1_000 + WORK_UNIT_RETRY_DELAY_MS);
         assert!(!counters.retry_ready("campaign", "unit", first.retry_after_ms - 1));
         assert!(counters.retry_ready("campaign", "unit", first.retry_after_ms));
 
-        let second = counters.record_failure("campaign", "unit", first.retry_after_ms);
+        let second =
+            counters.record_failure(&store, "campaign", "unit", first.retry_after_ms, "boom");
         assert_eq!(second.attempts, 2);
         assert_eq!(
             second.retry_after_ms,
             first.retry_after_ms + WORK_UNIT_CLAIM_TTL_MS
         );
         assert!(!counters.retry_ready("campaign", "unit", second.retry_after_ms - 1));
-    }
-
-    #[test]
-    fn a_newly_open_unit_clears_prior_failure_state() {
-        let mut counters = AutonomousState::default();
-        counters.record_failure("campaign", "unit", 1_000);
-        counters.clear_failure("campaign", "unit");
-        assert!(counters.retry_ready("campaign", "unit", 1_000));
     }
 }
