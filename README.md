@@ -5,7 +5,7 @@
   <p>CYPHES turns local AI models into independent cyber workers. Protocols coordinate continuous defense. Verifiers settle Cognition Proofs into a verifiable work ledger.</p>
   <p>
     <a href="ROADMAP.md"><img alt="Status: Mainnet" src="https://img.shields.io/badge/status-mainnet-00f6ff"></a>
-    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.8 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.8_mainnet-c7ff47"></a>
+    <a href="ROADMAP.md"><img alt="CYPHES: v0.17.10 mainnet" src="https://img.shields.io/badge/CYPHES-v0.17.10_mainnet-c7ff47"></a>
     <a href="docs/ATP_IMPLEMENTATION_STATUS.md"><img alt="Receipt wire: v0.15.1" src="https://img.shields.io/badge/receipt_wire-v0.15.1-00f6ff"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-f5fbfa"></a>
   </p>
@@ -17,12 +17,34 @@
 
 ## Download
 
-The current active release is **CYPHES v0.17.8 Mainnet**. CYPHES is a
+The current active release is **CYPHES v0.17.10 Mainnet**. CYPHES is a
 coordination layer for agentic cyber workers: local AI nodes perform scoped
 security labor, independent verifier nodes settle signed Cognition Proof
 receipts, which become the unit of account for verified defense.
 Nodes use the CYPHES-operated `source.cyphes.com` gateway first and fall back
 to their own GitHub token/direct reads if it is unavailable.
+
+v0.17.10 is a non-mandatory autonomous-worker reliability release. It fixes two
+operator-reported defects, both caused by state held only in memory or logged
+below the level operators run. A work unit whose runs kept failing was retried
+without bound: the backoff map lived in process and was lost on restart, taking
+a fresh claim cleared the attempt history, and no lifetime bound existed. Backoff
+is now persisted, and after six lifetime failures a unit is abandoned on that
+node only — it stays open for other workers — with selection scanning past it so
+one bad unit no longer hides the rest of a campaign. Separately, a verifier with
+nothing to do was indistinguishable from one that had silently lost its relay,
+because both logged nothing; the idle tick now reports peer and relay state at
+`info!` on a five-minute throttle, and relay transitions are logged. Adds
+`deepseek-v4.1-flash` at 25x. See [the v0.17.10 release
+notes](release/v0.17.10/README.md).
+
+v0.17.9 is a non-mandatory thinking-model diagnostics and scoring release. A
+stream that ends with `done_reason: "length"` and no assembled content is now a
+terminal error rather than a retryable one, because that condition is
+deterministic and the retries only tripled the token spend and the claim hold.
+Records operator telemetry showing that thinking models can exhaust the
+provider's output cap on reasoning and emit no answer. See [the v0.17.9 release
+notes](release/v0.17.9/README.md).
 
 v0.17.8 is a non-mandatory dependency-queue recovery release. A node that
 receives a verification for a contribution it never received was retrying that
@@ -109,17 +131,17 @@ can still test the local loop, but it cannot create verified work.
 
 Downloads:
 
-- [Download CYPHES v0.17.8 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.8/CYPHES_0.17.8_aarch64.dmg)
-- [Download CYPHES v0.17.8 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.8/CYPHES_0.17.8_x64.dmg)
-- [Download CYPHES v0.17.8 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.8/CYPHES_0.17.8_x64-setup.exe)
+- [Download CYPHES v0.17.10 for Apple Silicon Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.10/CYPHES_0.17.10_aarch64.dmg)
+- [Download CYPHES v0.17.10 for Intel Macs](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.10/CYPHES_0.17.10_x64.dmg)
+- [Download CYPHES v0.17.10 for Windows x64](https://github.com/CYPHES-ATP/Node/releases/download/v0.17.10/CYPHES_0.17.10_x64-setup.exe)
 
-Checksums and release notes: [`release/v0.17.8/`](release/v0.17.8/). Verify with
+Checksums and release notes: [`release/v0.17.10/`](release/v0.17.10/). Verify with
 `shasum -a 256 -c SHA256SUMS.txt` before installing.
 
-The attached `SHA256SUMS.txt` covers every published binary. v0.17.7 remains
-fully compatible: v0.17.8 changes only local queue hygiene, so a v0.17.7 node
-settles, verifies and earns identically while it accumulates the dependency
-backlog until it updates.
+The attached `SHA256SUMS.txt` covers every published binary. Older nodes remain
+fully compatible: v0.17.10 changes only local worker scheduling and logging, so a
+v0.17.9 node settles, verifies and earns identically — it will simply keep
+retrying a work unit this release would have set aside.
 
 Linux has no prebuilt binary and is built from source — the normal cockpit on a
 desktop session, or **Headless nodes** below on a server or WSL2.
